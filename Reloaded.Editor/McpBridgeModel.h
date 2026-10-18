@@ -119,7 +119,7 @@ namespace Mcp::Bridge
             {"view.screenshot", P::Read, true}, {"view.capture", P::Read, true}, {"view.restore", P::Read, true},
             {"mapcheck.run", P::Read, true}, {"lighting.budget", P::Read, true}, {"scene.trace", P::Read, true},
             {"ge.list", P::Read, true}, {"object.inspect", P::Read, true}, {"mapsettings.get", P::Read, true},
-            {"mcp.sidecar.get", P::Read, true}, {"props.copy", P::Read, true},
+            {"mcp.sidecar.get", P::Read, true}, {"props.copy", P::Read, true}, {"design.pieces", P::Read, true},
             {"design.scene", P::Read, true}, {"design.grid", P::Read, true}, {"design.view", P::Read, true},
             {"design.bspowners", P::Read, true}, {"design.builds", P::Read, true}, {"design.spawns", P::Read, true},
             {"design.clearances", P::Read, true}, {"placement.selection", P::Read, true},
@@ -159,7 +159,7 @@ namespace Mcp::Bridge
             {"stairs.smooth", P::Undoable, true}, {"stairs.remove", P::Undoable, true},
             {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"surface.texture", P::Undoable, false},
             // Files and packages.
-            {"asset.texture", P::File, false}, {"package.save", P::File, false}, {"object.set", P::File, false},
+            {"asset.texture", P::File, false}, {"asset.mesh", P::File, false}, {"package.save", P::File, false}, {"object.set", P::File, false},
             {"interface.texture", P::File, false}, {"minimap.apply", P::File, false}, {"uas.build", P::File, false},
             {"mapsettings.set", P::File, false}, {"optimise.release", P::File, false}, {"conveyor.prepare", P::File, false},
             {"emitterlib.save", P::File, false}, {"emitterlib.delete", P::File, false}, {"emitterlib.update", P::File, false},
