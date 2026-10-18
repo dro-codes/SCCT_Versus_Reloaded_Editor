@@ -70,5 +70,5 @@ Package writes:
 - package names unique;
 - the archive file list above.
 
-`map_validate profile:"release"` reports naming problems.
-- Rules: `release.package-names`, `release.file-name`, `release.naming-convention`, `release.uas`, `interface.textures`
+`map_validate profile:"release"` reports naming problems. Given the `release` check's `findings` in its `release` argument, it also reports the files, dependencies and optimise suggestions only that check can see.
+- Rules: `release.package-names`, `release.file-name`, `release.naming-convention`, `release.uas`, `interface.textures`, `release.files`, `release.dependencies`, `release.optimise`

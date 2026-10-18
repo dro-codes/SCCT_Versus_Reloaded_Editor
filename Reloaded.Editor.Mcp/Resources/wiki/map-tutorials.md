@@ -58,10 +58,11 @@ The property sheet is image-only.
 
 `environment` with `tutorials[{id, class, at, mesh?, properties}]` (spec `environment.tutorials`) places generic actors. `class` defaults to `SZoneTips`; set `SHelpPath` or `SEndZoneTip` explicitly.
 
-The compiler passes `properties` through, so write the wiki settings yourself:
-- **`SHelpPath`:** give it a `mesh`, which makes the compiler set `StaticMesh`, and set `DrawType: "DT_StaticMesh"`.
+**`SZoneTips` and `SEndZoneTip` get the wiki's settings by default:** `DrawType DT_Sprite`, `bHidden True`, `bShowOnlyWithIngameHelp True` and `bStayPermanently False`. Values in `properties` still win.
+
+The compiler passes the rest of `properties` through, so write these yourself:
+- **`SHelpPath`:** give it a `mesh`; the compiler then sets `StaticMesh` and `DrawType DT_StaticMesh`.
 - **`SZoneTips`:**
-  - `DrawType: "DT_Sprite"`, `bHidden: "True"`, `bShowOnlyWithIngameHelp: "True"`, `bStayPermanently: "False"`;
   - `sMessage_ATT` / `sMessage_DEF` as complete two-element arrays, such as `["\"Climb the pipe\"", "\"\""]`;
   - optionally `CollisionRadius` / `CollisionHeight`.
 - **`SEndZoneTip`:** only when the user asks for one; it ends the game.

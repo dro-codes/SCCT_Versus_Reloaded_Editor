@@ -48,10 +48,10 @@ rules: true
    - heavy: layered detectors and locked doors. Still leave a route chaff or a sticky shocker can open (detectors are disabled by `StickyNeutralizationTime`).
 6. **Modes.**
    - Deathmatch and Disk Hunt usually switch security off: their `SMission` `AtResetEvent` fires an `SMagicEvent` that untriggers the detectors and alarms.
-   - Use `gameplay` with `deathmatch.disableSecurity` (or `events`).
-7. **Apply.** Call `security` with `alarms`, `devices` and `camnet` (spec `security` section), with `dryRun:true` first and then for real. Door locks go through `lockMovers`; button-opened doors through `mechanisms`.
+   - Use `gameplay` with `deathmatch:{disableSecurity:true}` (or `events`).
+7. **Apply.** Call `security` with `alarms`, `devices` and `camnet` (spec `security` section), with `dryRun:true` first and then for real. Door locks go through each alarm's `lockMovers`; button-opened doors through `mechanisms`.
 8. **Check.**
    - Call `map_validate` with `include:["security","wiki"]`, and fix every `security.*` and `camnet.*` finding.
-   - Call `view_screenshot` with presets `objective:<name>`.
+   - Call `view_screenshot` with `preset:"objective:<name>"`.
    - Call `map_query` with `what:"wiring"` to confirm that no Event dangles.
 9. **Report.** List each alarm with its detectors, outputs and locks, plus the CamNet order, and the spy routes that avoid detection.

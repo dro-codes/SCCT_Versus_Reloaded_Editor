@@ -127,16 +127,21 @@ namespace
     void Store(const McpBridge::Settings& next) { std::lock_guard lock(settingsLock); settings = next; }
     void WriteFlag(const wchar_t* key, bool on) { WritePrivateProfileStringW(L"Mcp", key, on ? L"1" : L"0", IniPath().c_str()); }
     // The keys are written once, off, so the user can find the ones only the
-    // INI sets (AllowRawExec, AllowPlay, HistoryMaxMB).
+    // INI sets (AllowRawExec, AllowPlay, HistoryMaxMB, and Ffmpeg and
+    // WriteRoots, which Reloaded.Editor.Mcp.exe reads: the ffmpeg to use and
+    // the folders besides its work folder it may write in, empty for none).
     void WriteMissingDefaults()
     {
         static const std::pair<const wchar_t*, const wchar_t*> defaults[] = {
-            {L"Enabled", L"0"}, {L"RequireApproval", L"0"}, {L"AllowRawExec", L"0"}, {L"AllowPlay", L"0"}, {L"HistoryMaxMB", L"200"}};
+            {L"Enabled", L"0"}, {L"RequireApproval", L"0"}, {L"AllowRawExec", L"0"}, {L"AllowPlay", L"0"}, {L"HistoryMaxMB", L"200"}, {L"Ffmpeg", L""}, {L"WriteRoots", L""}};
+        // Returned only for a key that is not there, so an empty value counts as set.
+        constexpr const wchar_t* absent = L"\x1" L"absent";
         const auto ini = IniPath();
         for (const auto& [key, value] : defaults)
         {
             wchar_t present[16] = L"";
-            if (!GetPrivateProfileStringW(L"Mcp", key, L"", present, 16, ini.c_str())) WritePrivateProfileStringW(L"Mcp", key, value, ini.c_str());
+            GetPrivateProfileStringW(L"Mcp", key, absent, present, 16, ini.c_str());
+            if (!wcscmp(present, absent)) WritePrivateProfileStringW(L"Mcp", key, value, ini.c_str());
         }
     }
 

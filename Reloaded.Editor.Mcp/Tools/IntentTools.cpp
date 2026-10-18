@@ -10,13 +10,6 @@
 
 namespace Mcp
 {
-// SpecTools.cpp
-namespace Tools
-{
-    Json BuildContext(ToolContext& c, bool needEditor);
-    Json LevelBuild(ToolContext& c, const Json& context, const Json& spec, const Json& request, std::vector<Content>& images);
-    ToolResult BuildResult(ToolContext& c, const Json& report, const std::vector<Content>& images);
-}
 namespace
 {
     using namespace Tools;

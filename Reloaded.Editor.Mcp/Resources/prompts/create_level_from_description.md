@@ -70,14 +70,14 @@ The SCCT Versus wiki digests and the rule catalogue are embedded below. They are
    - Call `level_spec_validate` with the spec, and fix every error at the JSON pointer it names.
    - Call `plan_render` with the spec and look at the PNG. Is the layout what the description asks for? Are both teams' routes to each objective sensible?
 6. **Preview.** Call `level_build` with `mode:"preview"` and read the preview rows and the plan image.
-7. **Apply.** Call `level_build` with `mode:"apply"` and `build:true`. It is one Undo step; `editor_undo` reverts it.
-8. **Look.** Call `view_screenshot` with presets `overview`, `spawn:spy`, `spawn:merc` and `objective:<id>`.
+7. **Apply.** Call `level_build` with `mode:"apply"` and `build:"geometry"`. It is one Undo step; `editor_undo` reverts it.
+8. **Look.** Call `view_screenshot` with `preset` `overview`, `spawn:spy`, `spawn:merc` and `objective:<id>`.
 9. **Validate.** Call `map_validate` with `profile:"draft"`.
    - Fix the findings. Prefer editing the spec and calling `level_build` with `sync:"incremental"`; each finding's `fix` names a tool call.
    - Repeat until no errors remain.
-10. **Save.** Call `map_file` with `action:"save_as"` and the map name, then `editor_restart`. The wiki requires save → exit → reopen before Map Settings works.
-11. **Map Settings.** Call `map_settings` with the spec's `settings` (and `interface` textures if the user supplied images). Then `map_file` with `action:"save"`.
-12. **Finish.** Call `map_validate` with `profile:"{{profile}}"`. For release, continue with the `prepare_release` prompt's steps (`release`).
+10. **Save.** Call `map_file` with `action:"save_as"` and `mapName` (the map name), then `editor_restart`. The wiki requires save → exit → reopen before Map Settings works.
+11. **Map Settings.** Call `map_settings` with `settings` (the spec's `settings` section), and `interface` (image paths by slot: `menu`, `briefing`, `loadingAtt`, `loadingDef`) if the user supplied images. Then `map_file` with `action:"save"`.
+12. **Finish.** Call `map_validate` with `profile:"{{profile}}"`. For release, continue with the `prepare_release` prompt's steps (the `release` tool).
 13. **Report.** Give the user:
     - the file name;
     - what was built: rooms, starts per team, objectives per mode, cameras, alarms;

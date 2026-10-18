@@ -7,7 +7,7 @@ arguments:
     description: The file to import.
     required: true
   - name: format
-    description: The importer to use (grid, image, svg, tiled, geojson, csv, t3d, vmf, quake, obj, map-authoring, level-spec) or auto.
+    description: The importer to use (grid, image, svg, tiled, geojson, csv, t3d, vmf, quake, obj, ase, map-authoring, map-changes, level-spec, r6v) or auto.
     default: auto
   - name: mapName
     description: The map's display name (CAPS). The file becomes its first 4 letters + D.
@@ -27,7 +27,7 @@ rules: true
 
 1. **Connect.** Call `editor_status`. If the open map has unsaved work, ask the user before calling `map_file` with `action:"new"`.
 
-2. **Import.** Call `import_to_spec` with `path` and `format`{{#options}} and `options` {{options}}{{/options}}.
+2. **Import.** Call `import_to_spec` with `source` (the file's full path, as above) and `format:"{{format}}"`{{#options}}, and `options` {{options}}{{/options}}.
    - It returns a `scct.level-spec` plus a `report`: what each part became, what it could not map, and the scale it assumed.
    - Read the report.
    - Supported formats:
@@ -60,12 +60,12 @@ rules: true
    - Call `level_spec_validate`, and fix every error at its JSON pointer.
    - Call `plan_render` with the spec, and compare the PNG with the source file. For an image, view the original with `media_read_image`.
 
-6. **Build.** Call `level_build` with `mode:"preview"`. Then call it with `mode:"apply"`, `build:true` and, for brush formats, `brushMode:"polygons"`.
+6. **Build.** Call `level_build` with `mode:"preview"`. Then call it with `mode:"apply"`, `build:"geometry"` and, for brush formats, `brushMode:"polygons"`.
    - Polygon brushes keep the source's faces exactly, but are not editable as Map Design pieces.
    - `pieces` mode turns spaces into editable rooms.
 
 7. **Look and validate.**
-   - Call `view_screenshot` with presets `overview`, `spawn:spy` and `spawn:merc`.
+   - Call `view_screenshot` with `preset` `overview`, `spawn:spy` and `spawn:merc`.
    - Call `map_validate` with `profile:"draft"`. Fix the findings by editing the spec and running `level_build` with `sync:"incremental"`, or through each finding's `fix`.
 
 8. **Assets.** Any textures, meshes or sounds the file references must exist.
@@ -73,7 +73,7 @@ rules: true
    - Or swap them for loaded stock assets (`map_query` with `what:"assets"`).
 
 9. **Save and finish.**
-   - Call `map_file` with `action:"save_as"`, then `editor_restart`, then `map_settings`.
+   - Call `map_file` with `action:"save_as"`{{#mapName}} and `mapName:"{{mapName}}"`{{/mapName}}, then `editor_restart`, then `map_settings` with the spec's `settings`.
    - Then `map_validate` with `profile:"release"`.
 
 10. **Report.** Tell the user what the importer mapped, what you added for gameplay, and what could not be imported.

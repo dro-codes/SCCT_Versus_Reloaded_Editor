@@ -4,6 +4,7 @@
 #include "../BridgeClient.h"
 #include "../../Reloaded.Editor/Version.h"
 #include <chrono>
+#include <set>
 #include <thread>
 
 namespace Mcp
@@ -33,6 +34,30 @@ namespace
         for (const auto& e : editors) if (e.is_object() && e.value("pid", 0ul) == pid) return true;
         return false;
     }
+    std::set<unsigned long> Pids(const Json& editors)
+    {
+        std::set<unsigned long> pids;
+        for (const auto& e : editors) if (e.is_object() && e.value("pid", 0ul)) pids.insert(e.value("pid", 0ul));
+        return pids;
+    }
+    // Reloaded_Editor.exe logs to Reloaded_Editor.exe.log beside it; the lines
+    // that say it could not start the editor, when this launch wrote the log.
+    std::string LauncherFailure(const ToolContext& c, std::filesystem::file_time_type launchedAt)
+    {
+        const auto log = c.systemDir / "Reloaded_Editor.exe.log";
+        std::error_code error;
+        const auto written = std::filesystem::last_write_time(log, error);
+        if (error || written + std::chrono::seconds(3) < launchedAt) return {};
+        std::ifstream in(log, std::ios::binary);
+        std::istringstream lines(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+        std::vector<std::string> failures;
+        for (std::string line; std::getline(lines, line);)
+        {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (line.find("not found") != std::string::npos || line.rfind("Failed", 0) == 0) failures.push_back(line);
+        }
+        return Join(failures, " ");
+    }
     std::string MapText(const Json& state)
     {
         if (!state.value("open", true)) return "no map open";
@@ -44,6 +69,11 @@ namespace
     Json State(ToolContext& c) { return Call(c, "editor.state"); }
 
     // Starts the editor with -reMcp and waits until its pipe answers hello.
+    // Reloaded_Editor.exe is only the launcher: it starts ChaosTheory_Editor.exe
+    // with the DLL injected and exits, so the pipe belongs to a process it
+    // started, not to the pid it was given. The editor is the first pipe that
+    // was not there before the launch (or the launcher's own, should it ever
+    // be the editor).
     Json Launch(ToolContext& c, unsigned waitSeconds, bool force)
     {
         const auto exe = EditorExe(c);
@@ -55,29 +85,55 @@ namespace
             throw std::runtime_error("The editor's MCP server is off ([Mcp] Enabled is not 1 in " + settings.at("ini").get<std::string>() +
                                      "). Only the user can turn it on: open the editor and tick RE+ Tools > MCP > Enable MCP server, then call editor_launch again "
                                      "(or pass force: true if it was enabled another way).");
-        const auto pid = Process().launch(exe, "-reMcp", c.systemDir);
+        const auto before = Pids(c.bridge.Editors());
+        const auto launchedAt = std::filesystem::file_time_type::clock::now();
+        const auto launcher = Process().launch(exe, "-reMcp", c.systemDir);
         const auto started = Clock::now();
+        unsigned long pid = 0; // the editor's, once its pipe shows
+        bool launcherGone = false;
         Json hello;
         std::string last;
         for (;;)
         {
             const double waited = Elapsed(started);
-            c.progress(std::min<double>(waited, waitSeconds), waitSeconds, "Waiting for the editor (process " + std::to_string(pid) + ") to open its MCP pipe");
-            if (Listed(c.bridge.Editors(), pid))
+            c.progress(std::min<double>(waited, waitSeconds), waitSeconds,
+                       pid ? "Waiting for the editor (process " + std::to_string(pid) + ") to answer on its MCP pipe" : std::string("Waiting for the new editor to open its MCP pipe"));
+            const auto editors = c.bridge.Editors();
+            if (!pid)
+            {
+                if (Listed(editors, launcher)) pid = launcher;
+                else for (const auto found : Pids(editors)) if (!before.count(found)) { pid = found; break; }
+            }
+            if (pid && Listed(editors, pid))
             {
                 c.bridge.Select(pid);
                 try { hello = c.bridge.Hello(); break; }
                 catch (const Bridge::Error& e) { last = e.what(); }
             }
-            if (!Process().running(pid) && !Listed(c.bridge.Editors(), pid))
+            else if (pid && !Process().running(pid))
                 throw std::runtime_error("The editor (process " + std::to_string(pid) + ") exited while starting. Ask the user to start Reloaded_Editor.exe and look for an error.");
+            // The launcher leaving is normal; leaving a failure in its log is not.
+            if (!pid && !launcherGone && !Process().running(launcher))
+            {
+                launcherGone = true;
+                const auto failure = LauncherFailure(c, launchedAt);
+                if (!failure.empty())
+                    throw std::runtime_error("Reloaded_Editor.exe could not start the editor: " + failure + " ChaosTheory_Editor.exe and Reloaded.Editor.dll must be in " +
+                                             PathText(c.systemDir) + "; ask the user to start Reloaded_Editor.exe there.");
+            }
             if (waited >= waitSeconds)
-                throw Bridge::Error(Bridge::Code::Timeout, "The editor started (process " + std::to_string(pid) + ") but its MCP pipe did not answer within " + std::to_string(waitSeconds) +
-                                    " s. A window may be waiting for the user (an update offer, crash recovery, a missing package): ask the user to answer it, then call editor_status." +
-                                    (last.empty() ? "" : " Last error: " + last), "startup", Json{{"pid", pid}});
-            Pause(1000);
+            {
+                std::string why;
+                if (pid) why = "The editor started (process " + std::to_string(pid) + ") but its MCP pipe did not answer within " + std::to_string(waitSeconds) + " s.";
+                else if (!launcherGone) why = "Reloaded_Editor.exe (process " + std::to_string(launcher) + ") had not started the editor after " + std::to_string(waitSeconds) +
+                                             " s; it may be showing a message (ChaosTheory_Editor.exe or Reloaded.Editor.dll missing).";
+                else why = "The editor was started, but no new MCP pipe opened within " + std::to_string(waitSeconds) + " s (if no editor window appeared, System\\Reloaded_Editor.exe.log says why).";
+                throw Bridge::Error(Bridge::Code::Timeout, why + " A window may be waiting for the user (an update offer, crash recovery, a missing package): ask the user to answer it, then call editor_status." +
+                                    (last.empty() ? "" : " Last error: " + last), "startup", Json{{"pid", pid}, {"launcher", launcher}});
+            }
+            Pause(500);
         }
-        Json out{{"pid", pid}, {"hello", hello}, {"seconds", std::round(Elapsed(started) * 10) / 10}};
+        Json out{{"pid", pid}, {"launcher", launcher}, {"hello", hello}, {"seconds", std::round(Elapsed(started) * 10) / 10}};
         try { out["state"] = State(c); } catch (const std::exception& e) { out["stateError"] = e.what(); }
         return out;
     }
@@ -510,7 +566,8 @@ void RegisterSessionTools(Registry& registry)
         t.name = "editor_launch";
         t.title = "Start the editor";
         t.description =
-            "Starts Reloaded_Editor.exe from the game's System folder with -reMcp and waits (default 180 s) until its MCP pipe answers, reporting progress. "
+            "Starts Reloaded_Editor.exe from the game's System folder with -reMcp (it starts ChaosTheory_Editor.exe with RE+ and exits) and waits (default 180 s) "
+            "until the new editor's MCP pipe answers, reporting progress; the result's pid is the editor's. "
             "Needs [Mcp] Enabled=1 in System\\Reloaded_Editor.ini, which only the user sets (RE+ Tools > MCP > Enable MCP server); refuses otherwise unless force. "
             "Does nothing when an editor is already running (use editor_status). Optional map opens a .sdc once started (a bare name such as \"AquaD\" is looked "
             "up in Packages\\MapsEd). If the editor shows a startup window (update offer, crash recovery) the wait times out: ask the user to answer it. Windows only.";

@@ -49,7 +49,7 @@ rules: true
      | GEs | `geometric_events` |
      | Level Properties, Map Settings | `map_settings` |
      | packages, `.uas` | `release` |
-     | one property on one actor | `actors_edit` with `set` |
+     | one property on one actor | `actors_edit` with `edits:[{action:"set", actor, properties}]` |
 
    - Where the map was built from a spec (`map_query` with `what:"spec"` is not null), prefer editing the spec and calling `level_build` with `sync:"incremental"`, so the spec stays the truth.
    - If a call fails as `stale`, re-read with `map_query` and retry once. If it is `denied`, stop and ask the user.

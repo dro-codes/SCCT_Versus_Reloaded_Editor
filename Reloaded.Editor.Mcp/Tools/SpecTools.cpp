@@ -12,13 +12,6 @@
 
 namespace Mcp
 {
-// Shared with IntentTools.cpp, which declares them the same way.
-namespace Tools
-{
-    Json BuildContext(ToolContext& c, bool needEditor);
-    Json LevelBuild(ToolContext& c, const Json& context, const Json& spec, const Json& request, std::vector<Content>& images);
-    ToolResult BuildResult(ToolContext& c, const Json& report, const std::vector<Content>& images);
-}
 namespace
 {
     using namespace Tools;
@@ -300,34 +293,25 @@ namespace
         }
         if (post.empty()) plan.erase("post");
     }
-    // One mcp.plan call, checked here first. An apply carries expect, so the
-    // editor refuses it as stale if the map moved on since the sidecar and
-    // the schema were read.
-    Json SendPlan(ToolContext& c, Json plan, const std::string& label, bool dryRun, unsigned timeoutMs, const Json& state)
+    // What an apply's mcp.plan expects, so the editor refuses it as stale if
+    // the map moved on since the sidecar and the schema were read.
+    Bridge::Expect Expected(const Json& state)
     {
-        plan["label"] = label;
-        if (dryRun) plan["dryRun"] = true;
-        Plan::Check(plan);
-        CallOptions options;
-        options.label = label;
-        options.dryRun = dryRun;
-        options.timeoutMs = timeoutMs;
+        Bridge::Expect expect;
         auto whole = [&](const char* key)
         {
             if (!state.is_object() || !state.contains(key)) return false;
             const auto& v = state.at(key);
             return v.is_number_unsigned() || (v.is_number_integer() && v.get<long long>() >= 0);
         };
-        if (!dryRun && whole("level") && whole("generation") && whole("contentRevision"))
+        if (whole("level") && whole("generation") && whole("contentRevision"))
         {
-            options.expect.set = true;
-            options.expect.level = state.at("level").get<uint64_t>();
-            options.expect.generation = state.at("generation").get<unsigned>();
-            options.expect.revision = state.at("contentRevision").get<unsigned>();
+            expect.set = true;
+            expect.level = state.at("level").get<uint64_t>();
+            expect.generation = state.at("generation").get<unsigned>();
+            expect.revision = state.at("contentRevision").get<unsigned>();
         }
-        auto steps = std::make_shared<int>(0);
-        options.progress = [&c, steps](const Json& message) { c.progress(++*steps, 0, ProgressText("mcp.plan", message)); };
-        return c.bridge.Call("mcp.plan", plan, options);
+        return expect;
     }
     const Json* StepIn(const Json& plan, const std::string& id)
     {
@@ -853,7 +837,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
         if (mapOpen && checked)
         {
             c.progress(2, 4, "Previewing in the editor");
-            const auto dry = SendPlan(c, compiled.plan, label, true, kBuildTimeout, state);
+            const auto dry = RunPlan(c, compiled.plan, label, true, kBuildTimeout);
             const auto rows = PreviewRows(dry);
             report["preview"] = Limit(rows, kPreviewRows);
             report["previewTotal"] = rows.size();
@@ -895,7 +879,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
     }
     const auto ops = PlanOutline(compiled.plan);
     c.progress(2, 4, "Building in the editor: " + std::to_string(ops.at("pre").get<size_t>() + ops.at("steps").get<size_t>() + ops.at("post").get<size_t>()) + " plan steps");
-    const auto result = SendPlan(c, compiled.plan, label, false, build == "all" ? kBuildAllTimeout : kBuildTimeout, state);
+    const auto result = RunPlan(c, compiled.plan, label, false, build == "all" ? kBuildAllTimeout : kBuildTimeout, Expected(state));
     // Read the undo record now: a later call would replace it.
     report["undo"] = Undo(c);
     for (const auto& w : BridgeWarnings(c)) warnings.push_back(w);

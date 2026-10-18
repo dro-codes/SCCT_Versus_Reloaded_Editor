@@ -95,9 +95,11 @@ Simulates a chain. It inherits from `ESBRopeActor`, so it has all the rope prope
 
 ## How the MCP tools apply this
 
-`environment` with `softbody[{id, class, at, properties}]` (spec `environment.softbody`) places generic actors.
+`environment` with `softbody[{id, class?, at, mesh?, properties}]` (spec `environment.softbody`) places SoftBody actors.
 
-**Always set `class`** to a placeable type: `ESBPatchActor`, `ESBStripeDoorActor`, `ESBRopeActor` or `ESBChainActor`. The base `ESoftBodyActor` is not placeable.
+**`class` defaults to `ESBPatchActor`**, the usual cloth. Set `ESBStripeDoorActor`, `ESBRopeActor` or `ESBChainActor` for the others; a short name gets its package (`Echelon.ESBRopeActor`). The base `ESoftBodyActor` is not placeable, and the compiler refuses it (error `softbody.class`).
+
+A `mesh` becomes the actor's `LinkMesh` (a chain's links). The SoftBody still draws itself (`DT_SoftBody`), so `StaticMesh` and `DrawType` are left alone.
 
 The compiler passes `properties` through, so write the wiki values yourself:
 - **Texture:** in `Texture`.
@@ -107,6 +109,6 @@ The compiler passes `properties` through, so write the wiki values yourself:
 
 Always **create** each SoftBody actor:
 - Never use `actors_edit` `copy` or the editor's Duplicate on one.
-- The compiler warns when two spec entries repeat each other.
+- The compiler warns (`softbody.duplicate`) when two spec entries are identical apart from their id.
 - `map_validate` flags live duplicates sharing one `ESoftBody`.
 - Rules: `softbody.duplicated`

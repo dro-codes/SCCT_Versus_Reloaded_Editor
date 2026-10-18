@@ -58,7 +58,7 @@ Tip: the UnrealEd viewport can switch to Motion Tracking Vision, so you can prev
 
 ## How the MCP tools apply this
 
-- `map_settings` (the spec's `level` section: `song`, `deathPawnHeight`, `motionTracking: standard|enhanced`, `events[{event, sendAtTime}]`, `snapshot`) writes these through the bridge op `settings.edit`.
+- `map_settings` with `level` (the spec's `level` section: `song`, `deathPawnHeight`, `motionTracking: standard|enhanced`, `events[{event, sendAtTime}]`, `geActivationMask`) writes these through the bridge op `settings.edit`.
   - `settings.edit` checks the LevelInfo snapshot first.
   - It writes non-editable fields (`MapSnapshotInfo`, `MotionTrackingTweak`, `GEActivationMask`, `Events`, `SendAtTime`, `fDeathPawnHeight`, `Song`) through ImportText.
 - `motionTracking: "standard"` writes 52/85, and `"enhanced"` writes 8/8.

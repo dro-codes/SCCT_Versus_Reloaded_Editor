@@ -733,6 +733,32 @@ int main()
             Fails("release.naming-convention",u);
             Passes("release.naming-convention",good);
         }
+        {
+            // The release tool's file check: its rows for what only it can see
+            // are folded in at their own severity, the rest are left to the rules.
+            auto row=[](const char* severity,const char* rule,const std::string& message){return Json{{"severity",severity},{"rule",rule},{"wikiPage","map-packaging"},{"message",message}};};
+            auto s=good;s["release"]["findings"]=Json::array({row("error","release.files","There is no playable Packages\\Maps\\TestD.sdc."),
+                                                               row("warning","release.files","Packages\\Maps\\TestD.sdc is older than the MapsEd file.")});
+            s["release"]["findings"][0]["fix"]={{"tool","map_file"},{"args",{{"action","save"}}}};
+            const auto files=Fails("release.files",s,"draft","error");
+            Check(files.message.find("Maps\\TestD.sdc")!=std::string::npos && files.fix.at("tool")=="map_file" && files.wikiPage=="map-packaging","the row's message and fix");
+            const auto all=Run(s);
+            Check(std::count_if(all.begin(),all.end(),[](const Rules::Finding& f){return f.rule=="release.files";})==2 &&
+                  std::any_of(all.begin(),all.end(),[](const Rules::Finding& f){return f.rule=="release.files" && f.severity=="warning";}),"every row, at its severity");
+            Passes("release.files",good);
+            auto t=good;t["release"]["findings"]=Json::array({row("error","release.dependencies","The map uses Bunker_TXT, but no package of that name is in Packages.")});
+            Fails("release.dependencies",t,"release","error");
+            t["release"]["findings"][0]["severity"]="warning";
+            Fails("release.dependencies",t,"release","warning");
+            Passes("release.dependencies",good);
+            auto u=good;u["release"]["findings"]=Json::array({row("info","release.optimise","The map uses 2.0 MB of the 40.0 MB in Lab_TXT.")});
+            Fails("release.optimise",u,"release","info");
+            Passes("release.optimise",good);
+            // Rows the rules check for themselves are not repeated.
+            auto v=good;v["release"]["findings"]=Json::array({row("error","release.package-names","TestD_TXT.utx and TestD_TXT.usx share a base name."),row("error","release.files","")});
+            Passes("release.package-names",v);
+            Passes("release.files",v);
+        }
 
         // -------------------------------------------------- geometric events
         {

@@ -59,9 +59,9 @@ Parameters:
    - the teams are more than 768 uu apart;
    - the terminal is within 4096 uu of the merc starts.
 6. **Build.**
-   - Call `level_build` with `mode:"preview"`, then `mode:"apply"` with `build:true` and `screenshot:true`.
-   - Call `view_screenshot` with presets `overview`, `spawn:spy`, `spawn:merc` and `objective:ServerObjective`.
+   - Call `level_build` with `mode:"preview"`, then `mode:"apply"` with `build:"geometry"` and `screenshot:true`.
+   - Call `view_screenshot` with `preset` `overview`, `spawn:spy`, `spawn:merc` and `objective:ServerObjective`.
 7. **Validate.** Call `map_validate` with `profile:"draft"`, and fix anything it reports.
-8. **Save and restart.** Call `map_file` with `action:"save_as"` and `mapName:"{{mapName}}"`, then `editor_restart`, then `map_settings` with the spec's `settings`. Then call `map_file` with `action:"save"`.
+8. **Save and restart.** Call `map_file` with `action:"save_as"` and `mapName:"{{mapName}}"`, then `editor_restart`, then `map_settings` with `settings` (the spec's `settings` section). Then call `map_file` with `action:"save"`.
 9. **Finish.** Call `map_validate` with `profile:"release"`. Only the interface textures and the `.uas` should remain; the `prepare_release` prompt covers them.
 10. **Hand over.** Tell the user the pieces are Map Design pieces: they can open **RE+ Tools > Map Design** to drag, resize and extend them.

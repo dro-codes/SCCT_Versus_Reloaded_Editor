@@ -42,17 +42,17 @@ GEs give Spies their routes: ledges up to balconies, pipes up shafts, hand-over-
    - high-to-low spans for ziplines;
    - fences 88-128 high.
 
-   Measure with `workflow_request` op `scene.trace` (segments from above down to the floor) where the blockout does not tell you the heights.
+   Measure with `workflow_request` with `op:"scene.trace"` and `args:{segments:[{from, to}]}` (from above down to the floor) where the blockout does not tell you the heights.
 3. **Place the GEs.**
    - Call `geometric_events` with `ges:[{kind, points}]`:
      - 2 points along the edge for `ledge`, `hoh`, `zipline`, `fence` and `pole`;
      - 3 points for `pipe` and `ladder`: bottom, top, then the side the player climbs from.
    - The tool orders pipe and ladder points low end first and runs the editor's `GE ADD`.
    - Run it with `dryRun:true` first.
-   - For a fence, set `bClimbable` on its texture in a map-owned package (`workflow_request` `object.set`), or ask the user to do it.
+   - For a fence, `bClimbable` goes on its texture, in a map-owned package. The tools cannot set texture properties yet (`workflow_request` with `op:"object.set"` and `args:{path, properties}` returns the manual steps), so ask the user to do it.
 4. **Dynamic GEs.**
-   - If geometry changes during play, add `geTriggers:[{id, toggle, geMask}]` (`SGETrigger`).
-   - Set the starting `GEActivationMask` with `map_settings` (the spec's `level`).
+   - If geometry changes during play, call `geometric_events` with `geTriggers:[{id, toggle, geMask}]` (`SGETrigger`).
+   - Set the starting `GEActivationMask` with `map_settings` and `level:{geActivationMask}`.
    - The GE IDs themselves are assigned with the editor's `Set GE ID` (right-click a GE); ask the user to do that by hand.
 5. **Check.**
    - Call `map_validate` with `include:["wiki"]`, and fix every `ge.*` finding. Each cites the measurement it failed.

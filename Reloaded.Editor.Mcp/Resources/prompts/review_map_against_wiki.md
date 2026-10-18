@@ -25,11 +25,11 @@ rules: true
    - Each finding has `severity`, `rule`, `wikiPage`, `message`, `actors` and usually `fix`.
    - Rules and their severities are in the embedded catalogue.
 3. **Walk the checklist.** Go through the **Minimum viable Versus map checklist** in the embedded index, item by item, and confirm each with data. For each item, write ✅, ⚠️ or ❌ with the evidence.
-   - Spawns: `map_query` with `what:"spawns"` (per team, ≥3) and `view_screenshot` with presets `spawn:spy` and `spawn:merc`.
+   - Spawns: `map_query` with `what:"spawns"` (per team, ≥3) and `view_screenshot` with `preset` `spawn:spy` and `spawn:merc`.
    - Modes: `map_query` with `what:"missions"`: a `GM_Multi` mission with objectives and triggers, `GM_DiskHunt` with `SDisk`s, `GM_DeathMatch` with a security reset.
    - CamNet: `map_query` with `what:"cameras"`: ≥1 camera, exactly one `bFirstCam`, a closed `NextCam`/`PrevCam` loop, collision on.
    - Security: `map_query` with `what:"security"` and `what:"wiring"`: detector Events reach alarm Tags, `MessagePriority` 0-5, no locked bomb targets.
-   - Terminals: `view_screenshot` with preset `objective:<name>`: about 78 above the floor and clear of geometry.
+   - Terminals: `view_screenshot` with `preset:"objective:<name>"`: about 78 above the floor and clear of geometry.
    - Lights: `map_query` with `what:"lights"`: only `LE_None`, `LE_Spotlight`, `LE_Sunlight`, or `LE_ESpotShadow` for Echelon lights.
    - Zones: a `LocationName` in each area, spawns included, and no `SAlarmZoneInfo`.
    - Level and Map Settings: `map_query` with `what:"level"`. Map Settings ranges, CAPS, index parity, interface textures.

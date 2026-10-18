@@ -33,40 +33,40 @@ rules: true
    - The file is the first 4 letters + `D` (Aquarius → `AquaD`), in `Packages\MapsEd`, ASCII, with no spaces.
    - If the map already has its file, call `map_file` with `action:"save"` instead.
 3. **Restart.** Call `editor_restart`. A new map needs save → exit → reopen before Map Settings can be opened.
-4. **Map Settings.** Call `map_settings` with these settings:
-   - `MapName` "{{mapName}}" in CAPS;
-   - `ExpliMapInBriefSpy` / `ExpliMapInBriefSentry` (shared by all modes);
-   - `LegendMap` (date, time, location, a one-line story) and `LegendMapInBrief` (numbered minimap zones), with `|` for line breaks;
-   - one `Modes[i]` + `ModesStrings[i]` per mode, index-aligned:
-     - `GameModeId` `GM_Multi` / `GM_DiskHunt` / `GM_DeathMatch`;
-     - `RespawnTime` 5-15, `SpiesLives`/`SentriesLives` 0-10 (0 = infinite), `TimeLimit` 0-20 minutes;
-     - for Disk Hunt, `ScoreLimit`, `Handicap` and `NumDisksMax`;
-     - `ExplicationModeSpy` / `ExplicationModeSentry` and `ExpliModeInBriefSpy` / `ExpliModeInBriefSentry`;
-     - the Ubisoft standard `LegendModeInBrief*` text from the embedded page.
+4. **Map Settings.** Call `map_settings` with these arguments (the SMapSettings property each one writes is in brackets):
+   - `mapName:"{{mapName}}"` in CAPS (`MapName`);
+   - `briefSpy` / `briefMerc`, shared by all modes (`ExpliMapInBriefSpy` / `ExpliMapInBriefSentry`);
+   - `legend`: date, time, location and a one-line story (`LegendMap`), and `legendInBrief`: the numbered minimap zones (`LegendMapInBrief`), with `|` for line breaks;
+   - `modes`, one entry per mode, which the tool writes as index-aligned `Modes[i]` + `ModesStrings[i]`:
+     - `mode` `story` / `diskhunt` / `deathmatch` (`GameModeId` `GM_Multi` / `GM_DiskHunt` / `GM_DeathMatch`);
+     - `respawn` 5-15 (`RespawnTime`), `spiesLives` / `sentriesLives` 0-10, 0 = infinite (`SpiesLives` / `SentriesLives`), `timeLimit` 0-20 minutes (`TimeLimit`);
+     - for Disk Hunt, `scoreLimit`, `handicap` and `numDisksMax` (`ScoreLimit`, `Handicap`, `NumDisksMax`);
+     - `strings:{explicationSpy, explicationMerc, briefSpy, briefMerc}` (`ExplicationModeSpy` / `ExplicationModeSentry`, `ExpliModeInBriefSpy` / `ExpliModeInBriefSentry`);
+     - `strings.legendSpy` / `legendMerc` (`LegendModeInBrief*`) default to the Ubisoft standard text from the embedded page.
 
    {{#briefing}}Briefing and legend source: {{briefing}}.{{/briefing}}
 5. **Interface textures.** These go in package `<File>-i`, with no group.
-   - Prepare images with `image_convert` (power of two):
+   - Prepare images with `image_convert` (power of two; `slot` sets the size and alpha for each):
      - `Menu` 256 × 256, alpha with the Menu fade mask;
      - `Briefing` 256 × 256, alpha;
      - `LoadingATT0` 512 × 512;
      - `LoadingDEF0` 512 × 512.
-   - Import them with `map_settings` and `interface`:
+   - Import them with `map_settings` and `interface:{menu, briefing, loadingAtt, loadingDef}` (image paths):
      - `Menu` and `Briefing` as DXT5 with `bAlphaTexture=True`;
      - `LoadingATT0` and `LoadingDEF0` as DXT1.
    - Saving produces `Packages\Textures\<File>-i.utc`. Delete any `-i.utx` it leaves; the game does not use it.
 {{^images}}   - No images were given. Ask the user for them, or render placeholders with `view_screenshot` (`maxEdge` 512) and convert those.
 {{/images}}
-6. **Minimap (optional).** Use `map_settings` with `minimap`, filling `MapSnapshotInfo` (`MapFloors` per floor with `FloorZ`, plus `SnapshotCamera`) for the F7 Strategic Map.
-7. **Sound.** Call `release` with `sounds` to build `Sounds\<File>.uas`.
+6. **Minimap (optional).** Use `map_settings` with `minimap` (`true`, or `{floors, framing, ...}`), which fills `MapSnapshotInfo` (`MapFloors` per floor with `FloorZ`, plus `SnapshotCamera`) for the F7 Strategic Map.
+7. **Sound.** Call `release` with `action:"sounds"` to build `Sounds\<File>.uas`.
    - Always include `Interface` (objective sounds, win/lose music), plus `Amb_<Map>` if the map has its own ambient package.
    - Quality is 5.0. Build it even when the map has no streamed audio.
-8. **Packages.** Call `release` with `check`:
+8. **Packages.** Call `release` with `action:"check"`:
    - every new package has a unique base name: `<Map>_TXT.utx`, `<Map>_STM.usx`, `Amb_<Map>.uax`;
    - no stock package or map was modified;
    - each new package is saved.
 9. **Final save.** Call `map_file` with `action:"save"`, then `map_validate` with `profile:"release"` (expect no errors).
-10. **Archive.** Call `release` with `package` (or list the files for the user):
+10. **Archive.** Call `release` with `action:"package"` (or list the files for the user):
     - `Packages\Maps\<File>.sdc`
     - `Packages\MapsEd\<File>.sdc`: keep it backed up, because a Maps file cannot be turned back into a MapsEd file.
     - `Packages\Textures\<File>-i.utc`

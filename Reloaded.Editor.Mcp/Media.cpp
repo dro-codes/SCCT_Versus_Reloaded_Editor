@@ -16,6 +16,9 @@
 #include <mfidl.h>
 #include <mferror.h>
 #include <mfreadwrite.h>
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
 #ifdef _MSC_VER
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
@@ -317,10 +320,50 @@ namespace
     }
 
     // ------------------------------------------------------------ Media Foundation
+    // mfplat.dll and mfreadwrite.dll are delay-loaded, so the server starts on
+    // Windows N editions and Server, which lack them until the Media Feature
+    // Pack is added. A delay-load that fails raises an SEH exception no catch
+    // here sees, so both are loaded (and every function used looked up) first:
+    // a missing one is an ordinary error, which ExtractFrames answers with
+    // ffmpeg. They stay loaded, so the delay-load helper finds them by name.
+    void LoadMediaFoundation()
+    {
+        static const std::string problem = []() -> std::string
+        {
+            struct Module { const wchar_t* file; const char* name; std::vector<const char*> functions; };
+            const Module modules[] = {{L"mfplat.dll", "mfplat.dll", {"MFStartup", "MFShutdown", "MFCreateAttributes", "MFCreateMediaType"}},
+                                      {L"mfreadwrite.dll", "mfreadwrite.dll", {"MFCreateSourceReaderFromURL"}}};
+            for (const auto& m : modules)
+            {
+                HMODULE library = LoadLibraryExW(m.file, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+                // Windows 7 without KB2533623 has no LOAD_LIBRARY_SEARCH_*: name the system folder instead.
+                if (!library && GetLastError() == ERROR_INVALID_PARAMETER)
+                {
+                    std::wstring system(MAX_PATH, L'\0');
+                    const UINT length = GetSystemDirectoryW(system.data(), MAX_PATH);
+                    if (length && length < MAX_PATH)
+                    {
+                        system.resize(length);
+                        library = LoadLibraryW((system + L"\\" + m.file).c_str());
+                    }
+                }
+                if (!library)
+                    return std::string(m.name) + " is missing, so Windows has no Media Foundation (Windows N and Server editions need the Media Feature Pack)";
+                for (const char* function : m.functions)
+                    if (!GetProcAddress(library, function)) return std::string(m.name) + " has no " + function + " (this Windows's Media Foundation is too old)";
+            }
+            return {};
+        }();
+        if (!problem.empty()) throw std::runtime_error(problem);
+    }
     class Foundation
     {
     public:
-        Foundation() { Check(MFStartup(MF_VERSION, MFSTARTUP_FULL), "Media Foundation could not start (is the Media Feature Pack installed?)"); }
+        Foundation()
+        {
+            LoadMediaFoundation();
+            Check(MFStartup(MF_VERSION, MFSTARTUP_FULL), "Media Foundation could not start (is the Media Feature Pack installed?)");
+        }
         Foundation(const Foundation&) = delete;
         Foundation& operator=(const Foundation&) = delete;
         ~Foundation() { MFShutdown(); }

@@ -24,7 +24,10 @@
 //    modes: ["story", "diskhunt", "deathmatch"] (the modes the map must play),
 //    mapName, mapFile (or map: {name, file}), geometryBuilt, live,
 //    release: {packages: [name | {name, file, stock}], uas: {packages},
-//              interface: {menu, briefing, loadingAtt, loadingDef}},
+//              interface: {menu, briefing, loadingAtt, loadingDef},
+//              findings: the release tool's check findings [{severity, rule,
+//              message, fix}], of which release.files, release.dependencies
+//              and release.optimise are folded in (only it reads the files)},
 //    playerCounts: [{objective, min, max}], targets: [{mission, sizes[8]}],
 //    documents: [scct.map-changes], schema: authoring.schema's result,
 //    mapCheck: mapcheck.run's result, lighting: lighting.budget's result}
@@ -187,6 +190,11 @@ namespace Mcp::Rules
             {"release.uas", "sound-browser", "warning", "warning", "The map's .uas includes Interface (and the map's own Amb_ sounds)."},
             {"release.file-name", "map-packaging", "warning", "warning", "The map file is an ASCII .sdc whose name has no spaces."},
             {"release.naming-convention", "map-packaging", "info", "info", "Map file: first 4 letters of the map name plus a suffix letter (D for the default version); packages <Map>_TXT, <Map>_STM, Amb_<Map>."},
+            // Found by the release tool's file check (release action check) and
+            // folded in from its findings, at the severity it gave each row.
+            {"release.files", "map-packaging", "reported", "reported", "The files a release ships are on disk and current: Packages\\MapsEd and Packages\\Maps <Map>.sdc saved since the last change, and <Map>-i.utc without a stray <Map>-i.utx."},
+            {"release.dependencies", "map-packaging", "reported", "reported", "Every package the map imports is in Packages, and a stock one is unchanged from a clean install, which is what players have."},
+            {"release.optimise", "map-packaging", "info", "info", "A stock package the map uses little of can be cut down to a release copy with only those assets (release action optimise)."},
             // Geometric events.
             {"ge.points", "geometric-events", "error", "error", "A GE is LG, HOH, PIPE, LADDER, ZL, FENCE or POLE with 2 points (3 for a pipe or ladder)."},
             {"ge.ledge-height", "geometric-events", "warning", "warning", "Ledges are grabbed 208-320 units up standing, up to 448 with a running jump, or at 512 with a co-op boost."},
@@ -1832,6 +1840,17 @@ namespace Mcp::Rules
                     for (const auto& p : packageNames)
                         if (Lower(p).rfind("amb_", 0) == 0 && std::find(inside.begin(), inside.end(), Lower(p)) == inside.end())
                             Add("release.uas", "The map's .uas does not include " + p + ", the map's own ambient sounds.", {}, Fix("release", {{"sounds", true}}));
+                }
+                // What only the release tool's file check sees, from its findings;
+                // the rules above check the rest from the facts themselves.
+                static const std::set<std::string> fileRules{"release.files", "release.dependencies", "release.optimise"};
+                for (const auto& row : Get(r, "findings"))
+                {
+                    const auto rule = GetString(row, {"rule"});
+                    const auto message = GetString(row, {"message"});
+                    if (!fileRules.count(rule) || message.empty()) continue;
+                    const auto severity = GetString(row, {"severity"});
+                    Add(rule, message, {}, Get(row, "fix"), severity == "error" || severity == "warning" || severity == "info" ? severity : std::string());
                 }
             }
 

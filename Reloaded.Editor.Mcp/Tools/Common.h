@@ -216,12 +216,15 @@ namespace Mcp::Tools
         if (message.contains("step") && message.at("step").is_string()) text += " (" + message.at("step").get<std::string>() + ")";
         return text;
     }
-    // One bridge call; its progress messages go to the MCP client.
-    inline Json Call(ToolContext& c, const std::string& op, const Json& args = Json::object(), const std::string& label = {}, bool dryRun = false, unsigned timeoutMs = 120000)
+    // One bridge call; its progress messages go to the MCP client. With
+    // expect set, the editor refuses the call as stale if the map moved on.
+    inline Json Call(ToolContext& c, const std::string& op, const Json& args = Json::object(), const std::string& label = {}, bool dryRun = false, unsigned timeoutMs = 120000,
+                     const Bridge::Expect& expect = {})
     {
         CallOptions options;
         options.label = label;
         options.dryRun = dryRun;
+        options.expect = expect;
         options.timeoutMs = timeoutMs;
         auto steps = std::make_shared<int>(0);
         options.progress = [&c, steps, op](const Json& message) { c.progress(++*steps, 0, ProgressText(op, message)); };
@@ -379,12 +382,12 @@ namespace Mcp::Tools
     }
     // A plan checked here first (McpPlanModel.h), so a misordered plan fails
     // before it reaches the editor, then run as one bridge call.
-    inline Json RunPlan(ToolContext& c, Json plan, const std::string& label, bool dryRun, unsigned timeoutMs = 600000)
+    inline Json RunPlan(ToolContext& c, Json plan, const std::string& label, bool dryRun, unsigned timeoutMs = 600000, const Bridge::Expect& expect = {})
     {
         plan["label"] = label;
         if (dryRun) plan["dryRun"] = true;
         Plan::Check(plan);
-        return Call(c, "mcp.plan", plan, label, dryRun, timeoutMs);
+        return Call(c, "mcp.plan", plan, label, dryRun, timeoutMs, expect);
     }
     // A dry run's rows, and their count, for summaries.
     inline Json PreviewRows(const Json& result)
@@ -397,6 +400,17 @@ namespace Mcp::Tools
     // The open map at a glance: map_query summary and scct://map/summary
     // (QueryTools.cpp).
     Json MapSummary(ToolContext& c);
+
+    // ---------------------------------------------------------- level builds
+    // level_build's path (SpecTools.cpp), which every intent tool
+    // (IntentTools.cpp) builds through too. BuildContext is what a build
+    // starts from: the editor's state, the stored sidecar less what the map no
+    // longer has, and whether an editor answered. LevelBuild compiles spec
+    // against it and previews or applies it, returning the report BuildResult
+    // turns into the tool result; images gets the plan PNG or the screenshot.
+    Json BuildContext(ToolContext& c, bool needEditor);
+    Json LevelBuild(ToolContext& c, const Json& context, const Json& spec, const Json& request, std::vector<Content>& images);
+    ToolResult BuildResult(ToolContext& c, const Json& report, const std::vector<Content>& images);
 
     // ---------------------------------------------------------------- files
     // One section of an INI file (Reloaded_Editor.ini), keys lower-cased.

@@ -42,17 +42,17 @@ Every judgement is yours: what a room is, where walls and doors are, how big thi
 1. **Connect.** Call `editor_status`; use `editor_launch` if no editor is running. If the open map has unsaved work, ask the user before `map_file` with `action:"new"`.
 
 2. **Get frames (video).** Call `media_extract_frames` on the video.
-   - Start with `mode:"scene"` (a new frame on each scene change) and a contact sheet, so you see the whole clip at a glance.
-   - Then use `mode:"interval"` (for example one frame per second) over the stretches that show the layout: walk-throughs, pans, overhead shots.
+   - Start with `mode:"scene"` (a new frame on each scene change) and `sheet:true` (a contact sheet), so you see the whole clip at a glance.
+   - Then use `mode:"interval"` with `intervalS` (for example `intervalS:1`, one frame per second) and `start` / `end` over the stretches that show the layout: walk-throughs, pans, overhead shots.
    - Keep the frame numbers and timestamps; you will cite them in `provenance.frames`.
    - For still images, skip this step.
 
 3. **Look at every relevant frame.**
-   - Use `media_read_image` to view frames at a readable size, and to crop details such as doors, stairs, vents and ladders.
+   - Use `media_read_image` with `path` (a frame) to view it at a readable size (`maxEdge`), and with `crop` to look at details such as doors, stairs, vents and ladders.
    - For each frame, write a short note: which space it shows, from where, looking which way, and what connects to what. Build a room graph: spaces as nodes, doorways and stairs as edges.
 
 4. **Read a grid.**
-   - For a floor plan or a top-down view: call `media_read_image` with a measurement grid overlay, and read each wall line and opening against the labelled cells.
+   - For a floor plan or a top-down view: call `media_read_image` with `grid` (a measurement grid overlay: `{spacingPx}`, or `{cellUu, uuPerPx}` once the scale is known), and read each wall line and opening against the labelled cells.
    - For perspective frames: overlay a grid and count known repeating elements, such as floor tiles, ceiling panels, windows or doors, to estimate lengths along each wall.
    - Note the cell size in pixels and what it maps to.
 
@@ -90,13 +90,13 @@ Every judgement is yours: what a room is, where walls and doors are, how big thi
    - Iterate the spec until it matches.
 
 8. **Build.**
-   - Call `level_build` with `mode:"preview"`, then `mode:"apply"` with `build:true`.
-   - Call `view_screenshot` with a `camera` placed where a key source frame was taken. Compare the two images, adjust the spec, and run `level_build` with `sync:"incremental"`.
+   - Call `level_build` with `mode:"preview"`, then `mode:"apply"` with `build:"geometry"`.
+   - Call `view_screenshot` with a `camera` (`{location:[x,y,z], rotation:[pitch,yaw,roll]}`) placed where a key source frame was taken. Compare the two images, adjust the spec, and run `level_build` with `sync:"incremental"`.
 
 9. **Validate.** Call `map_validate` with `profile:"draft"`, and fix the findings (each has a `fix`). Check climbing GEs against the measurements in the embedded geometric-events page.
 
 10. **Save and finish.**
-    - Call `map_file` with `action:"save_as"`, then `editor_restart`, then `map_settings`.
+    - Call `map_file` with `action:"save_as"`{{#mapName}} and `mapName:"{{mapName}}"`{{/mapName}}, then `editor_restart`, then `map_settings` with the spec's `settings`.
     - Then `map_validate` with `profile:"release"`.
 
 11. **Report.** Tell the user:

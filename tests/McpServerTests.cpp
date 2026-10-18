@@ -7,6 +7,7 @@
 #include "../Reloaded.Editor.Mcp/BridgeClient.h"
 #include "../Reloaded.Editor.Mcp/Tools/Common.h"
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <source_location>
@@ -449,13 +450,27 @@ void Launch()
     auto& process=Process();
     const auto saved=process;
     std::vector<std::string> launched;
-    process.launch=[&](const std::filesystem::path& exe,const std::string& arguments,const std::filesystem::path& folder)
+    // As Reloaded_Editor.exe does: the launcher (9100, 9101, ...) starts the
+    // editor and exits, and the editor's pipe (pipePid) shows a moment later.
+    unsigned long launcher=0,pipePid=5151;
+    Json opened;
+    std::string launcherLog;
+    const auto viaLauncher=[&](const std::filesystem::path& exe,const std::string& arguments,const std::filesystem::path& folder)
     {
         launched.push_back(exe.filename().string()+" "+arguments+" in "+folder.filename().string());
-        h.fake.editors=Json::array({{{"pid",5151}}});
-        return 5151ul;
+        if(!launcherLog.empty())std::ofstream(h.dir/"Reloaded_Editor.exe.log")<<launcherLog;
+        opened=h.fake.editors;
+        if(pipePid)opened.push_back({{"pid",pipePid}});
+        launcher=9100+static_cast<unsigned long>(launched.size()-1);
+        return launcher;
     };
-    process.running=[](unsigned long){return true;};
+    process.launch=viaLauncher;
+    process.running=[&](unsigned long pid)
+    {
+        if(pid!=launcher)return true;
+        h.fake.editors=opened;
+        return false;
+    };
     process.waitExit=[](unsigned long,unsigned){return true;};
     h.fake.On("editor.state",OpenState());
     auto already=h.Call("editor_launch");
@@ -465,15 +480,51 @@ void Launch()
     Check(status.at("structuredContent").at("settings").at("enabled")==true && status.at("structuredContent").at("settings").at("requireApproval")==true,"INI [Mcp] read");
     auto started=h.Call("editor_launch",{{"waitSeconds",10}});
     Check(started.at("isError")==false && launched.size()==1 && launched[0]=="Reloaded_Editor.exe -reMcp in "+h.dir.filename().string(),"started with -reMcp in System");
-    Check(h.fake.selected==5151 && started.at("structuredContent").at("pid")==5151,"selects the new editor");
+    Check(h.fake.selected==5151 && started.at("structuredContent").at("pid")==5151 && started.at("structuredContent").at("launcher")==9100,"selects the editor the launcher started, not the launcher");
+    // With an editor already running (force), the new pipe is the new editor.
+    h.fake.editors=Json::array({{{"pid",4242}}});
+    pipePid=6161;
+    auto second=h.Call("editor_launch",{{"waitSeconds",10},{"force",true}});
+    Check(second.at("isError")==false && h.fake.selected==6161 && second.at("structuredContent").at("pid")==6161,"the editor that was already running is not taken for the new one");
+    // A launcher that failed says so in its log, at once rather than after the wait.
+    h.fake.editors=Json::array();
+    pipePid=0;
+    launcherLog="Starting at 2026-10-18 10:00:00\r\nReloaded.Editor.dll not found at C:\\Game\\System\\Reloaded.Editor.dll\r\n";
+    const auto failing=std::chrono::steady_clock::now();
+    auto failed=h.Call("editor_launch",{{"waitSeconds",10}});
+    Check(failed.at("isError")==true && Text(failed).find("Reloaded.Editor.dll not found")!=std::string::npos &&
+          std::chrono::steady_clock::now()-failing<std::chrono::seconds(5),"the launcher's failure is reported from its log");
+    // An old log is not this launch's.
+    std::filesystem::last_write_time(h.dir/"Reloaded_Editor.exe.log",std::filesystem::file_time_type::clock::now()-std::chrono::hours(1));
+    launcherLog.clear();
+    pipePid=5151;
+    auto stale=h.Call("editor_launch",{{"waitSeconds",10}});
+    Check(stale.at("isError")==false && h.fake.selected==5151,"a log from an earlier start is ignored");
+    // The legacy layout, where the started process is the editor itself.
+    h.fake.editors=Json::array();
+    pipePid=0;
+    process.launch=[&](const std::filesystem::path& exe,const std::string& arguments,const std::filesystem::path& folder)
+    {
+        launched.push_back(exe.filename().string()+" "+arguments+" in "+folder.filename().string());
+        h.fake.editors=Json::array({{{"pid",7171}}});
+        launcher=7171;
+        return launcher;
+    };
+    auto direct=h.Call("editor_launch",{{"waitSeconds",10}});
+    Check(direct.at("isError")==false && h.fake.selected==7171,"a started process that owns the pipe is the editor");
     // Restart: save, quit, wait, start again, reopen.
+    process.launch=viaLauncher;
+    h.fake.editors=Json::array({{{"pid",4242}}});
+    pipePid=5252;
+    const auto before=launched.size();
     auto saved_state=OpenState();saved_state["mapFile"]="C:/Game/Packages/MapsEd/AquaD.sdc";saved_state["dirty"]=true;
     h.fake.Clear("editor.state");h.fake.On("editor.state",saved_state);
     h.fake.On("map.save",Json{{"file","C:/Game/Packages/MapsEd/AquaD.sdc"}});
     h.fake.On("editor.quit",[&](const Json&,const CallOptions&){h.fake.editors=Json::array();return Json(true);});
     h.fake.On("map.open",saved_state);
     auto restart=h.Call("editor_restart");
-    Check(restart.at("isError")==false && launched.size()==2,"restarted");
+    Check(restart.at("isError")==false && launched.size()==before+1,"restarted");
+    Check(h.fake.selected==5252 && restart.at("structuredContent").at("pid")==5252 && restart.at("structuredContent").at("previousPid")==4242,"the restarted editor is the one connected");
     const auto ops=h.fake.Ops();
     auto index=[&](const char* op){return std::find(ops.begin(),ops.end(),op)-ops.begin();};
     Check(index("map.save")<index("editor.quit") && index("editor.quit")<static_cast<long>(ops.size()) && h.fake.Last("map.open")->args.at("path")=="C:/Game/Packages/MapsEd/AquaD.sdc","save, quit, reopen");
@@ -481,7 +532,7 @@ void Launch()
     {std::ofstream(h.dir/"Reloaded_Editor.ini")<<"[Mcp]\r\nEnabled=0\r\n";}
     h.fake.editors=Json::array();
     auto off=h.Call("editor_launch");
-    Check(off.at("isError")==true && Text(off).find("Enable MCP server")!=std::string::npos && launched.size()==2,"an editor with MCP off is not started");
+    Check(off.at("isError")==true && Text(off).find("Enable MCP server")!=std::string::npos && launched.size()==before+1,"an editor with MCP off is not started");
     process=saved;
 }
 void Stub()

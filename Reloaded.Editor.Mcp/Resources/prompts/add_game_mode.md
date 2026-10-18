@@ -42,15 +42,15 @@ Follow the embedded **game-modes** page exactly. Name actors in lists by their *
      - One `SMission` with `GameMode GM_DeathMatch`.
      - If the map has security, an `AtResetEvent` → `SMagicEvent` that **untriggers** the alarms and detectors.
      - Optional separate spawns (`STriggerPlayerStart`).
-3. **Apply.** Call `gameplay` with the matching spec fragment:
-   - `gameplay.story` (`mission`, `objectives[triggers]`, `sectors`);
-   - `gameplay.diskhunt` (`disks`, `resetTime`, `mission`);
-   - `gameplay.deathmatch` (`disableSecurity`, `mission`);
-   - add `"{{mode}}"` to `gameplay.modes`.
+3. **Apply.** Call `gameplay` with the matching part of the spec's `gameplay` section, at the top level of the arguments:
+   - `story` (`mission`, `objectives[triggers]`, `sectors`), for story and sectors;
+   - `diskhunt` (`disks`, `resetTime`, `mission`);
+   - `deathmatch` (`disableSecurity`, `mission`);
+   - and `modes` with the mode (`story`, `diskhunt` or `deathmatch`; sectors are `story`) for "{{mode}}". It is added to the modes the map already has.
 
    Run it with `dryRun:true` first and read the preview, then without.
 4. **Map Settings.**
-   - Call `map_settings` with one more `settings.modes[]` entry for this mode: respawn 5-15, lives 0-10, time limit 0-20. For Disk Hunt also give `scoreLimit`, `handicap` and `numDisksMax`.
+   - Call `map_settings` with `modes:[{mode, respawn, timeLimit, spiesLives, sentriesLives}]`, one entry for this mode (matched by `mode`, so the others stay): `respawn` 5-15, lives 0-10, `timeLimit` 0-20. For Disk Hunt also give `scoreLimit`, `handicap` and `numDisksMax`.
    - `Modes[i]` and `ModesStrings[i]` must stay index-aligned. If Map Settings does not exist yet, save, `editor_restart`, then retry.
 5. **Check.**
    - Call `map_validate` with `profile:"draft"`, and fix every `story.*`, `modes.*`, `objectives.*`, `diskhunt.*` and `deathmatch.*` finding.
