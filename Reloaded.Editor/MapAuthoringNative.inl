@@ -424,7 +424,12 @@ Json PreviewMapAuthoring(const Json& given)
     const Json document=AuthoringDefaults(given);
     auto plan=PlanAuthoring(document,false);
     const bool assets=AuthoringHas(document,"load") || AuthoringHas(document,"texture") || AuthoringHas(document,"save");
-    return {{"changes",plan.summary},{"rows",plan.rows},{"tally",Authoring::Tally(plan.rows)},
+    // The names the creates would get as the map is now (a component's is
+    // known only once it exists); a later edit can change them.
+    Json identities=Json::object();
+    for(const auto& op:document.at("operations"))
+        if(op.at("op")=="create" && plan.identities.count(op.at("id").get<std::string>()))identities[op.at("id").get<std::string>()]=plan.identities.at(op.at("id").get<std::string>());
+    return {{"changes",plan.summary},{"rows",plan.rows},{"tally",Authoring::Tally(plan.rows)},{"identities",identities},
         {"note",std::string(assets?"Package loads, texture imports and package saves run first and are not undone by Undo. ":"")+"Map changes apply in one Undo step. Save the map to retain changes. Lighting, geometry and navigation are not rebuilt; playtest the result."}};
 }
 Json ApplyMapAuthoring(const Json& given)
@@ -437,7 +442,7 @@ Json ApplyMapAuthoring(const Json& given)
     auto plan=PlanAuthoring(document);
     auto selection=SelectedIdentities();
     struct Restore{Json selection;~Restore(){try{Select(selection);Redraw();}catch(...){}}} restore{selection};
-    Transaction transaction("Import map JSON changes");Json created=Json::array();
+    Transaction transaction("Import map JSON changes");Json created=Json::array(),identities=Json::object();
     // Deletes go first, through the editor's own delete inside this transaction, so the same Undo brings them back.
     // Nothing else in the file may touch a deleted actor, so the order changes no result; but a delete after the
     // paste in one transaction makes Undo fault restoring the level's actor list (seen on ShipD), as the stock
@@ -476,7 +481,7 @@ Json ApplyMapAuthoring(const Json& given)
         for(const auto& op:document.at("operations"))if(op.at("op")=="create")
         {
             auto id=op.at("id").get<std::string>();auto actor=MagicResolve(plan.identities.at(id));
-            if(!actor)throw std::runtime_error("Native creation failed: "+id);created.push_back(Identity(actor));
+            if(!actor)throw std::runtime_error("Native creation failed: "+id);created.push_back(Identity(actor));identities[id]=created.back();
         }
     }
     for(const auto& op:document.at("operations"))if(op.at("op")=="component")
@@ -486,7 +491,7 @@ Json ApplyMapAuthoring(const Json& given)
         using Construct=Address(__cdecl*)(Address,Address,int,unsigned,Address,Address,Address);
         auto object=reinterpret_cast<Construct>(0x10fadf80)(plan.types.at(id),owner,0,1,0,Read<Address>(0x115befb0),0);
         if(!object)throw std::runtime_error("Particle component creation failed.");Modify(object);plan.identities[id]=Identity(object);
-        auto values=InspectActor(Identity(owner)).at("values").at("Emitters");values.push_back(Path(plan.types.at(id))+"'"+Path(object)+"'");MagicSet(owner,"Emitters",values);Call(owner,0x44);created.push_back(Identity(object));
+        auto values=InspectActor(Identity(owner)).at("values").at("Emitters");values.push_back(Path(plan.types.at(id))+"'"+Path(object)+"'");MagicSet(owner,"Emitters",values);Call(owner,0x44);created.push_back(Identity(object));identities[id]=created.back();
     }
     for(const auto& op:document.at("operations"))if(op.at("op")=="create" || op.at("op")=="component" || op.at("op")=="update")
     {
@@ -535,5 +540,5 @@ Json ApplyMapAuthoring(const Json& given)
         if(!Exec("POLY SETTEXTURE"))throw std::runtime_error("Native surface texturing failed.");
         textured+=wanted.size();
     }
-    transaction.Commit();return {{"created",created},{"deleted",deleted},{"operations",document.at("operations").size()},{"assets",assets},{"surfaces",textured}};
+    transaction.Commit();return {{"created",created},{"identities",identities},{"deleted",deleted},{"operations",document.at("operations").size()},{"assets",assets},{"surfaces",textured}};
 }

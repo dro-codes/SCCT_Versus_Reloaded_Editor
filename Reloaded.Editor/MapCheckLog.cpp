@@ -76,9 +76,11 @@ void MapCheckLog::Initialize()
     INSTALL_HOOKS;
 }
 
-void MapCheckLog::SetSink(Sink sink)
+MapCheckLog::Sink MapCheckLog::SetSink(Sink sink)
 {
+    const Sink previous = s_sink;
     s_sink = sink;
+    return previous;
 }
 
 void MapCheckLog::SetCapture(Capture capture)

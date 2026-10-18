@@ -8,9 +8,15 @@
 // leak path drawn in the viewports (MapCheckModel.h holds the checks).
 namespace MapCheck
 {
+    struct Report; // MapCheckModel.h
+
     // Reserved block 41220-41239.
     constexpr UINT kOpenCommand = 41220;
 
     bool HandleCommand(UINT command);
     void Open(HWND owner);
+    // The checks the window runs, on the map as last built, with the
+    // [MapCheck] settings; logged like a Refresh. UI thread only. ToJson
+    // (MapCheckModel.h) is the bridge's mapcheck.run reply.
+    Report Measure();
 }

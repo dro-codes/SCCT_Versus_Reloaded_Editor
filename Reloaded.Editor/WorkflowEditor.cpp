@@ -2,6 +2,8 @@
 #undef min
 #undef max
 #include "WorkflowEditor.h"
+#include "McpEditor.h"
+#include "McpBridgeModel.h"
 #include "BrushGridSnapModel.h"
 #include "EmitterLibraryModel.h"
 #include "EmitterLibraryDefaults.gen.h"
@@ -425,29 +427,43 @@ namespace
         return false;
     }
     void Modify(Address a) { Call(a,0x20); }
+    // While a JoinScope (McpNative.inl) is open on this thread, Transactions
+    // join its one Undo step: no Begin or End of their own, and no rollback,
+    // which the scope does for the whole plan. The prefix names the bridge
+    // call in Undo History ("MCP 12: ").
+    thread_local int joinDepth=0;
+    thread_local std::string transactionPrefix,transactionLabel;
+    const char* TransactionLabel(const char* label)
+    {
+        const std::string text=label?label:"";
+        if(transactionPrefix.empty() || text.rfind(transactionPrefix,0)==0) { transactionLabel=text; return transactionLabel.c_str(); }
+        transactionLabel=transactionPrefix+text; return transactionLabel.c_str();
+    }
+    // Ends the open transaction and takes it back. Undo (0x11059990) keeps the
+    // rolled-back record for Redo, which would replay the half-done operation.
+    // Drop it the way native Begin (0x1105ad61) cancels the redo queue:
+    // TArray<FTransaction>::Remove (0x110590e0) on UndoBuffer (+0x28, Num
+    // +0x2c), UndoCount (+0x34)=0.
+    void RollBack(Address buffer)
+    {
+        Call(buffer,0x68);
+        if(Call<int>(buffer,0x78) && Read<int>(buffer+0x34)==1)
+        {
+            reinterpret_cast<void(__thiscall*)(void*,int,int)>(0x110590e0)(reinterpret_cast<void*>(buffer+0x28),Read<int>(buffer+0x2c)-1,1);
+            Write(buffer+0x34,0);
+        }
+    }
     struct Transaction
     {
-        Address buffer; bool ended=false;
+        Address buffer; bool ended=false,joined=joinDepth>0;
         explicit Transaction(const char* label):buffer(Read<Address>(Engine()+0x148))
         {
+            if(joined) return;
             if(!buffer || Read<int>(buffer+0x44)!=0) throw std::runtime_error("Finish the current editor operation first.");
-            Call(buffer,0x64,label);
+            Call(buffer,0x64,TransactionLabel(label));
         }
-        void Commit() { if(!ended) { Call(buffer,0x68); ended=true; } }
-        ~Transaction()
-        {
-            if(ended) return;
-            Call(buffer,0x68);
-            // Undo (0x11059990) keeps the rolled-back record for Redo, which
-            // would replay the half-done operation. Drop it the way native Begin
-            // (0x1105ad61) cancels the redo queue: TArray<FTransaction>::Remove
-            // (0x110590e0) on UndoBuffer (+0x28, Num +0x2c), UndoCount (+0x34)=0.
-            if(Call<int>(buffer,0x78) && Read<int>(buffer+0x34)==1)
-            {
-                reinterpret_cast<void(__thiscall*)(void*,int,int)>(0x110590e0)(reinterpret_cast<void*>(buffer+0x28),Read<int>(buffer+0x2c)-1,1);
-                Write(buffer+0x34,0);
-            }
-        }
+        void Commit() { if(!ended) { if(!joined) Call(buffer,0x68); ended=true; } }
+        ~Transaction() { if(!ended && !joined) RollBack(buffer); }
     };
     thread_local const char* insertionText=nullptr;
     bool pasteHookReady=false;
@@ -1619,4 +1635,5 @@ Json AddObjectiveActor(const Json& owner,const std::string& type)
 #include "MapRecoveryNative.inl"
 #include "StairSmoothNative.inl"
 #include "MapOptimiseNative.inl"
+#include "McpNative.inl"
 }

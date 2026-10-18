@@ -82,23 +82,13 @@ struct Snapshot
     double seconds = 0;
 };
 
-Snapshot Measure()
+Snapshot TakeSnapshot()
 {
-    const auto settings = LoadSettings();
     const auto started = std::chrono::steady_clock::now();
     Snapshot snapshot;
-    auto scene = Workflow::Editor::MapCheckScene(settings);
-    if (settings.floatMaxGap > 0 && scene.bsp.Built()) scene.floors = Workflow::Editor::MapCheckFloorGaps(settings.floatMaxGap);
-    snapshot.report = Analyse(scene, settings);
+    snapshot.report = MapCheck::Measure();
     snapshot.generation = Workflow::Editor::MapGeneration();
     snapshot.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    const auto& report = snapshot.report;
-    Logger::log("MapCheck: " + std::to_string(report.problems.size()) + " problem(s) (" + std::to_string(report.Count(Severity::Error)) + " errors, "
-                + std::to_string(report.Count(Severity::Warning)) + " warnings) in " + std::to_string(scene.actors.size()) + " actors, "
-                + std::to_string(scene.bsp.nodes.size()) + " nodes, " + std::to_string(report.zones) + " zones, " + std::to_string(scene.portals.size())
-                + " portal surfaces; stock entries " + std::to_string(scene.stock.size()));
-    for (const auto& p : report.problems)
-        Logger::log(std::string("MapCheck: ") + SeverityName(p.severity) + " [" + p.check + "] " + p.message);
     return snapshot;
 }
 
@@ -219,7 +209,7 @@ void Refresh()
     auto old = SetCursor(LoadCursor(nullptr, IDC_WAIT));
     try
     {
-        check.snapshot = Measure();
+        check.snapshot = TakeSnapshot();
     }
     catch (...)
     {
@@ -386,6 +376,21 @@ void Show(HWND owner)
     ShowWindow(check.window, SW_SHOW);
 }
 } // namespace
+
+Report Measure()
+{
+    const auto settings = LoadSettings();
+    auto scene = Workflow::Editor::MapCheckScene(settings);
+    if (settings.floatMaxGap > 0 && scene.bsp.Built()) scene.floors = Workflow::Editor::MapCheckFloorGaps(settings.floatMaxGap);
+    auto report = Analyse(scene, settings);
+    Logger::log("MapCheck: " + std::to_string(report.problems.size()) + " problem(s) (" + std::to_string(report.Count(Severity::Error)) + " errors, "
+                + std::to_string(report.Count(Severity::Warning)) + " warnings) in " + std::to_string(scene.actors.size()) + " actors, "
+                + std::to_string(scene.bsp.nodes.size()) + " nodes, " + std::to_string(report.zones) + " zones, " + std::to_string(scene.portals.size())
+                + " portal surfaces; stock entries " + std::to_string(scene.stock.size()));
+    for (const auto& p : report.problems)
+        Logger::log(std::string("MapCheck: ") + SeverityName(p.severity) + " [" + p.check + "] " + p.message);
+    return report;
+}
 
 void Open(HWND owner)
 {

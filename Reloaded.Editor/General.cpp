@@ -726,7 +726,8 @@ JMP_HOOK(0x10e57b30, MenuBarDispatch)
         //   41390-41394 optimise map assets  41395-41399 conveyor belts
         //   41400-41419 objective player counts
         //   41420-41439 placement snap and push  41440-41459 camera bookmarks
-        cmp dword ptr [esp+4], 41459
+        //   41460-41479 MCP server
+        cmp dword ptr [esp+4], 41479
         jbe workflow_dispatch
     workflow_legacy_range:
         cmp dword ptr [esp+4], 40920

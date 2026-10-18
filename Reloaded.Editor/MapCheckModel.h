@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Include/nlohmann/json.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -950,5 +951,66 @@ namespace MapCheck
         }
         std::stable_sort(report.problems.begin(), report.problems.end(), [](const Problem& a, const Problem& b) { return a.severity < b.severity; });
         return report;
+    }
+
+    // ---------------------------------------------------------------- JSON --
+
+    // Actor names and the stock entries come from the engine in the ANSI code
+    // page, and JSON must be UTF-8 (a stray byte makes the bridge's reply fail
+    // to serialise). Valid UTF-8 is kept; anything else is read as Latin-1.
+    inline std::string Utf8(const std::string& text)
+    {
+        bool valid = true;
+        for (size_t i = 0; i < text.size() && valid;)
+        {
+            const auto c = static_cast<unsigned char>(text[i]);
+            const size_t length = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+            if (!length || (length > 1 && c < 0xC2) || i + length > text.size()) { valid = false; break; }
+            for (size_t k = 1; k < length; ++k)
+                if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) valid = false;
+            i += length;
+        }
+        if (valid) return text;
+        std::string out;
+        out.reserve(text.size() + 8);
+        for (unsigned char c : text)
+        {
+            if (c < 0x80) out += static_cast<char>(c);
+            else { out += static_cast<char>(0xC0 | (c >> 6)); out += static_cast<char>(0x80 | (c & 0x3F)); }
+        }
+        return out;
+    }
+
+    inline const char* SeverityKey(Severity s) { return s == Severity::Error ? "error" : s == Severity::Warning ? "warning" : "info"; }
+
+    // The report as the MCP bridge's mapcheck.run returns it: one row per
+    // problem, worst first, with what the row selects (actor paths, BSP
+    // surface indices) and the leak path when there is one; then the counts.
+    inline nlohmann::json ToJson(const Report& report)
+    {
+        auto rounded = [](double v) { return std::round(v * 10) / 10; };
+        nlohmann::json rows = nlohmann::json::array();
+        for (const auto& p : report.problems)
+        {
+            nlohmann::json actors = nlohmann::json::array();
+            for (const auto& path : p.actors) actors.push_back(Utf8(path));
+            nlohmann::json row{{"severity", SeverityKey(p.severity)}, {"group", Utf8(p.group)}, {"check", Utf8(p.check)}, {"message", Utf8(p.message)},
+                     {"actors", std::move(actors)}, {"surfaces", p.surfaces}};
+            if (!p.path.empty())
+            {
+                nlohmann::json points = nlohmann::json::array();
+                for (const auto& at : p.path) points.push_back({rounded(at[0]), rounded(at[1]), rounded(at[2])});
+                row["path"] = std::move(points);
+                row["pathThroughPortal"] = p.pathThroughPortal;
+            }
+            rows.push_back(std::move(row));
+        }
+        const auto errors = report.Count(Severity::Error), warnings = report.Count(Severity::Warning), notes = report.Count(Severity::Note);
+        const std::string checked = std::to_string(report.actorsChecked) + " actors and " + std::to_string(report.zones) + " zone(s) checked.";
+        const std::string text = report.problems.empty() ? "No problems found; " + checked
+            : std::to_string(errors) + " error(s), " + std::to_string(warnings) + " warning(s), " + std::to_string(notes) + " note(s); " + checked;
+        return {{"rows", std::move(rows)},
+                {"summary", {{"errors", errors}, {"warnings", warnings}, {"info", notes}, {"actorsChecked", report.actorsChecked},
+                             {"zones", report.zones}, {"bspBuilt", report.bspBuilt}, {"text", text}}}};
     }
 }
