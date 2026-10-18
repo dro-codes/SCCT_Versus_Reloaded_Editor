@@ -1,0 +1,101 @@
+{
+  "format": "scct.level-spec",
+  "version": 1,
+  "map": {"name": "DISK ARENA", "file": "DiskD"},
+  "profile": "release",
+  "geometry": {
+    "pieces": [
+      {"id": "Arena", "kind": "Room", "size": [2048, 2048, 512], "at": [0, 0], "name": "Arena"},
+      {"id": "NorthPlatform", "kind": "Platform", "size": [512, 512, 256], "at": [-640, 640], "name": "North platform"},
+      {"id": "SouthPlatform", "kind": "Platform", "size": [512, 512, 256], "at": [640, -640], "name": "South platform"},
+      {"id": "NorthRamp", "kind": "Ramp", "size": [192, 768, 256], "at": [-640, 0], "name": "North ramp"},
+      {"id": "SouthRamp", "kind": "Ramp", "size": [192, 768, 256], "at": [640, 0], "yaw": 180, "name": "South ramp"},
+      {"id": "SpyRoom", "kind": "Room", "size": [640, 640, 256], "name": "Spy room", "attach": {"to": "Arena", "side": "west"}},
+      {"id": "MercRoom", "kind": "Room", "size": [640, 640, 256], "name": "Merc room", "attach": {"to": "Arena", "side": "east"}}
+    ],
+    "doorways": [
+      {"id": "SpyDoorway", "between": ["SpyRoom", "Arena"], "size": [192, 192]},
+      {"id": "MercDoorway", "between": ["MercRoom", "Arena"], "size": [192, 192]}
+    ]
+  },
+  "zones": [
+    {"id": "ArenaZone", "locationName": "Arena", "spaces": ["Arena"]},
+    {"id": "SpyZone", "locationName": "Spy room", "spaces": ["SpyRoom"]},
+    {"id": "MercZone", "locationName": "Merc room", "spaces": ["MercRoom"]}
+  ],
+  "spawns": {
+    "spy": {"in": "SpyRoom", "count": 4, "facing": {"toward": "Arena"}},
+    "merc": {"in": "MercRoom", "count": 4, "facing": {"toward": "Arena"}}
+  },
+  "gameplay": {
+    "modes": ["story", "diskhunt", "deathmatch"],
+    "story": {
+      "mission": {"id": "Mission", "name": "Arena", "description": "Destroy the generator", "descriptionDef": "Protect the generator"},
+      "objectives": [
+        {"id": "Generator", "name": "Generator", "triggers": [{"id": "GeneratorBomb", "kind": "bomb", "at": [640, -640, 320], "captureTime": 40}]}
+      ]
+    },
+    "diskhunt": {
+      "disks": [
+        {"id": "DiskN1", "at": [-760, 760, 304]},
+        {"id": "DiskN2", "at": [-520, 520, 304]},
+        {"id": "DiskS1", "at": [760, -760, 304]},
+        {"id": "DiskS2", "at": [520, -520, 304]},
+        {"id": "DiskFloor1", "at": [0, 0]},
+        {"id": "DiskFloor2", "at": [-800, -800]},
+        {"id": "DiskFloor3", "at": [800, 800]},
+        {"id": "DiskFloor4", "at": [-200, -700]},
+        {"id": "DiskFloor5", "at": [200, 700]},
+        {"id": "DiskFloor6", "at": [-850, 200]},
+        {"id": "DiskFloor7", "at": [850, -200]},
+        {"id": "DiskFloor8", "at": [0, -900]}
+      ],
+      "resetTime": 25,
+      "mission": {"id": "DiskHuntMission", "description": "Collect eight disks", "descriptionDef": "Stop the spies collecting eight disks"}
+    },
+    "deathmatch": {"disableSecurity": true, "mission": {"id": "DeathmatchMission"}}
+  },
+  "security": {
+    "devices": [
+      {"id": "RampCamera", "kind": "camera", "at": {"in": "Arena", "u": 0.45, "v": 0.45, "h": "ceiling-24"}, "facing": {"toward": "NorthRamp"}, "alarm": "ArenaAlarm"},
+      {"id": "FloorSensor", "kind": "motion", "box": {"min": [-300, -300, 0], "max": [300, 300, 180]}, "alarm": "ArenaAlarm", "detected": "spy"}
+    ],
+    "alarms": [{"id": "ArenaAlarm", "name": "Arena alarm", "description": "Spies on the arena floor", "duration": 20, "priority": 3, "outputs": ["ArenaSpot"]}],
+    "camnet": [
+      {"id": "CamNorth", "camName": "Arena north", "at": {"in": "Arena", "u": -0.45, "v": 0.45, "h": "ceiling-32"}, "first": true, "constraints": {"pitch": [-70, 0], "yaw": [-90, 0]}},
+      {"id": "CamSouth", "camName": "Arena south", "at": {"in": "Arena", "u": 0.45, "v": -0.45, "h": "ceiling-32"}, "constraints": {"pitch": [-70, 0], "yaw": [90, 180]}}
+    ]
+  },
+  "environment": {
+    "lights": [
+      {"id": "ArenaSpot", "preset": "echelon-spot", "in": "Arena", "radius": 1400, "switchable": true},
+      {"id": "ArenaFill", "preset": "ceiling", "at": {"in": "Arena", "u": 0.25, "v": 0.25, "h": "ceiling-24"}, "radius": 1000, "brightness": 48}
+    ],
+    "volumes": [
+      {"id": "ArenaFloorName", "class": "Volume", "box": {"in": "Arena", "height": 192}, "locationName": "Arena floor", "priority": 1}
+    ],
+    "ingredients": [
+      {"kind": "ammo", "in": "MercRoom"},
+      {"kind": "infirmary", "in": "MercRoom"},
+      {"kind": "infirmary", "in": "SpyRoom"}
+    ]
+  },
+  "ges": [
+    {"kind": "ledge", "points": [[384, -880, 256], [384, -400, 256]]},
+    {"kind": "ledge", "points": [[-384, 400, 256], [-384, 880, 256]]},
+    {"kind": "ladder", "points": [[-640, 904, 256], [-640, 904, 0], [-640, 952, 128]]}
+  ],
+  "settings": {
+    "mapName": "DISK ARENA",
+    "briefSpy": "Collect the disks scattered round the arena.",
+    "briefMerc": "Keep the spies off the disks.",
+    "legend": "ARENA|Two platforms and a hall",
+    "modes": [
+      {"mode": "diskhunt", "respawn": 8, "timeLimit": 10, "scoreLimit": 8, "handicap": 10, "numDisksMax": 12},
+      {"mode": "story", "respawn": 10, "timeLimit": 10},
+      {"mode": "deathmatch", "respawn": 6, "timeLimit": 10}
+    ]
+  },
+  "level": {"motionTracking": "enhanced", "deathPawnHeight": -256},
+  "provenance": {"source": "Hand-written example", "notes": "Disk groups cycle 1, 2, 3 in the order listed; platform disks stand 48 units above the platform tops."}
+}

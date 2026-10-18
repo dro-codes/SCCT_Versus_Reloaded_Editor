@@ -1,0 +1,604 @@
+{
+ "defaults": {
+  "construction": "Carve",
+  "lights": "none"
+ },
+ "environment": {
+  "ingredients": [
+   {
+    "at": {
+     "in": "Room5",
+     "u": -0.1429,
+     "v": 0
+    },
+    "id": "Ammo1",
+    "kind": "ammo"
+   },
+   {
+    "at": {
+     "in": "Room5",
+     "u": 0.1429,
+     "v": 0
+    },
+    "id": "Infirmary1",
+    "kind": "infirmary"
+   }
+  ],
+  "lights": [
+   {
+    "at": {
+     "in": "Room3",
+     "u": -0.3125,
+     "v": 0
+    },
+    "id": "Light1",
+    "preset": "ceiling"
+   },
+   {
+    "at": {
+     "in": "Corridor1",
+     "u": 0,
+     "v": -0.2609
+    },
+    "id": "Light2",
+    "preset": "ceiling"
+   }
+  ]
+ },
+ "format": "scct.level-spec",
+ "gameplay": {
+  "diskhunt": {
+   "disks": [
+    {
+     "at": {
+      "in": "Room1",
+      "u": -0.0833,
+      "v": 0.1429
+     },
+     "group": 1,
+     "id": "Disk1"
+    }
+   ]
+  },
+  "modes": [
+   "story",
+   "diskhunt"
+  ],
+  "story": {
+   "objectives": [
+    {
+     "id": "Objective1",
+     "name": "Terminal 1",
+     "triggers": [
+      {
+       "at": {
+        "in": "Room1",
+        "u": -0.0833,
+        "v": 0.2857
+       },
+       "id": "Terminal1",
+       "kind": "terminal"
+      }
+     ]
+    },
+    {
+     "id": "Objective2",
+     "name": "Bomb 1",
+     "triggers": [
+      {
+       "at": {
+        "in": "Room1",
+        "u": -0.0833,
+        "v": -0.1429
+       },
+       "id": "Bomb1",
+       "kind": "bomb"
+      }
+     ]
+    },
+    {
+     "id": "Objective3",
+     "name": "Flag 1",
+     "triggers": [
+      {
+       "at": {
+        "in": "Room1",
+        "u": 0.4167,
+        "v": -0.1429
+       },
+       "dropZones": [
+        {
+         "at": {
+          "in": "Room1",
+          "u": -0.0833,
+          "v": -0.4286
+         },
+         "id": "DropZone1"
+        }
+       ],
+       "id": "Flag1",
+       "kind": "flag"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "geometry": {
+  "doorways": [
+   {
+    "depth": 128,
+    "host": "Room2",
+    "id": "Door1",
+    "offset": 0,
+    "portal": false,
+    "side": "east",
+    "size": [
+     128,
+     196
+    ]
+   },
+   {
+    "depth": 128,
+    "host": "Room1",
+    "id": "Door2",
+    "offset": 256,
+    "portal": false,
+    "side": "east",
+    "size": [
+     128,
+     196
+    ]
+   },
+   {
+    "depth": 128,
+    "host": "Room3",
+    "id": "Door3",
+    "offset": 0,
+    "portal": false,
+    "side": "east",
+    "size": [
+     128,
+     196
+    ]
+   },
+   {
+    "depth": 128,
+    "host": "Room1",
+    "id": "Door4",
+    "offset": -256,
+    "portal": false,
+    "side": "east",
+    "size": [
+     128,
+     196
+    ]
+   },
+   {
+    "between": [
+     "Room2",
+     "Room6"
+    ],
+    "id": "Join1",
+    "portal": false,
+    "size": [
+     128,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Room3",
+     "Room6"
+    ],
+    "id": "Join2",
+    "portal": false,
+    "size": [
+     128,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Room4",
+     "Room7"
+    ],
+    "id": "Join3",
+    "portal": false,
+    "size": [
+     128,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Room5",
+     "Room7"
+    ],
+    "id": "Join4",
+    "portal": false,
+    "size": [
+     128,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Corridor1",
+     "Corridor2"
+    ],
+    "id": "Join5",
+    "portal": false,
+    "size": [
+     1024,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Corridor1",
+     "Corridor3"
+    ],
+    "id": "Join6",
+    "portal": false,
+    "size": [
+     1024,
+     320
+    ]
+   },
+   {
+    "between": [
+     "Corridor1",
+     "Vent1"
+    ],
+    "id": "Join7",
+    "portal": false,
+    "size": [
+     896,
+     128
+    ]
+   },
+   {
+    "between": [
+     "Corridor2",
+     "Vent1"
+    ],
+    "id": "Join8",
+    "portal": false,
+    "size": [
+     128,
+     128
+    ]
+   },
+   {
+    "between": [
+     "Corridor3",
+     "Vent1"
+    ],
+    "id": "Join9",
+    "portal": false,
+    "size": [
+     128,
+     128
+    ]
+   }
+  ],
+  "pieces": [
+   {
+    "at": [
+     64,
+     0
+    ],
+    "id": "Room1",
+    "kind": "Room",
+    "size": [
+     768,
+     896,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     -960,
+     256
+    ],
+    "id": "Room2",
+    "kind": "Room",
+    "size": [
+     1024,
+     384,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     -960,
+     -256
+    ],
+    "id": "Room3",
+    "kind": "Room",
+    "size": [
+     1024,
+     384,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     1024,
+     256
+    ],
+    "id": "Room4",
+    "kind": "Room",
+    "size": [
+     896,
+     384,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     1024,
+     -256
+    ],
+    "id": "Room5",
+    "kind": "Room",
+    "size": [
+     896,
+     384,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     -1024,
+     0
+    ],
+    "id": "Room6",
+    "kind": "Room",
+    "size": [
+     128,
+     128,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     1152,
+     0
+    ],
+    "id": "Room7",
+    "kind": "Room",
+    "size": [
+     128,
+     128,
+     320
+    ],
+    "storey": "Storey0"
+   },
+   {
+    "at": [
+     0,
+     256
+    ],
+    "id": "Corridor1",
+    "kind": "Corridor",
+    "size": [
+     128,
+     2944,
+     320
+    ],
+    "storey": "Storey1",
+    "yaw": 90
+   },
+   {
+    "at": [
+     -960,
+     384
+    ],
+    "id": "Corridor2",
+    "kind": "Corridor",
+    "size": [
+     128,
+     1024,
+     320
+    ],
+    "storey": "Storey1",
+    "yaw": 90
+   },
+   {
+    "at": [
+     960,
+     384
+    ],
+    "id": "Corridor3",
+    "kind": "Corridor",
+    "size": [
+     128,
+     1024,
+     320
+    ],
+    "storey": "Storey1",
+    "yaw": 90
+   },
+   {
+    "at": [
+     0,
+     384
+    ],
+    "id": "Vent1",
+    "kind": "Vent",
+    "size": [
+     128,
+     896,
+     128
+    ],
+    "storey": "Storey1",
+    "yaw": 90
+   }
+  ]
+ },
+ "map": {
+  "name": "GRID TEST"
+ },
+ "profile": "draft",
+ "provenance": {
+  "notes": [
+   "Each grid cell is 128 units square; row 1 is the north edge and columns run west to east, centred on the origin.",
+   "Storey N stands at z = N x 384; rooms are 320 units tall and vents 128; a rectangle 256 units wide or less is a corridor.",
+   "D cells are doorways 196 units tall without zone portals; pass doorMesh for door movers.",
+   "Spaces that touch are joined by full-width openings without zone portals (autoDoorways false leaves them out).",
+   "Cameras and lasers all report to one alarm, Alarm1.",
+   "The plan places its own lights, so rooms get no automatic ceiling lights (defaults.lights \"none\")."
+  ],
+  "source": {
+   "format": "grid"
+  }
+ },
+ "security": {
+  "alarms": [
+   {
+    "id": "Alarm1"
+   }
+  ],
+  "camnet": [
+   {
+    "at": {
+     "in": "Corridor2",
+     "u": 0,
+     "v": 0.1875
+    },
+    "first": true,
+    "id": "CamNet1",
+    "yaw": 270
+   },
+   {
+    "at": {
+     "in": "Corridor3",
+     "u": 0,
+     "v": -0.1875
+    },
+    "first": false,
+    "id": "CamNet2",
+    "yaw": 270
+   }
+  ],
+  "devices": [
+   {
+    "alarm": "Alarm1",
+    "at": {
+     "in": "Room3",
+     "u": -0.0625,
+     "v": 0.3333
+    },
+    "id": "Camera1",
+    "kind": "camera"
+   },
+   {
+    "alarm": "Alarm1",
+    "at": {
+     "in": "Room5",
+     "u": 0,
+     "v": 0.3333
+    },
+    "id": "Laser1",
+    "kind": "laser"
+   }
+  ]
+ },
+ "spawns": {
+  "merc": [
+   {
+    "at": {
+     "in": "Room4",
+     "u": 0.1429,
+     "v": 0.3333
+    },
+    "id": "MercStart1",
+    "yaw": 200.6
+   },
+   {
+    "at": {
+     "in": "Room4",
+     "u": 0.4286,
+     "v": 0.3333
+    },
+    "id": "MercStart2",
+    "yaw": 196.7
+   },
+   {
+    "at": {
+     "in": "Room4",
+     "u": 0.1429,
+     "v": -0.3333
+    },
+    "id": "MercStart3",
+    "yaw": 187.1
+   },
+   {
+    "at": {
+     "in": "Room4",
+     "u": 0.4286,
+     "v": -0.3333
+    },
+    "id": "MercStart4",
+    "yaw": 185.7
+   }
+  ],
+  "spy": [
+   {
+    "at": {
+     "in": "Room2",
+     "u": -0.4375,
+     "v": 0.3333
+    },
+    "id": "SpyStart1",
+    "yaw": 346
+   },
+   {
+    "at": {
+     "in": "Room2",
+     "u": -0.1875,
+     "v": 0.3333
+    },
+    "id": "SpyStart2",
+    "yaw": 343.3
+   },
+   {
+    "at": {
+     "in": "Room2",
+     "u": -0.4375,
+     "v": -0.3333
+    },
+    "id": "SpyStart3",
+    "yaw": 355.2
+   },
+   {
+    "at": {
+     "in": "Room2",
+     "u": -0.1875,
+     "v": -0.3333
+    },
+    "id": "SpyStart4",
+    "yaw": 354.3
+   }
+  ]
+ },
+ "storeys": [
+  {
+   "id": "Storey0",
+   "z": 0
+  },
+  {
+   "id": "Storey1",
+   "z": 384
+  }
+ ],
+ "version": 1
+}

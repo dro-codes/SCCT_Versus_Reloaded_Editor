@@ -1,0 +1,225 @@
+Begin Map
+Begin Actor Class=LevelInfo Name=LevelInfo0
+    TimeSeconds=0.000000
+End Actor
+Begin Actor Class=Brush Name=Brush0
+    MainScale=(SheerAxis=SHEER_ZX)
+    PostScale=(SheerAxis=SHEER_ZX)
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=Brush
+    Location=(X=0.000000,Y=0.000000,Z=0.000000)
+    Begin Brush Name=Brush
+       Begin PolyList
+          Begin Polygon
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+          End Polygon
+       End PolyList
+    End Brush
+    Brush=Model'MyLevel.Brush'
+    Name=Brush0
+End Actor
+Begin Actor Class=Brush Name=Brush1
+    CsgOper=CSG_Subtract
+    MainScale=(Scale=(X=2.000000,Y=1.000000,Z=1.000000),SheerAxis=SHEER_ZX)
+    PostScale=(SheerAxis=SHEER_ZX)
+    PrePivot=(X=0.000000,Y=0.000000,Z=-128.000000)
+    Location=(X=512.000000,Y=0.000000,Z=128.000000)
+    Rotation=(Yaw=16384)
+    Begin Brush Name=Model1
+       Begin PolyList
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+          End Polygon
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+          End Polygon
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   -00128.000000,-00128.000000,+00128.000000
+             Vertex   +00128.000000,-00128.000000,+00128.000000
+             Vertex   +00128.000000,+00128.000000,+00128.000000
+             Vertex   -00128.000000,+00128.000000,+00128.000000
+          End Polygon
+          Begin Polygon Texture=Bunker.Walls.Concrete Flags=0 Link=0
+             Vertex   -00128.000000,-00128.000000,-00128.000000
+             Vertex   -00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,+00128.000000,-00128.000000
+             Vertex   +00128.000000,-00128.000000,-00128.000000
+          End Polygon
+       End PolyList
+    End Brush
+    Brush=Model'MyLevel.Model1'
+    Name=Brush1
+End Actor
+Begin Actor Class=Brush Name=Brush2
+    CsgOper=CSG_Add
+    PolyFlags=32
+    MainScale=(Scale=(X=-1.000000,Y=1.000000,Z=1.000000),SheerAxis=SHEER_ZX)
+    Location=(X=512.000000,Y=0.000000,Z=0.000000)
+    Begin Brush Name=Model2
+       Begin PolyList
+          Begin Polygon
+             Vertex   +00032.000000,-00032.000000,+00000.000000
+             Vertex   +00032.000000,+00032.000000,+00000.000000
+             Vertex   +00032.000000,+00032.000000,+00064.000000
+             Vertex   +00032.000000,-00032.000000,+00064.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00032.000000,-00032.000000,+00000.000000
+             Vertex   -00032.000000,-00032.000000,+00064.000000
+             Vertex   -00032.000000,+00032.000000,+00064.000000
+             Vertex   -00032.000000,+00032.000000,+00000.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00032.000000,+00032.000000,+00000.000000
+             Vertex   -00032.000000,+00032.000000,+00064.000000
+             Vertex   +00032.000000,+00032.000000,+00064.000000
+             Vertex   +00032.000000,+00032.000000,+00000.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00032.000000,-00032.000000,+00000.000000
+             Vertex   +00032.000000,-00032.000000,+00000.000000
+             Vertex   +00032.000000,-00032.000000,+00064.000000
+             Vertex   -00032.000000,-00032.000000,+00064.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00032.000000,-00032.000000,+00064.000000
+             Vertex   +00032.000000,-00032.000000,+00064.000000
+             Vertex   +00032.000000,+00032.000000,+00064.000000
+             Vertex   -00032.000000,+00032.000000,+00064.000000
+          End Polygon
+          Begin Polygon
+             Vertex   -00032.000000,-00032.000000,+00000.000000
+             Vertex   -00032.000000,+00032.000000,+00000.000000
+             Vertex   +00032.000000,+00032.000000,+00000.000000
+             Vertex   +00032.000000,-00032.000000,+00000.000000
+          End Polygon
+       End PolyList
+    End Brush
+End Actor
+Begin Actor Class=PlayerStart Name=PlayerStart0
+    TeamNumber=1
+    Location=(X=100.000000,Y=50.000000,Z=48.000000)
+    Rotation=(Yaw=32768)
+End Actor
+Begin Actor Class=PlayerStart Name=PlayerStart1
+    Location=(X=-100.000000,Y=50.000000,Z=48.000000)
+End Actor
+Begin Actor Class=Light Name=Light3
+    LightEffect=LE_Spotlight
+    LightBrightness=180.000000
+    Location=(X=0.000000,Y=0.000000,Z=200.000000)
+    Rotation=(Pitch=-16384,Yaw=16384)
+End Actor
+Begin Actor Class=StaticMeshActor Name=StaticMeshActor7
+    StaticMesh=StaticMesh'Crates.Wood.Crate01'
+    DrawScale3D=(X=2.000000,Y=2.000000,Z=1.000000)
+    Location=(X=-64.000000,Y=64.000000,Z=0.000000)
+    Rotation=(Yaw=8192)
+    Tag=Crate
+End Actor
+Begin Actor Class=BlockingVolume Name=BlockingVolume0
+    Location=(X=256.000000,Y=0.000000,Z=0.000000)
+    Begin Brush Name=Model3
+       Begin PolyList
+          Begin Polygon
+             Vertex   +00064.000000,+00000.000000,+00000.000000
+             Vertex   +00064.000000,+00064.000000,+00000.000000
+             Vertex   +00064.000000,+00064.000000,+00032.000000
+             Vertex   +00064.000000,+00000.000000,+00032.000000
+          End Polygon
+          Begin Polygon
+             Vertex   +00000.000000,+00000.000000,+00000.000000
+             Vertex   +00000.000000,+00000.000000,+00032.000000
+             Vertex   +00000.000000,+00064.000000,+00032.000000
+             Vertex   +00000.000000,+00064.000000,+00000.000000
+          End Polygon
+          Begin Polygon
+             Vertex   +00000.000000,+00064.000000,+00000.000000
+             Vertex   +00000.000000,+00064.000000,+00032.000000
+             Vertex   +00064.000000,+00064.000000,+00032.000000
+             Vertex   +00064.000000,+00064.000000,+00000.000000
+          End Polygon
+          Begin Polygon
+             Vertex   +00000.000000,+00000.000000,+00000.000000
+             Vertex   +00064.000000,+00000.000000,+00000.000000
+             Vertex   +00064.000000,+00000.000000,+00032.000000
+             Vertex   +00000.000000,+00000.000000,+00032.000000
+          End Polygon
+          Begin Polygon
+             Vertex   +00000.000000,+00000.000000,+00032.000000
+             Vertex   +00064.000000,+00000.000000,+00032.000000
+             Vertex   +00064.000000,+00064.000000,+00032.000000
+             Vertex   +00000.000000,+00064.000000,+00032.000000
+          End Polygon
+          Begin Polygon
+             Vertex   +00000.000000,+00000.000000,+00000.000000
+             Vertex   +00000.000000,+00064.000000,+00000.000000
+             Vertex   +00064.000000,+00064.000000,+00000.000000
+             Vertex   +00064.000000,+00000.000000,+00000.000000
+          End Polygon
+       End PolyList
+    End Brush
+End Actor
+Begin Actor Class=SBase.SMagicEvent Name=SMagicEvent0
+    Tag=Fireworks
+    Groups(0)=(EventGroup=((Event=Boom,Delay=1.000000)),Sequence=False)
+    Groups(1)=(EventGroup=((Event=Bang,Delay=2.000000)))
+    Location=(X=0.000000,Y=0.000000,Z=0.000000)
+End Actor
+Begin Actor Class=Mover Name=Mover0
+    Location=(X=0.000000,Y=0.000000,Z=0.000000)
+End Actor
+Begin Actor Class=Camera Name=Camera0
+End Actor
+End Map

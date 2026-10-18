@@ -1,0 +1,23 @@
+{ "compressionlevel":-1, "height":6, "infinite":false, "orientation":"orthogonal", "renderorder":"right-down",
+  "tiledversion":"1.10.2", "tileheight":32, "tilewidth":32, "type":"map", "version":"1.10", "width":8, "nextlayerid":3, "nextobjectid":5,
+  "tilesets":[ { "firstgid":1, "name":"plan", "tilecount":4, "tilewidth":32, "tileheight":32, "columns":4, "image":"plan.png", "imagewidth":128, "imageheight":32,
+     "tiles":[ {"id":0, "type":"floor"},
+               {"id":1, "properties":[{"name":"kind", "type":"string", "value":"wall"}]},
+               {"id":2, "class":"spy"},
+               {"id":3, "class":"merc"} ] } ],
+  "layers":[
+    { "id":1, "name":"Ground", "type":"tilelayer", "width":8, "height":6, "x":0, "y":0, "opacity":1, "visible":true,
+      "data":[2,2,2,2,2,2,2,2,
+              2,3,1,1,1,1,4,2,
+              2,3,1,1,1,1,4,2,
+              2,3,1,1,1,1,4,2,
+              2,1,1,1,1,1,1,2,
+              2,2,2,2,2,2,2,2] },
+    { "id":2, "name":"Markers", "type":"objectgroup", "opacity":1, "visible":true, "x":0, "y":0, "draworder":"topdown",
+      "objects":[
+        { "id":1, "name":"Server", "type":"terminal", "x":112, "y":80, "width":0, "height":0, "rotation":0, "visible":true, "point":true },
+        { "id":2, "name":"", "class":"camnet", "x":176, "y":48, "width":0, "height":0, "rotation":0, "visible":true, "point":true,
+          "properties":[{"name":"yaw", "type":"float", "value":180}] },
+        { "id":3, "name":"vault", "type":"room", "x":224, "y":32, "width":64, "height":96, "rotation":0, "visible":true },
+        { "id":4, "name":"beam", "type":"laser", "x":240, "y":40, "width":0, "height":0, "rotation":0, "visible":true,
+          "polyline":[{"x":0, "y":0}, {"x":0, "y":80}] } ] } ] }

@@ -108,6 +108,15 @@ namespace Thumbnail
         return size;
     }
 
+    // A picture at most maxEdge pixels on its longer side, the aspect kept,
+    // never enlarged: the MCP bridge's viewport screenshots.
+    inline Size Within(int sourceWidth, int sourceHeight, int maxEdge)
+    {
+        if (sourceWidth <= 0 || sourceHeight <= 0 || maxEdge <= 0) throw std::runtime_error("The viewport has no size to capture.");
+        if ((std::max)(sourceWidth, sourceHeight) <= maxEdge) return { sourceWidth, sourceHeight };
+        return Fit(sourceWidth, sourceHeight, maxEdge, maxEdge);
+    }
+
     // Where a picture sits inside a list cell: fitted whole, centred.
     struct Rect { int x = 0, y = 0, width = 0, height = 0; };
     inline Rect Letterbox(int imageWidth, int imageHeight, int cellWidth = kCellWidth, int cellHeight = kCellHeight)

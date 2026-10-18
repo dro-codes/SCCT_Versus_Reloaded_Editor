@@ -14,6 +14,8 @@ param(
     [switch]$OptimiseAssetsOnly,
     # A map copied into the disposable MapsEd for the Optimise Map Assets full-size check.
     [string]$OptimiseExtraMap,
+    # Only the MCP bridge section (tests/McpBridgeNativeNotes.md).
+    [switch]$McpBridgeOnly,
     [switch]$ImportBaseline,
     [switch]$ReopenOnly,
     [switch]$RootOutside,
@@ -149,11 +151,12 @@ source=$inputMap
 destination=$outputMap
 editor_dll=$injectedDll
 generate_fixture=$([int][bool]$GenerateFixture)
-workflow_tools=$([int][bool]($WorkflowTools -or $BrushGridSnapOnly -or $CharacterPreviewOnly -or $StairSmoothOnly -or $OptimiseAssetsOnly))
+workflow_tools=$([int][bool]($WorkflowTools -or $BrushGridSnapOnly -or $CharacterPreviewOnly -or $StairSmoothOnly -or $OptimiseAssetsOnly -or $McpBridgeOnly))
 brush_grid_snap_only=$([int][bool]$BrushGridSnapOnly)
 character_preview_only=$([int][bool]$CharacterPreviewOnly)
 stair_smooth_only=$([int][bool]$StairSmoothOnly)
 optimise_only=$([int][bool]$OptimiseAssetsOnly)
+mcp_bridge_only=$([int][bool]$McpBridgeOnly)
 import_baseline=$([int][bool]$ImportBaseline)
 reopen_only=$([int][bool]$ReopenOnly)
 root_outside=$([int][bool]$RootOutside)
@@ -235,7 +238,7 @@ try {
                 $failed = @($lines | Where-Object { $_ -match '^workflow_fail ' })
                 if ($failed.Count) { Write-Output ('' + $failed.Count + ' check(s) failed:'); $failed | ForEach-Object { Write-Output ('  ' + $_.Substring(14)) } }
                 if ($result -match '(?m)^FAIL ') { throw 'Native map recovery test failed.' }
-                if ($WorkflowTools -and !$BrushGridSnapOnly -and !$CharacterPreviewOnly -and !$StairSmoothOnly -and !$OptimiseAssetsOnly -and !$workflowRestarted) {
+                if ($WorkflowTools -and !$BrushGridSnapOnly -and !$CharacterPreviewOnly -and !$StairSmoothOnly -and !$OptimiseAssetsOnly -and !$McpBridgeOnly -and !$workflowRestarted) {
                     $owned = Get-Process -Id $editorProcessId -ErrorAction Stop
                     if ($owned.Path -ne $testExecutable) { throw 'Unexpected isolated editor path.' }
                     Stop-Process -Id $editorProcessId -Force

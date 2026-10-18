@@ -780,6 +780,91 @@ game-specific array/structure actor links,
 Save As/map switching, GE selections, and external-binding changes during assembly edits.
 Use disposable source maps and include stale/deleted instance members and missing packages.
 
+## MCP server
+
+The MCP server and its editor bridge are described in [docs/Mcp.md](../docs/Mcp.md).
+Their engine-free parts have their own suites, run by two scripts with the same
+list (keep them in step):
+
+- `tools\test_mcp.cmd`, from an x86 Native Tools Command Prompt for Visual Studio,
+  builds each suite with `cl /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8`
+  and runs it, then builds the whole server and runs `--version` and
+  `--self-test`, which compiles every embedded example and checks the rules
+  report no errors.
+- `tools/test_mcp.sh [-j jobs] [-k] [build dir]` does the same with g++ (or
+  `$CXX`) and `-Wall -Wextra -Wshadow -Werror`, for contributors without MSVC:
+  it builds in parallel, runs one suite at a time, and keeps going after a
+  failure with `-k`. It also runs `python3 tools/mcp/embed_resources.py
+  --check`, which fails when `Reloaded.Editor.Mcp/Embedded.gen.h` no longer
+  matches `Reloaded.Editor.Mcp/Resources`; run the script without `--check` and
+  commit the header after changing a resource.
+
+Both run from the repository root, since several suites read fixtures and
+sources relative to it. CI runs `test_mcp.cmd`, the built exe's `--self-test`
+and the embed check.
+
+| Suite | What it covers |
+| --- | --- |
+| `McpBridgeModelTests` | The pipe's framing and limits, the hello handshake and protocol versions, op policies and error codes. |
+| `McpPlanModelTests` | `mcp.plan` checks: section order, `$bind` pointers, single ops wrapped as plans, refused ops. |
+| `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). The bridge's refusals in `Reloaded.Editor/McpSafetyModel.h`: map-owned packages for imports and Map JSON `texture`/`save`, release folders inside `Releases`, the work folder and `WriteRoots`, and `exec`'s deny list read word by word as the console reads it, with its `FILE=`, `PACKAGE=` and one-command rules. The dialog watchdog's button (by control id, translated labels, OK only alone, closed when none is safe). No DLL source calls `std::min`/`std::max` while `windows.h`'s macros are live, and every Level Properties name the level spec compiler writes is one `settings.edit` accepts. |
+| `MapCheckJsonModelTests` | Map Check rows and summary as JSON (`mapcheck.run`). |
+| `McpProtocolModelTests` | JSON-RPC messages, protocol version negotiation, capabilities, tool and resource JSON, argument checking against schemas. |
+| `McpServerTests` | The server over strings against a FakeBridge: handshake, lists, the session, query and escape tools, resources, prompts, progress, approval, busy and stale replies, cancellation, launch and restart. |
+| `LevelSpecModelTests` | Spec shape checks with JSON pointers, and `Resources/schemas/level-spec.schema.json` equal to the schema the code checks (`--write-schema` rewrites it). |
+| `LevelSpecCompilerTests` | The Versus starter's pieces equal to Map Design's, every section's wiki defaults, plan order, the Map JSON documents, `$bind` shapes, incremental builds, diagnostics at JSON pointers for values the editor cannot take (such as an SMagicEvent delay beyond a day), and the golden plan and render in `tests/mcp/golden` (`--write-golden` rewrites them). |
+| `LevelRulesModelTests` | Every rule in the catalogue has a failing fixture (and all but the summary a passing one), cites a wiki page with a digest, and has the right draft and release severities. |
+| `GeometricEventModelTests` | GE kinds, point order and the wiki's measurements. |
+| `ImageCodecTests` | PNG (every colour type), BMP and TGA decoding against `tests/mcp/fixtures/*.rgba`, inflate and gzip, PNG encoding round trips. |
+| `PlanRenderTests` | Plan size, colours at known points, the golden starter render. |
+| `GridPlanModelTests` | The grid legend, rectangle decomposition, doorways and the golden `grid-basic` spec. |
+| `BrushImportModelTests` | Hammer and Quake brushes clipped to polygons that pass the editor's own polygon check and wind outward. |
+| `ImportersTests` | Every importer on `tests/mcp/fixtures`; each result is a valid spec that compiles with no errors. `--render <dir>` writes the plans as PNGs. |
+| `McpSpecToolsTests` | `level_spec_validate`, `level_build` and the intent tools on all five examples, against a FakeBridge that runs plans as the editor does. |
+| `McpMediaToolsTests` | The media and import tools: frame sampling and scene picking, grids and palettes, `image_convert`, OBJ to ASE, `import_to_spec`, `assets_import`. Video extraction runs only when ffmpeg is on `PATH` (the last line says with or without ffmpeg). |
+| `McpReleaseToolsTests` | The `release` tool against a temporary game folder with a real MapsEd import table and a compressed `<Map>-i.utc`. |
+| `PromptsTests` | The embedded files, every prompt filled, and every tool name and rule id the digests and prompts cite. |
+
+The fixture generators `tests/mcp/fixtures/make_image_fixtures.py` and
+`make_import_fixtures.py` rebuild the binary and computed fixtures.
+
+What only a running editor can show is checked in a disposable copy of the game,
+as the native suites above are (see
+[McpBridgeNativeNotes.md](McpBridgeNativeNotes.md) for each case and what it
+expects):
+
+```powershell
+# The native probe's MCP bridge section (tests/WorkflowNativeTests.h, mcpBridge)
+./tools/run_native_map_recovery_test.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpBridgeOnly
+# The same, preparing the install and turning the server on itself
+./tools/run_mcp_e2e.ps1 -Native -EditorDll ./bin/Reloaded.Editor.dll
+# End to end: Reloaded.Editor.Mcp.exe over stdio against a real editor
+./tools/run_mcp_e2e.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpExe ./bin/Reloaded.Editor.Mcp.exe
+# No game needed: reads the step files and tests the expectation checker
+pwsh tools/run_mcp_e2e.ps1 -CheckScripts
+```
+
+The native section is a pipe client inside the editor (`tests/mcp/McpPipeClient.h`):
+the handshake and protocol mismatch, a second client, refused and blocked ops,
+labels in Undo History and the call history file, dry runs, `stale`, `busy` under
+a modal dialog, a failing plan rolled back with no Undo step, two-step plans as
+one Undo step, `undo.call`, `spec.material`, `build.all`, `mapcheck.run`,
+`ge.add`, screenshots over 256 px, an export over 8 MiB read back through blobs,
+the `map.new`/`map.save`/`map.open` round trip, `design.register`, approval
+(approve, cancel, client cancel, busy while the review is open), Disconnect and
+turning the server off and on.
+
+The end-to-end run starts the editor through the launcher with `-reMcp` in the
+disposable install (`[Mcp] Enabled=1`, approval, raw commands and Play off), runs
+`Reloaded.Editor.Mcp.exe --self-test`, then plays the JSON-RPC steps of
+`tests/mcp/e2e/versus-starter.jsonl`: initialize and the lists, `editor_status`,
+`map_file new`, `level_build` of the Versus starter example, `map_build all`,
+`map_validate release` with no errors, `map_query summary`, `map_file save_as`,
+`editor_restart` and the same summary again, a screenshot, then a one-light
+`map_changes_apply` taken back with `editor_undo`. The transcript
+(`mcp_e2e_transcript.txt`) and the server's stderr (`mcp_stderr.log`) stay in the
+test folder.
+
 ## Map recovery
 
 ClarD soft-body regression (2026-09-13): one native simulation step before

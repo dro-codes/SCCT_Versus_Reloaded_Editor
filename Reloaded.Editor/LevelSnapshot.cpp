@@ -1,8 +1,12 @@
 #include "pch.h"
+#undef min
+#undef max
 #include "LevelSnapshot.h"
 #include "EditorConfigBits.h"
 #include "LevelSnapshotModel.h"
+#include "MinimapModel.h"
 #include "EntryThumbnailModel.h"
+#include "MapAuthoringModel.h"
 #include "WorkflowEditor.h"
 #include "MeasureTool.h"
 #include "logger.h"
@@ -19,6 +23,7 @@ using std::min;
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -54,8 +59,9 @@ namespace
 
     struct Image { Bytes bgr; }; // kSize x kSize, top-down BGR.
 
-    // The largest visible perspective level viewport's window and camera.
-    LevelSnapshot::Perspective PerspectiveViewport()
+    // The largest visible level viewport's window and camera: a perspective
+    // one, or the top view (REN_OrthXY; 14 and 15 are the front and side views).
+    LevelSnapshot::Perspective LevelViewport(bool top)
     {
         const auto configs = Read<uintptr_t>(kViewportConfigs);
         const int count = Read<int>(kViewportCount);
@@ -69,18 +75,20 @@ namespace
             const auto camera = view ? Read<uintptr_t>(view + 0x30) : 0;
             if (!camera) continue;
             const int mode = Read<int>(camera + 0x4fc);
-            if (mode == 13 || mode == 14 || mode == 15) continue; // The orthographic views.
+            if (top ? mode != 13 : (mode == 13 || mode == 14 || mode == 15)) continue;
             const auto window = Read<uintptr_t>(view + 0x1b4);
             const HWND hwnd = window ? Read<HWND>(window + 4) : nullptr;
             if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) continue;
             RECT rc{};
             GetClientRect(hwnd, &rc);
             const long area = static_cast<long>(rc.right - rc.left) * (rc.bottom - rc.top);
-            if (area > bestArea) { best = { hwnd, camera, view }; bestArea = area; }
+            if (area > bestArea) { best = { hwnd, camera, view, i }; bestArea = area; }
         }
-        if (!best.window) throw std::runtime_error("No perspective viewport is open to take the snapshot from.");
+        if (!best.window)
+            throw std::runtime_error(top ? "No top viewport is open. Set one of the editor's viewports to Top." : "No perspective viewport is open to take the snapshot from.");
         return best;
     }
+    LevelSnapshot::Perspective PerspectiveViewport() { return LevelViewport(false); }
 
     // The whole picture squeezed to the snapshot's square, as the stock
     // snapshots are; the game stretches it back into its own box.
@@ -241,6 +249,76 @@ namespace
         return false;
     }
 
+    // The viewport drawn afresh and scaled to the size fit gives for its
+    // client area.
+    std::unique_ptr<Gdiplus::Bitmap> Scaled(const LevelSnapshot::Perspective& perspective, const std::function<Thumbnail::Size(int, int)>& fit)
+    {
+        EnsureGdiplus();
+        const HWND viewport = perspective.window;
+        if (!viewport || !IsWindow(viewport)) throw std::runtime_error("The viewport is gone.");
+        int width = 0, height = 0;
+        const HBITMAP bitmap = GrabViewport(viewport, perspective.viewport, width, height);
+        Thumbnail::Size size;
+        try { size = fit(width, height); }
+        catch (...) { DeleteObject(bitmap); throw; }
+        auto target = std::make_unique<Gdiplus::Bitmap>(size.width, size.height, PixelFormat24bppRGB);
+        bool drawn = false;
+        {
+            Gdiplus::Bitmap source(bitmap, nullptr);
+            if (source.GetLastStatus() == Gdiplus::Ok && target->GetLastStatus() == Gdiplus::Ok)
+            {
+                Gdiplus::Graphics graphics(target.get());
+                graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+                drawn = graphics.DrawImage(&source, Gdiplus::Rect(0, 0, size.width, size.height), 0, 0, width, height, Gdiplus::UnitPixel) == Gdiplus::Ok;
+            }
+        }
+        DeleteObject(bitmap);
+        if (!drawn) throw std::runtime_error("The viewport picture could not be scaled.");
+        return target;
+    }
+
+    void SaveScaled(const LevelSnapshot::Perspective& perspective, const fs::path& file, const std::function<Thumbnail::Size(int, int)>& fit)
+    {
+        CLSID png{};
+        EnsureGdiplus();
+        if (!PngEncoder(png)) throw std::runtime_error("GDI+ has no PNG encoder.");
+        const auto picture = Scaled(perspective, fit);
+        std::error_code error;
+        fs::create_directories(file.parent_path(), error);
+        fs::path temporary = file;
+        temporary += ".tmp";
+        const Gdiplus::Status status = picture->Save(temporary.c_str(), &png, nullptr);
+        if (status != Gdiplus::Ok || !MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING))
+        {
+            fs::remove(temporary, error);
+            throw std::runtime_error("Cannot write the picture " + file.string());
+        }
+    }
+
+    // A bitmap as PNG file bytes, encoded in memory.
+    std::string PngBytes(Gdiplus::Bitmap& bitmap)
+    {
+        CLSID png{};
+        if (!PngEncoder(png)) throw std::runtime_error("GDI+ has no PNG encoder.");
+        IStream* stream = nullptr;
+        if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) || !stream) throw std::runtime_error("No memory for the picture.");
+        std::string bytes;
+        STATSTG stat{};
+        if (bitmap.Save(stream, &png, nullptr) == Gdiplus::Ok && SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME))
+            && stat.cbSize.QuadPart > 0 && stat.cbSize.QuadPart < (256ull << 20))
+        {
+            bytes.resize(static_cast<size_t>(stat.cbSize.QuadPart));
+            LARGE_INTEGER start{};
+            ULONG read = 0;
+            if (FAILED(stream->Seek(start, STREAM_SEEK_SET, nullptr)) || FAILED(stream->Read(bytes.data(), static_cast<ULONG>(bytes.size()), &read)) || read != bytes.size())
+                bytes.clear();
+        }
+        stream->Release();
+        if (bytes.empty()) throw std::runtime_error("The picture could not be encoded as PNG.");
+        return bytes;
+    }
+
     // A cell-sized 32-bit bitmap, opaque, with the window colour behind
     // whatever draw() puts on it.
     HBITMAP Cell(int width, int height, const std::function<void(Gdiplus::Graphics&)>& draw)
@@ -312,10 +390,19 @@ namespace
         Snapshot::Verified verified;
     };
 
-    // Into the map's interface package: the BMP for the editor's importer,
-    // the existing package loaded so nothing else in it is lost, the import,
-    // the stock save, and a check of what landed on disk.
-    Written Apply(const Image& image)
+    // How a picture goes into the interface package: the texture's name and
+    // size, the importer's options, and the format to compress it to (none:
+    // as the importer made it) that the saved package must then hold.
+    struct Import
+    {
+        std::string name = "Menu", options = "MIPS=0", compress;
+        int size = Snapshot::kSize, format = -1;
+    };
+
+    // Into the map's interface package: the existing package loaded so nothing
+    // else in it is lost, the import of source, the stock save, and a check of
+    // what landed on disk. The files it replaced are put back when it fails.
+    Written Apply(const fs::path& source, const Import& import)
     {
         const fs::path map = Editor::MapFile();
         const std::string stem = map.stem().string();
@@ -326,9 +413,7 @@ namespace
         fs::create_directories(textures, error);
 
         Written written;
-        written.bmp = Editor::Directory() / "snapshots" / (stem + "-menu.bmp");
-        fs::create_directories(written.bmp.parent_path(), error);
-        WriteFile(written.bmp, Snapshot::Bmp24(Snapshot::kSize, Snapshot::kSize, image.bgr));
+        written.bmp = source;
 
         // What is there now: backed up beside the editor's other files, and
         // loaded so the loading screens and map settings ride along.
@@ -351,8 +436,9 @@ namespace
         // package back from the file, losing settings changed since.
         Editor::Exec("LOADMAPPROP MAP=\"" + stem + "\"");
 
-        if (!Editor::Exec("TEXTURE IMPORT FILE=" + Quote(written.bmp) + " NAME=\"Menu\" PACKAGE=\"" + package + "\" MIPS=0"))
-            throw std::runtime_error("The editor's texture importer refused the snapshot.");
+        if (!Editor::Exec("TEXTURE IMPORT FILE=" + Quote(source) + " NAME=\"" + import.name + "\" PACKAGE=\"" + package + "\" " + import.options))
+            throw std::runtime_error("The editor's texture importer refused the picture for " + import.name + ".");
+        if (!import.compress.empty()) Editor::Exec("TEXTURE COMPRESS NAME=" + package + "." + import.name + " FORMAT=" + import.compress);
 
         const auto started = std::chrono::file_clock::now();
         try
@@ -370,7 +456,11 @@ namespace
             if (!saved) saved = Editor::Exec("OBJ SAVEPACKAGE PACKAGE=\"" + package + "\" FILE=" + Quote(utc));
             if (!saved || !landed()) throw std::runtime_error("The editor did not write " + utc.string());
             const Bytes packageBytes = Unpack(ReadFile(utc));
-            written.verified = Snapshot::Verify(packageBytes, previousExports);
+            written.verified.menu = Minimap::VerifyTexture(packageBytes, import.name, import.size, previousExports);
+            written.verified.exportCount = Snapshot::Parse(packageBytes).exports.size();
+            if (import.format >= 0 && written.verified.menu.format != import.format)
+                throw std::runtime_error("The " + import.name + " texture was saved in format " + std::to_string(written.verified.menu.format)
+                                         + ", not " + std::to_string(import.format) + " (" + (import.compress.empty() ? std::string("the file's own") : import.compress) + ").");
             written.utc = utc;
             // Whichever of the two the game opens first, both now hold the new picture.
             if (fs::exists(utx, error)) { WriteFile(utx, packageBytes); written.utx = utx; }
@@ -459,7 +549,12 @@ namespace
     }
     void Finish(const Image& image)
     {
-        const Written written = Apply(image);
+        const std::string stem = fs::path(Editor::MapFile()).stem().string();
+        const fs::path bmp = Editor::Directory() / "snapshots" / (stem + "-menu.bmp");
+        std::error_code error;
+        fs::create_directories(bmp.parent_path(), error);
+        WriteFile(bmp, Snapshot::Bmp24(Snapshot::kSize, Snapshot::kSize, image.bgr));
+        const Written written = Apply(bmp, Import{});
         Logger::log("Level snapshot: wrote " + written.utc.string());
         ShowPreview(image, written);
     }
@@ -491,41 +586,190 @@ void LevelSnapshot::FromImageFile()
 
 LevelSnapshot::Perspective LevelSnapshot::FindPerspective() { return PerspectiveViewport(); }
 
+LevelSnapshot::Perspective LevelSnapshot::FindViewport(const std::string& kind)
+{
+    if (kind.empty() || kind == "perspective") return LevelViewport(false);
+    if (kind == "top") return LevelViewport(true);
+    throw std::runtime_error("The viewport is \"perspective\" or \"top\".");
+}
+
 void LevelSnapshot::SaveViewportThumbnail(const Perspective& perspective, const fs::path& file)
 {
-    EnsureGdiplus();
-    const HWND viewport = perspective.window;
-    if (!viewport || !IsWindow(viewport)) throw std::runtime_error("The perspective viewport is gone.");
-    CLSID png{};
-    if (!PngEncoder(png)) throw std::runtime_error("GDI+ has no PNG encoder.");
-    int width = 0, height = 0;
-    const HBITMAP bitmap = GrabViewport(viewport, perspective.viewport, width, height);
-    const auto size = Thumbnail::Fit(width, height);
-    std::error_code error;
-    fs::create_directories(file.parent_path(), error);
-    fs::path temporary = file;
-    temporary += ".tmp";
-    Gdiplus::Status status = Gdiplus::GenericError;
+    SaveScaled(perspective, file, [](int width, int height) { return Thumbnail::Fit(width, height); });
+}
+
+void LevelSnapshot::SaveViewportImage(const Perspective& viewport, const fs::path& file, int maxEdge)
+{
+    SaveScaled(viewport, file, [maxEdge](int width, int height) { return Thumbnail::Within(width, height, maxEdge); });
+}
+
+LevelSnapshot::Picture LevelSnapshot::ViewportImage(const Perspective& viewport, int maxEdge)
+{
+    const auto picture = Scaled(viewport, [maxEdge](int width, int height) { return Thumbnail::Within(width, height, maxEdge); });
+    Picture result;
+    result.width = static_cast<int>(picture->GetWidth());
+    result.height = static_cast<int>(picture->GetHeight());
+    result.png = PngBytes(*picture);
+    return result;
+}
+
+namespace
+{
+    // The interface package's pictures, as the wiki's Map Settings page lists them.
+    struct Slot { const char* name; int size; int format; const char* compress; bool alpha; };
+    constexpr Slot kSlots[] = {
+        { "Menu", 256, Snapshot::kFormatDxt5, "DXT5", true },
+        { "Briefing", 256, Snapshot::kFormatDxt5, "DXT5", true },
+        { "LoadingATT0", 512, Snapshot::kFormatDxt1, "DXT1", false },
+        { "LoadingDEF0", 512, Snapshot::kFormatDxt1, "DXT1", false },
+    };
+
+    // The whole picture squeezed to size x size as top-down RGBA, alpha kept,
+    // as the stock pictures are drawn into their square.
+    Bytes ResampleRgba(Gdiplus::Bitmap& source, int size)
     {
-        Gdiplus::Bitmap source(bitmap, nullptr);
-        Gdiplus::Bitmap target(size.width, size.height, PixelFormat24bppRGB);
-        if (source.GetLastStatus() == Gdiplus::Ok && target.GetLastStatus() == Gdiplus::Ok)
+        if (source.GetLastStatus() != Gdiplus::Ok || !source.GetWidth() || !source.GetHeight()) throw std::runtime_error("The image could not be read.");
+        if (source.GetWidth() > 16384 || source.GetHeight() > 16384) throw std::runtime_error("The image is larger than 16384 pixels on a side.");
+        Gdiplus::Bitmap target(size, size, PixelFormat32bppARGB);
         {
-            {
-                Gdiplus::Graphics graphics(&target);
-                graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-                graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-                graphics.DrawImage(&source, Gdiplus::Rect(0, 0, size.width, size.height), 0, 0, width, height, Gdiplus::UnitPixel);
-            }
-            status = target.Save(temporary.c_str(), &png, nullptr);
+            Gdiplus::Graphics graphics(&target);
+            graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+            graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+            graphics.DrawImage(&source, Gdiplus::Rect(0, 0, size, size), 0, 0, static_cast<INT>(source.GetWidth()), static_cast<INT>(source.GetHeight()), Gdiplus::UnitPixel);
         }
+        Gdiplus::BitmapData data{};
+        Gdiplus::Rect rect(0, 0, size, size);
+        if (target.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &data) != Gdiplus::Ok) throw std::runtime_error("The picture could not be read back.");
+        Bytes rgba(static_cast<size_t>(size) * size * 4);
+        for (int y = 0; y < size; ++y)
+        {
+            const auto* row = static_cast<const std::uint8_t*>(data.Scan0) + static_cast<ptrdiff_t>(y) * data.Stride;
+            for (int x = 0; x < size; ++x)
+            {
+                auto* out = &rgba[(static_cast<size_t>(y) * size + x) * 4];
+                out[0] = row[x * 4 + 2]; out[1] = row[x * 4 + 1]; out[2] = row[x * 4]; out[3] = row[x * 4 + 3];
+            }
+        }
+        target.UnlockBits(&data);
+        return rgba;
     }
-    DeleteObject(bitmap);
-    if (status != Gdiplus::Ok || !MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING))
+
+    // A path for a message from the bridge, which carries UTF-8.
+    std::string Shown(const fs::path& path) { return Workflow::Authoring::Utf8Text(path); }
+
+    // The engine's console reads ANSI and stops at quotes. Checked as UTF-8:
+    // a name the code page cannot hold turns into question marks in ANSI.
+    void CheckEnginePath(const fs::path& path)
     {
-        fs::remove(temporary, error);
-        throw std::runtime_error("Cannot write the thumbnail " + file.string());
+        const auto text = Shown(path);
+        for (unsigned char c : text)
+            if (c < 0x20 || c >= 0x80 || c == '"')
+                throw std::runtime_error("The editor's importer cannot open " + text + ": the path must be plain ASCII without quotes. Copy the file somewhere with such a path.");
     }
+}
+
+namespace
+{
+    const char* FormatName(int format)
+    {
+        static const char* formats[] = { "P8", "RGBA7", "RGB16", "DXT1", "RGB8", "RGBA8", "NODATA", "DXT3", "DXT5", "L8", "G16", "RRRGGGBBB" };
+        return format >= 0 && format < 12 ? formats[format] : "unknown";
+    }
+}
+
+Workflow::Json LevelSnapshot::DescribeInterfacePackage()
+{
+    const std::string stem = fs::path(Editor::MapFile()).stem().string();
+    Workflow::Json result{ { "package", nullptr }, { "saved", false }, { "settings", false }, { "textures", Workflow::Json::object() } };
+    if (stem.empty()) return result;
+    const std::string package = Snapshot::PackageName(stem);
+    const fs::path utc = Editor::Directory().parent_path().parent_path() / "Packages" / "Textures" / (package + ".utc");
+    result["package"] = package;
+    result["file"] = utc.string();
+    std::error_code error;
+    if (!fs::is_regular_file(utc, error)) return result;
+    result["saved"] = true;
+    const Bytes bytes = Unpack(ReadFile(utc));
+    const auto tables = Snapshot::Parse(bytes);
+    result["exports"] = tables.exports.size();
+    result["settings"] = tables.Find("MapSettings", "SMapSettings") != nullptr;
+    for (const auto& slot : kSlots)
+        if (const auto* e = tables.Find(slot.name, "Texture"))
+            try
+            {
+                const auto t = Snapshot::DescribeTexture(bytes, tables, *e);
+                result["textures"][slot.name] = { { "width", t.width }, { "height", t.height }, { "format", FormatName(t.format) }, { "mips", t.mips },
+                                                  { "expected", { { "size", slot.size }, { "format", slot.compress } } } };
+            }
+            catch (const std::exception& problem) { result["textures"][slot.name] = { { "unreadable", problem.what() } }; }
+    return result;
+}
+
+Workflow::Json LevelSnapshot::ApplyInterfaceTexture(const std::string& slotName, const fs::path& image)
+{
+    const Slot* slot = nullptr;
+    for (const auto& candidate : kSlots) if (Thumbnail::Lower(slotName) == Thumbnail::Lower(candidate.name)) slot = &candidate;
+    if (!slot) throw std::runtime_error("The interface texture slot is Menu, Briefing, LoadingATT0 or LoadingDEF0.");
+    const std::string stem = fs::path(Editor::MapFile()).stem().string();
+    const std::string package = Snapshot::PackageName(stem); // The map must have a name first.
+    std::error_code error;
+    if (image.is_relative()) throw std::runtime_error("Give the image's full path: " + Shown(image));
+    if (!fs::is_regular_file(image, error)) throw std::runtime_error("There is no image file at " + Shown(image));
+    const auto extension = Thumbnail::Lower(image.extension().string());
+    Import import;
+    import.name = slot->name;
+    import.size = slot->size;
+    import.format = slot->format;
+    import.compress = slot->compress;
+    import.options = std::string("MIPS=0 MASKED=0 ALPHATEXTURE=") + (slot->alpha ? "1" : "0");
+    fs::path source = image;
+    if (extension == ".dds" || extension == ".tga")
+    {
+        // Read as they are: the size must be the slot's already.
+        std::ifstream in(image, std::ios::binary);
+        std::string header(128, '\0');
+        in.read(header.data(), static_cast<std::streamsize>(header.size()));
+        header.resize(static_cast<size_t>(in.gcount()));
+        const auto size = Workflow::Authoring::ImageSize(header, extension);
+        if (size.first != static_cast<uint32_t>(slot->size) || size.second != static_cast<uint32_t>(slot->size))
+            throw std::runtime_error(std::string(slot->name) + " is " + std::to_string(slot->size) + " x " + std::to_string(slot->size) + "; " + Shown(image.filename())
+                                     + " is " + std::to_string(size.first) + " x " + std::to_string(size.second) + ". Give a PNG to have it fitted, or resize the file.");
+        if (extension == ".dds")
+        {
+            // A DDS keeps its own format (the pixel format's FourCC at byte
+            // 84), so the wrong one is refused before anything is imported.
+            const auto fourCC = header.size() >= 88 ? header.substr(84, 4) : std::string();
+            if (fourCC != slot->compress)
+                throw std::runtime_error(std::string(slot->name) + " is a " + slot->compress + " texture; " + Shown(image.filename()) + " is "
+                                         + (fourCC.empty() || fourCC[0] == '\0' ? std::string("not block-compressed") : fourCC) + ". Save it as " + slot->compress + ", or give a PNG to have it converted.");
+            import.compress.clear();
+        }
+        CheckEnginePath(image);
+    }
+    else if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp" || extension == ".gif" || extension == ".tif" || extension == ".tiff")
+    {
+        EnsureGdiplus();
+        Bytes rgba;
+        {
+            Gdiplus::Bitmap bitmap(image.wstring().c_str());
+            if (bitmap.GetLastStatus() != Gdiplus::Ok) throw std::runtime_error("The image could not be opened: " + Shown(image));
+            rgba = ResampleRgba(bitmap, slot->size);
+        }
+        if (!slot->alpha) for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = 255;
+        source = Editor::Directory() / "snapshots" / (stem + "-" + Thumbnail::Lower(slot->name) + ".tga");
+        fs::create_directories(source.parent_path(), error);
+        WriteFile(source, Minimap::Tga32(slot->size, slot->size, rgba));
+        CheckEnginePath(source);
+    }
+    else throw std::runtime_error("Interface pictures are read from PNG, JPEG, BMP, GIF, TIFF, TGA or DDS files: " + Shown(image.filename()));
+    const Written written = Apply(source, import);
+    Logger::log("Level snapshot: wrote the " + std::string(slot->name) + " texture of " + written.utc.string());
+    Workflow::Json result{ { "slot", slot->name }, { "package", package }, { "file", written.utc.string() },
+                           { "width", written.verified.menu.width }, { "height", written.verified.menu.height },
+                           { "format", FormatName(written.verified.menu.format) }, { "exports", written.verified.exportCount } };
+    if (!written.utx.empty()) result["utx"] = written.utx.string();
+    return result;
 }
 
 HBITMAP LevelSnapshot::LoadThumbnail(const fs::path& file, int width, int height)

@@ -3,6 +3,7 @@
 #include "RealtimeFix.h"
 #include "GEKeybindSwap.h"
 #include "AssetNameGloss.h"
+#include "McpBridge.h"
 #include "ViewportKeysModel.h"
 #include <cstdio>
 #include <cstdlib>
@@ -21,6 +22,8 @@
 #define IDC_CHECK_NO_DUPE_OFFSET    1009
 #define IDC_CHECK_MIN_PLAY          1010
 #define IDC_CHECK_ENGLISH_NAMES     1011
+#define IDC_CHECK_MCP_ENABLED       1012
+#define IDC_CHECK_MCP_APPROVAL      1013
 
 // In-memory DLGTEMPLATE builder
 struct OptionsDialogBuf
@@ -82,9 +85,9 @@ static std::vector<uint8_t> BuildReloadedOptionsDlgTemplate()
 
     b.dw(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_CENTER | DS_SETFONT);
     b.dw(0);
-    b.w(25);              // number of controls
+    b.w(28);              // number of controls
     b.w(0);  b.w(0);      // x, y (DS_CENTER overrides)
-    b.w(290); b.w(218);   // width, height
+    b.w(290); b.w(262);   // width, height
     b.w(0);               // no menu
     b.w(0);               // default class
     b.ws(L"RE+ Options");
@@ -173,12 +176,24 @@ static std::vector<uint8_t> BuildReloadedOptionsDlgTemplate()
                13, 175, 265, 10, IDC_CHECK_ENGLISH_NAMES,
                L"Show English for French asset names");
 
+    // MCP server group (y = 196 to 236): the same switches as RE+ Tools > MCP
+    EmitButton(b, WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+               5, 196, 280, 40, 0xFFFF, L"MCP Server (AI agents)");
+
+    EmitButton(b, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+               13, 209, 265, 10, IDC_CHECK_MCP_ENABLED,
+               L"Enable MCP server (Claude Code, Claude Desktop)");
+
+    EmitButton(b, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+               13, 221, 265, 10, IDC_CHECK_MCP_APPROVAL,
+               L"Require approval for each MCP change");
+
     // OK and Cancel buttons (right-aligned to the wider dialog)
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP,
-               180, 198, 50, 14, IDOK, L"OK");
+               180, 242, 50, 14, IDOK, L"OK");
 
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-               235, 198, 50, 14, IDCANCEL, L"Cancel");
+               235, 242, 50, 14, IDCANCEL, L"Cancel");
 
     return b.buf;
 }
@@ -314,6 +329,11 @@ static INT_PTR CALLBACK ReloadedOptionsDlgProc(
                        AssetNameGloss::Enabled() ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hDlg, IDC_CHECK_MIN_PLAY,
                        g_ReloadedMinimizeOnPlay ? BST_CHECKED : BST_UNCHECKED);
+        {
+            const McpBridge::Settings mcp = McpBridge::Current();
+            CheckDlgButton(hDlg, IDC_CHECK_MCP_ENABLED, mcp.enabled ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hDlg, IDC_CHECK_MCP_APPROVAL, mcp.requireApproval ? BST_CHECKED : BST_UNCHECKED);
+        }
 
         return TRUE;   // let Windows set default focus
 
@@ -409,6 +429,13 @@ static INT_PTR CALLBACK ReloadedOptionsDlgProc(
                 const bool englishNames = IsDlgButtonChecked(hDlg, IDC_CHECK_ENGLISH_NAMES) == BST_CHECKED;
                 if (englishNames != AssetNameGloss::Enabled())
                     AssetNameGloss::SetEnabled(englishNames);
+                // The bridge saves its own keys in [Mcp] and starts or stops the
+                // server, as its menu entries do.
+                const McpBridge::Settings mcp = McpBridge::Current();
+                if ((IsDlgButtonChecked(hDlg, IDC_CHECK_MCP_ENABLED) == BST_CHECKED) != mcp.enabled)
+                    McpBridge::HandleCommand(McpBridge::kEnable);
+                if ((IsDlgButtonChecked(hDlg, IDC_CHECK_MCP_APPROVAL) == BST_CHECKED) != mcp.requireApproval)
+                    McpBridge::HandleCommand(McpBridge::kRequireApproval);
                 EndDialog(hDlg, IDOK);
             }
             return TRUE;

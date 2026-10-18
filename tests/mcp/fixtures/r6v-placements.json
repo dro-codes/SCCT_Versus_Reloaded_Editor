@@ -1,0 +1,5 @@
+[
+ {"component":"Level.Crate_1.StaticMeshComponent0","actor":"Level.Crate_1","mesh":"Props_Vegas.Crates.CrateLarge","location":[100,200,0],"rotation":[0,16384,0],"scale":1,"scale3d":[1,1,2],"component_properties":{}},
+ {"component":"Level.Sign_2.StaticMeshComponent0","actor":"Level.Sign_2","mesh":"Props_Vegas.Signs.Neon","location":[-50,0,300],"rotation":[0,0,0],"scale":2,"scale3d":[-1,1,1],"component_properties":{"Rotation":[0,16384,0]}},
+ {"component":"Level.Empty_3.StaticMeshComponent0","actor":"Level.Empty_3","mesh":"None","location":[0,0,0],"rotation":[0,0,0],"scale":1,"scale3d":[1,1,1],"component_properties":{}}
+]

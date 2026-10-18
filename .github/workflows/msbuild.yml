@@ -72,6 +72,39 @@ jobs:
         "%TEMP%\GridSizeShortcutTests.exe"
         if errorlevel 1 exit /b 1
 
+    # The media tests read video through Media Foundation, which Windows Server
+    # only has as an optional feature; the 32-bit tests need the SysWOW64 copy.
+    - name: Media Foundation for the MCP media tests
+      shell: powershell
+      continue-on-error: true
+      run: |
+        if (Test-Path "$env:SystemRoot\SysWOW64\mfplat.dll") { 'Media Foundation is installed.'; exit 0 }
+        Install-WindowsFeature Server-Media-Foundation | Format-List | Out-String | Write-Output
+
+    - name: Test the MCP server
+      shell: cmd
+      run: |
+        for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+        if errorlevel 1 exit /b 1
+        call tools\test_mcp.cmd
+        if errorlevel 1 exit /b 1
+
+    - name: MCP server self-test
+      shell: cmd
+      run: |
+        bin\Reloaded.Editor.Mcp.exe --version
+        if not "%errorlevel%"=="0" exit /b 1
+        bin\Reloaded.Editor.Mcp.exe --self-test
+        if not "%errorlevel%"=="0" exit /b 1
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Check the embedded MCP resources
+      # Embedded.gen.h is committed; it must match Reloaded.Editor.Mcp/Resources.
+      run: python tools/mcp/embed_resources.py --check
+
     - name: Get current date
       id: date
       run: '"current_date=$(Get-Date -Format yyyyMMddHHmmss)" >> $env:GITHUB_OUTPUT'
@@ -87,7 +120,8 @@ jobs:
     
         # A file, directory or wildcard pattern that describes what to upload
         # Required.
-        path: bin/Reloaded_Editor.zip
+        # package_release.ps1 names the archive after the version in Version.h.
+        path: bin/Reloaded_Editor_Plus_v*.zip
     
         # The desired behavior if no files are found using the provided path.
         # Available Options:

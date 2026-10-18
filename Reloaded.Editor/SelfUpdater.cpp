@@ -42,6 +42,9 @@ namespace
     // The files a release archive may replace, beside the DLL.
     const char* const kDllName = "Reloaded.Editor.dll";
     const char* const kLauncherName = "Reloaded_Editor.exe";
+    // The MCP server, which an MCP client may be running: like the DLL it is
+    // renamed aside rather than overwritten.
+    const char* const kMcpName = "Reloaded.Editor.Mcp.exe";
 
     fs::path directory;
     std::atomic<bool> busy{false};
@@ -107,6 +110,21 @@ namespace
         WritePrivateProfileStringA(kSection, "RemindAfter", std::to_string(after).c_str(), IniPath().c_str());
     }
     std::int64_t Now() { return static_cast<std::int64_t>(std::time(nullptr)); }
+
+    // Started by the MCP server's editor_launch, with -reMcp.
+    bool StartedForMcp()
+    {
+        static const bool started = [] {
+            int count = 0;
+            LPWSTR* list = CommandLineToArgvW(GetCommandLineW(), &count);
+            if (!list) return false;
+            std::vector<std::string> arguments;
+            for (int i = 0; i < count; ++i) arguments.push_back(Narrow(list[i]));
+            LocalFree(list);
+            return Updater::StartedForMcp(arguments);
+        }();
+        return started;
+    }
 
     int Ask(const std::wstring& text, UINT flags)
     {
@@ -299,7 +317,7 @@ namespace
     void CleanUp()
     {
         using Updater::CleanUpAction;
-        const auto dll = directory / kDllName, launcher = directory / kLauncherName;
+        const auto dll = directory / kDllName, launcher = directory / kLauncherName, mcp = directory / kMcpName;
         std::error_code e;
         Updater::Leftovers found;
         found.oldDll = fs::exists(Old(dll), e);
@@ -307,6 +325,9 @@ namespace
         found.previousLauncher = fs::exists(Previous(launcher), e);
         found.stagedDll = fs::exists(Staged(dll), e);
         found.stagedLauncher = fs::exists(Staged(launcher), e);
+        found.oldMcp = fs::exists(Old(mcp), e);
+        found.previousMcp = fs::exists(Previous(mcp), e);
+        found.stagedMcp = fs::exists(Staged(mcp), e);
         auto keep = [](const fs::path& from, const fs::path& to) {
             if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             {
@@ -335,6 +356,12 @@ namespace
             case CleanUpAction::RemoveOldLauncher: remove(Old(launcher)); break;
             case CleanUpAction::RemoveStagedDll: remove(Staged(dll)); break;
             case CleanUpAction::RemoveStagedLauncher: remove(Staged(launcher)); break;
+            // A server an MCP client still runs can be renamed but not removed;
+            // the removal is tried again at the next start.
+            case CleanUpAction::KeepOldMcp: keep(Old(mcp), Previous(mcp)); break;
+            case CleanUpAction::RemovePreviousMcp: remove(Previous(mcp)); break;
+            case CleanUpAction::RemoveOldMcp: remove(Old(mcp)); break;
+            case CleanUpAction::RemoveStagedMcp: remove(Staged(mcp)); break;
             }
         }
     }
@@ -681,8 +708,9 @@ namespace
 
     void RollBack()
     {
-        const auto dll = directory / kDllName, launcher = directory / kLauncherName, previous = Previous(dll);
+        const auto dll = directory / kDllName, launcher = directory / kLauncherName, mcp = directory / kMcpName, previous = Previous(dll);
         auto tell = [](const std::wstring& text, UINT icon) { MessageBoxW(frame, text.c_str(), L"RE+ Roll Back", MB_OK | icon); };
+        bool mcpSwapped = false;
         if (installed)
         {
             tell(installedName + L" is already in place. Save your work and restart the editor to start using it.", MB_ICONINFORMATION);
@@ -731,6 +759,19 @@ namespace
                     // The launcher only injects the DLL; either one starts either DLL.
                     Logger::log(std::string("Updater: launcher left as it was: ") + error.what());
                 }
+            // The MCP server kept with the previous DLL speaks its pipe protocol.
+            if (fs::exists(Previous(mcp), e))
+                try
+                {
+                    const auto exe = Load(Previous(mcp));
+                    if (Updater::ImageKind(exe) != Updater::Image::Exe) throw std::runtime_error("it is not a 32-bit Windows program");
+                    SwapWithPrevious(mcp, exe);
+                    mcpSwapped = true;
+                }
+                catch (const std::exception& error)
+                {
+                    Logger::log(std::string("Updater: MCP server left as it was: ") + error.what());
+                }
         }
         catch (const std::exception& error)
         {
@@ -744,7 +785,9 @@ namespace
         installed = true;
         Logger::log("Updater: rolled " + std::string(forward ? "forward" : "back") + " from " RE_PLUS_VERSION " to " + Narrow(name));
         UpdateRollBackItem();
-        tell(name + L" is in place. Save your work and restart the editor to start using it.", MB_ICONINFORMATION);
+        tell(name + L" is in place. Save your work and restart the editor to start using it."
+                 + (mcpSwapped ? L" Restart your MCP client too, so it starts the matching MCP server." : L""),
+             MB_ICONINFORMATION);
     }
 
     // A pre-release (2.1.0-rc.1) is only offered to an editor already running
@@ -757,7 +800,8 @@ namespace
         return Updater::Newest(list, includePrereleases);
     }
 
-    void Install(const Release& release)
+    // Empty, or a note for the outcome when the MCP server could not be replaced.
+    std::string Install(const Release& release)
     {
         Logger::log("Updater: downloading " + release.assetUrl);
         const auto zip = Get(Wide(release.assetUrl), nullptr, kMaxArchiveBytes);
@@ -780,18 +824,34 @@ namespace
             launcher = Extract(zip, *e);
             if (Updater::ImageKind(launcher) != Updater::Image::Exe) throw std::runtime_error(std::string("The update's ") + kLauncherName + " is not a 32-bit Windows program.");
         }
+        // Releases before the MCP server have none; an installed one is then kept.
+        Bytes mcp;
+        if (const auto* e = Updater::FindEntry(entries, kMcpName))
+        {
+            mcp = Extract(zip, *e);
+            if (Updater::ImageKind(mcp) != Updater::Image::Exe) throw std::runtime_error(std::string("The update's ") + kMcpName + " is not a 32-bit Windows program.");
+        }
 
         // Stage everything before replacing anything.
-        const auto dllPath = directory / kDllName, launcherPath = directory / kLauncherName;
+        const auto dllPath = directory / kDllName, launcherPath = directory / kLauncherName, mcpPath = directory / kMcpName;
         const bool newLauncher = !launcher.empty() && Load(launcherPath) != launcher;
-        Store(Staged(dllPath), dll);
-        if (newLauncher) Store(Staged(launcherPath), launcher);
-        try { Swap(dllPath); }
-        catch (...)
-        {
+        const bool newMcp = !mcp.empty() && Load(mcpPath) != mcp;
+        auto unstage = [&] {
             std::error_code e;
             fs::remove(Staged(dllPath), e);
             fs::remove(Staged(launcherPath), e);
+            fs::remove(Staged(mcpPath), e);
+        };
+        try
+        {
+            Store(Staged(dllPath), dll);
+            if (newLauncher) Store(Staged(launcherPath), launcher);
+            if (newMcp) Store(Staged(mcpPath), mcp);
+            Swap(dllPath);
+        }
+        catch (...)
+        {
+            unstage();
             throw;
         }
         if (newLauncher)
@@ -803,7 +863,20 @@ namespace
                 std::error_code ignored;
                 fs::remove(Staged(launcherPath), ignored);
             }
+        std::string note;
+        if (newMcp)
+            try { Swap(mcpPath); }
+            catch (const std::exception& e)
+            {
+                // The old server cannot talk to a DLL with a newer pipe protocol,
+                // but the editor itself is fine; say so rather than undo it all.
+                Logger::log(std::string("Updater: MCP server left as it was: ") + e.what());
+                std::error_code ignored;
+                fs::remove(Staged(mcpPath), ignored);
+                note = std::string(" ") + kMcpName + " could not be replaced (" + e.what() + "); copy it from the release archive by hand.";
+            }
         Logger::log("Updater: installed " + release.version.ToString());
+        return note;
     }
 
     void Check(bool interactive)
@@ -872,7 +945,7 @@ namespace
             struct Done { ~Done() { busy = false; } } done;
             try
             {
-                Install(release);
+                const auto note = Install(release);
                 installedName = L"RE+ " + Wide(release.version.ToString());
                 installed = true;
                 SetSkippedVersion("");
@@ -880,7 +953,7 @@ namespace
                 // Shown once by the first start of the new version.
                 SaveWhatsNew({release.version.ToString(), release.name.empty() ? release.tag : release.name,
                               Updater::ClipUtf8(release.notes, Updater::WhatsNew::kNotesLimit), false, true});
-                outcome = "RE+ " + release.version.ToString() + " is installed. Save your work and restart the editor to start using it.";
+                outcome = "RE+ " + release.version.ToString() + " is installed. Save your work and restart the editor to start using it." + note;
                 ok = true;
             }
             catch (const std::exception& e)
@@ -927,6 +1000,13 @@ namespace
     {
         CleanUp();
         SetEvent(cleanedUp);
+        // An editor the MCP server started would answer its calls busy while
+        // the offer is up; Help > Check for RE+ Updates still works.
+        if (StartedForMcp())
+        {
+            Logger::log("Updater: started for MCP (-reMcp); no update check at start-up");
+            return 0;
+        }
         if (!CheckOnStartup()) return 0;
         Sleep(kStartupDelayMs);
         Check(false);
@@ -959,8 +1039,10 @@ void SelfUpdater::AppendHelpMenu(HMENU help, HWND frameWindow)
     AppendMenuA(help, MF_STRING, kRollBack, "Roll &Back");
     UpdateRollBackItem();
     AppendMenuA(help, MF_STRING, kAbout, "&About " RE_PLUS_NAME "...");
+    // Not in an editor the MCP server started: the notes stay unshown until
+    // the next start by hand.
     static bool scheduled = false;
-    if (!scheduled && frame) scheduled = SetTimer(frame, kWhatsNewTimer, kWhatsNewDelayMs, WhatsNewAtStart) != 0;
+    if (!scheduled && frame && !StartedForMcp()) scheduled = SetTimer(frame, kWhatsNewTimer, kWhatsNewDelayMs, WhatsNewAtStart) != 0;
 }
 
 bool SelfUpdater::HandleCommand(UINT command)

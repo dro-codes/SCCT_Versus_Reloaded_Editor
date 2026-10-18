@@ -8,7 +8,9 @@ RE+ is an unofficial patch for the **Splinter Cell: Chaos Theory Versus** map ed
 2. Extract it into the folder that contains `SCCT_Versus.exe`.
 3. Run `Reloaded_Editor.exe`.
 
-The editor keeps itself up to date: shortly after it starts, it checks the releases and offers a newer version in a window with its release notes and download size: **Install** (it takes effect the next time you start the editor), **Remind me later** (at the next start, tomorrow, in 3 days or in a week) or **Skip this version**. **Help > Check for RE+ Updates...** checks on demand, and **Help > Check for Updates at Startup** turns the automatic check off. After an update, the first start shows that release's notes once; **Help > What's New in RE+...** shows them again. The version an update replaced is kept as `Reloaded.Editor.previous.dll` (with `Reloaded_Editor.previous.exe` when the launcher changed): **Help > Roll Back to RE+ x.y.z...** puts it back at the next start, keeps the newer version to switch forward to again, and stops the startup check offering the version you left (**Check for RE+ Updates...** still can). The window title and **Help > About RE+...** show the version you are running.
+The ZIP also holds `Reloaded.Editor.Mcp.exe`, the [MCP server](docs/Mcp.md) that lets an AI agent work in the editor. It sits beside the DLL and does nothing until you turn it on.
+
+The editor keeps itself up to date: shortly after it starts, it checks the releases and offers a newer version in a window with its release notes and download size: **Install** (it takes effect the next time you start the editor), **Remind me later** (at the next start, tomorrow, in 3 days or in a week) or **Skip this version**. **Help > Check for RE+ Updates...** checks on demand, and **Help > Check for Updates at Startup** turns the automatic check off. After an update, the first start shows that release's notes once; **Help > What's New in RE+...** shows them again. The version an update replaced is kept as `Reloaded.Editor.previous.dll` (with `Reloaded_Editor.previous.exe` when the launcher changed, and `Reloaded.Editor.Mcp.previous.exe` when the MCP server did): **Help > Roll Back to RE+ x.y.z...** puts it back at the next start, keeps the newer version to switch forward to again, and stops the startup check offering the version you left (**Check for RE+ Updates...** still can). The window title and **Help > About RE+...** show the version you are running.
 
 ### Versions
 
@@ -29,6 +31,10 @@ Looking for maps to open? Recovered, enhanced and community maps are in [SCCT-Ma
 ![Map Design workspace](docs/images/map-design.png)
 
 **RE+ Tools > Map Design...** is a floor-plan view for planning and greyboxing a map. Draw rooms, corridors, vents and doorways as parametric pieces and drag, resize or type to change them; the brushes in the map follow every edit in one Undo step. Right-click anywhere for what applies at that point. Copy, paste, duplicate and mirror pieces, pick common sizes from presets, draw sightlines that show where a wall blocks the view, or start from a **Versus starter layout** with spawn rooms, corridors, a vent route, starts, a mission and an objective already placed. It also has reference images, player-size guides, routes timed for spies and mercs, playtest spawns, groups and locks in a Scene panel, a design check, a **Security** window that places lasers, cameras, motion sensors, mines and alarms and wires them together, and lights placed from presets, dragged into reach, and checked for the dark spots spies will use. Full guide: [docs/MapDesign.md](docs/MapDesign.md).
+
+### MCP server for AI agents
+
+**RE+ Tools > MCP > Enable MCP server** lets an AI agent such as Claude Code or Claude Desktop work in the running editor through `Reloaded.Editor.Mcp.exe`. It can read and edit the open map, build a whole Versus level from a description, a video, a floor plan or another game's map (grids, images, SVG, Tiled, T3D, Hammer and Quake maps), check it against the SCCT Versus wiki with every finding citing its page, and take it to a release. Every change is one Undo step, can be previewed first, and with **Require approval for changes** waits for you to approve it in the editor. The server is off until you turn it on and never writes the game's own packages; **Copy Claude Code command** puts the setup command on the clipboard. Full guide: [docs/Mcp.md](docs/Mcp.md).
 
 ### Gameplay tools
 
@@ -128,6 +134,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 ./tools/package_release.ps1
 ```
 
-Set the version in `Reloaded.Editor/Version.h` first: the title, About box, updater, DLL properties and archive name all come from it. The release ZIP is written to `bin/Reloaded_Editor_Plus_v<version>.zip`; tag the release `v<version>`. Packaging downloads the unchanged AllyPal v1.2 launcher and verifies its hash; pass `-LauncherPath` to use a local copy. Tests are described in [tests/README.md](tests/README.md).
+Set the version in `Reloaded.Editor/Version.h` first: the title, About box, updater, DLL properties and archive name all come from it. The release ZIP is written to `bin/Reloaded_Editor_Plus_v<version>.zip`; tag the release `v<version>`. Packaging downloads the unchanged AllyPal v1.2 launcher and verifies its hash; pass `-LauncherPath` to use a local copy. Tests are described in [tests/README.md](tests/README.md); `tools/test_mcp.cmd` (from an x86 Native Tools prompt, or `tools/test_mcp.sh` with g++ elsewhere) builds and runs the MCP server's test suites and its `--self-test`.
 
 </details>

@@ -15,22 +15,8 @@ namespace
 {
     constexpr int kHeading=10,kList=11,kStatus=12;
     constexpr std::streamoff kMaximumExport=256LL*1024*1024;
-    // Streams the export to disk. Pretty-printing a large map's export into one string needs a contiguous block
-    // the 32-bit editor rarely has once the map is loaded (ShipD failed with "bad allocation").
-    void WriteExport(const std::filesystem::path& path,const Workflow::Json& document)
-    {
-        auto temp=path;temp+=".tmp";std::error_code error;
-        try
-        {
-            std::ofstream out(temp,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Cannot create "+temp.string());
-            out<<std::setw(2)<<document;out.flush();
-            if(!out)throw std::runtime_error("Could not write "+temp.string());
-            if(out.tellp()>kMaximumExport)throw std::runtime_error("The export exceeds 256 MiB.");
-        }
-        catch(...){std::filesystem::remove(temp,error);throw;}
-        std::filesystem::rename(temp,path,error);
-        if(error){std::filesystem::remove(temp,error);throw std::runtime_error("Could not replace "+path.string());}
-    }
+    // The open preview window, for CancelReview; a preview is one nested modal loop at a time.
+    HWND reviewWindow=nullptr;bool reviewing=false;
     // One list row: change, actor, property, before, after; and the existing actor a click selects.
     struct Line { std::wstring cells[5];Workflow::Json select; };
     struct Preview { std::wstring text;std::vector<Line> lines;bool accepted=false; };
@@ -103,17 +89,22 @@ namespace
             }
         }
         if(message==WM_GETMINMAXINFO){auto info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={560,380};return 0;}
-        if(message==WM_COMMAND && (LOWORD(w)==IDOK || LOWORD(w)==IDCANCEL)){state->accepted=LOWORD(w)==IDOK;DestroyWindow(window);return 0;}
+        if(message==WM_COMMAND && (LOWORD(w)==IDOK || LOWORD(w)==IDCANCEL)){if(state)state->accepted=LOWORD(w)==IDOK;DestroyWindow(window);return 0;}
         if(message==WM_CLOSE){DestroyWindow(window);return 0;}
         return DefWindowProc(window,message,w,l);
     }
-    bool Confirm(HWND owner,const Workflow::Json& preview,const Workflow::Json& document)
+    // The window's title and Apply button say who asked: the Import dialog or a bridge client.
+    bool Confirm(HWND owner,const Workflow::Json& preview,const Workflow::Json& document,const wchar_t* title=L"Preview Map JSON Import",const wchar_t* apply=L"Apply changes")
     {
-        auto map=document.at("map").get<std::string>();if(map.rfind("unsaved:",0)==0)map="Unsaved map (current editor session)";else if(map=="*")map="The map that is open";
+        if(reviewing)throw std::runtime_error("Another change preview is already open in the editor; answer it first.");
+        struct Guard{Guard(){reviewing=true;}~Guard(){reviewing=false;reviewWindow=nullptr;}} guard;
+        auto map=document.is_object()?document.value("map",std::string{}):std::string{};
+        if(map.rfind("unsaved:",0)==0)map="Unsaved map (current editor session)";else if(map=="*" || map.empty())map="The map that is open";
         std::string text="Map: "+map+"\r\n";
-        if(!document.value("description",std::string{}).empty())text+=document.at("description").get<std::string>()+"\r\n";
-        text+="Changes: "+preview.value("tally",std::string{})+"\r\n"+preview.at("note").get<std::string>()+"\r\n";
-        if(Workflow::Authoring::Deletes(document))text+="This file deletes actors (allowDeletes is on). Undo brings them back.\r\n";
+        if(document.is_object() && document.contains("description") && document.at("description").is_string() && !document.at("description").get<std::string>().empty())
+            text+=document.at("description").get<std::string>()+"\r\n";
+        text+="Changes: "+preview.value("tally",std::string{})+"\r\n"+preview.value("note",std::string{})+"\r\n";
+        if(document.is_object() && document.contains("operations") && Workflow::Authoring::Deletes(document))text+="This file deletes actors (allowDeletes is on). Undo brings them back.\r\n";
         Preview state{Wide(text)};
         for(const auto& row:preview.value("rows",Workflow::Json::array()))
         {
@@ -122,8 +113,9 @@ namespace
             line.select=row.value("select",Workflow::Json());state.lines.push_back(std::move(line));
         }
         WNDCLASSW cls{};cls.lpfnWndProc=PreviewProc;cls.hInstance=GetModuleHandle(nullptr);cls.lpszClassName=L"ReloadedMapAuthoringPreview";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
-        auto window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,L"Preview Map JSON Import",WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT,920,660,owner,nullptr,cls.hInstance,&state);
+        auto window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,title,WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT,920,660,owner,nullptr,cls.hInstance,&state);
         if(!window)throw std::runtime_error("Could not open the change preview.");
+        SetWindowTextW(GetDlgItem(window,IDOK),apply);reviewWindow=window;
         EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG message{};
         while(IsWindow(window))
         {
@@ -134,6 +126,31 @@ namespace
         if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);return state.accepted;
     }
 }
+// Streams the export to disk. Pretty-printing a large map's export into one string needs a contiguous block
+// the 32-bit editor rarely has once the map is loaded (ShipD failed with "bad allocation").
+void WriteExport(const std::filesystem::path& path,const Workflow::Json& document)
+{
+    auto temp=path;temp+=".tmp";std::error_code error;
+    try
+    {
+        std::ofstream out(temp,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Cannot create "+temp.string());
+        out<<std::setw(2)<<document;out.flush();
+        if(!out)throw std::runtime_error("Could not write "+temp.string());
+        if(out.tellp()>kMaximumExport)throw std::runtime_error("The export exceeds 256 MiB.");
+    }
+    catch(...){std::filesystem::remove(temp,error);throw;}
+    std::filesystem::rename(temp,path,error);
+    if(error){std::filesystem::remove(temp,error);throw std::runtime_error("Could not replace "+path.string());}
+}
+bool Review(HWND owner,const Workflow::Json& preview,const Workflow::Json& document)
+{
+    return Confirm(owner,preview,document,L"Approve a change from the MCP client",L"Approve");
+}
+void CancelReview()
+{
+    if(reviewWindow && IsWindow(reviewWindow))PostMessage(reviewWindow,WM_COMMAND,MAKEWPARAM(IDCANCEL,BN_CLICKED),0);
+}
+bool Reviewing(){return reviewing;}
 void Open(HWND owner,bool exporting)
 {
     try

@@ -12,8 +12,28 @@
 #include <memory>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 
 static std::wstring logFilePath;
+
+namespace
+{
+// The MCP bridge's pipe thread and the engine's log hook write from other
+// threads than the editor's: one line at a time, whole. Never freed, so a
+// thread still logging while the DLL unloads finds it intact.
+CRITICAL_SECTION& LogLock()
+{
+    static CRITICAL_SECTION* lock = [] { auto section = new CRITICAL_SECTION; InitializeCriticalSection(section); return section; }();
+    return *lock;
+}
+struct LogGuard
+{
+    LogGuard() { EnterCriticalSection(&LogLock()); }
+    ~LogGuard() { LeaveCriticalSection(&LogLock()); }
+    LogGuard(const LogGuard&) = delete;
+    LogGuard& operator=(const LogGuard&) = delete;
+};
+}
 
 std::string TimePrefix() {
     auto now = std::chrono::system_clock::now();
@@ -42,7 +62,8 @@ std::wstring TimePrefixW() {
 }
 
 void Logger::log(const std::string& message) {
-    std::ofstream logFile(logFilePath, std::ios::app);
+    LogGuard guard;
+    std::ofstream logFile(std::filesystem::path(logFilePath), std::ios::app);
     if (!logFile.is_open()) {
         std::cerr << "Error: Could not open the file for logging." << "\n";
         return;
@@ -55,7 +76,8 @@ void Logger::log(const std::string& message) {
 }
 
 void Logger::log(const std::wstring& message) {
-    std::wofstream logFile(logFilePath, std::ios::app);
+    LogGuard guard;
+    std::wofstream logFile(std::filesystem::path(logFilePath), std::ios::app);
     if (!logFile.is_open()) {
         std::wcerr << L"Error: Could not open the file for logging." << "\n";
         return;
@@ -69,8 +91,9 @@ void Logger::log(const std::wstring& message) {
 
 void Logger::Initialize(const std::wstring& dllPath)
 {
+    LogGuard guard;
     logFilePath = dllPath + L".log";
-    std::wofstream logFile(logFilePath, std::ios::trunc);
+    std::wofstream logFile(std::filesystem::path(logFilePath), std::ios::trunc);
     if (!logFile.is_open()) {
         std::wcerr << L"Error: Could not open the file for clearing." << "\n";
         return;

@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{56038714-1291-42ab-ae68-bc7bfa8b66e3}</ProjectGuid>
+    <RootNamespace>ReloadedEditorMcp</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Reloaded.Editor.Mcp</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <TargetName>Reloaded.Editor.Mcp</TargetName>
+    <OutDir>$(SolutionDir)bin\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <TargetName>Reloaded.Editor.Mcp</TargetName>
+    <CopyCppRuntimeToOutputDir>false</CopyCppRuntimeToOutputDir>
+    <OutDir>$(SolutionDir)bin\</OutDir>
+  </PropertyGroup>
+  <!-- The server needs no packages: nlohmann is in Reloaded.Editor\Include, and
+       zlib's job (PNG) is done by ImageCodec.h. -->
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnabled>false</VcpkgEnabled>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>..\Reloaded.Editor;..\Reloaded.Editor\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- /bigobj: the spec compiler's translation units exceed 65,279 sections. -->
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <LargeAddressAware>true</LargeAddressAware>
+      <EnableUAC>true</EnableUAC>
+      <UACExecutionLevel>AsInvoker</UACExecutionLevel>
+      <AdditionalDependencies>ole32.lib;windowscodecs.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;shlwapi.lib;advapi32.lib;shell32.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- Windows N editions and Windows Server lack Media Foundation unless it is
+           added; delay-loaded, the server still starts there and only frame
+           extraction is affected. -->
+      <DelayLoadDLLs>mfplat.dll;mfreadwrite.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+    </Link>
+    <PostBuildEvent>
+      <Command>if defined SCCT (
+    echo %SCCT%
+    xcopy "$(SolutionDir)\bin\Reloaded.Editor.Mcp.exe" "%SCCT%" /Y || echo Reloaded.Editor.Mcp.exe in %SCCT% is in use: close the MCP client to replace it.
+)
+</Command>
+      <Message>Copys to %SCCT% if the env variable is defined</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>..\Reloaded.Editor;..\Reloaded.Editor\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <LargeAddressAware>true</LargeAddressAware>
+      <EnableUAC>true</EnableUAC>
+      <UACExecutionLevel>AsInvoker</UACExecutionLevel>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>ole32.lib;windowscodecs.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;shlwapi.lib;advapi32.lib;shell32.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- Windows N editions and Windows Server lack Media Foundation unless it is
+           added; delay-loaded, the server still starts there and only frame
+           extraction is affected. -->
+      <DelayLoadDLLs>mfplat.dll;mfreadwrite.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+    </Link>
+    <PostBuildEvent>
+      <Command>if defined SCCT (
+    echo %SCCT%
+    xcopy "$(SolutionDir)\bin\Reloaded.Editor.Mcp.exe" "%SCCT%" /Y || echo Reloaded.Editor.Mcp.exe in %SCCT% is in use: close the MCP client to replace it.
+)
+</Command>
+      <Message>Copys to %SCCT% if the env variable is defined</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="McpServer.cpp" />
+    <ClCompile Include="Resources.cpp" />
+    <ClCompile Include="BridgeClient.cpp" />
+    <ClCompile Include="Prompts.cpp" />
+    <ClCompile Include="Media.cpp" />
+    <ClCompile Include="Tools\SessionTools.cpp" />
+    <ClCompile Include="Tools\QueryTools.cpp" />
+    <ClCompile Include="Tools\ValidateTools.cpp" />
+    <ClCompile Include="Tools\SpecTools.cpp" />
+    <ClCompile Include="Tools\IntentTools.cpp" />
+    <ClCompile Include="Tools\EscapeTools.cpp" />
+    <ClCompile Include="Tools\ImportTools.cpp" />
+    <ClCompile Include="Tools\MediaTools.cpp" />
+    <ClCompile Include="Tools\ReleaseTools.cpp" />
+    <ClCompile Include="..\Reloaded.Editor\WorkflowModel.cpp" />
+    <ClCompile Include="..\Reloaded.Editor\RecoveredPolygonImport.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="BridgeClient.h" />
+    <ClInclude Include="BrushImportModel.h" />
+    <ClInclude Include="Embedded.gen.h" />
+    <ClInclude Include="Embedded.h" />
+    <ClInclude Include="FakeBridge.h" />
+    <ClInclude Include="GeometricEventModel.h" />
+    <ClInclude Include="GridPlanModel.h" />
+    <ClInclude Include="ImageCodec.h" />
+    <ClInclude Include="LevelRulesModel.h" />
+    <ClInclude Include="LevelSpecCompiler.h" />
+    <ClInclude Include="LevelSpecModel.h" />
+    <ClInclude Include="McpProtocolModel.h" />
+    <ClInclude Include="McpServer.h" />
+    <ClInclude Include="McpTool.h" />
+    <ClInclude Include="Media.h" />
+    <ClInclude Include="PlanRender.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="Tools\Common.h" />
+    <ClInclude Include="Importers\Authoring.h" />
+    <ClInclude Include="Importers\Common.h" />
+    <ClInclude Include="Importers\Csv.h" />
+    <ClInclude Include="Importers\GeoJson.h" />
+    <ClInclude Include="Importers\Grid.h" />
+    <ClInclude Include="Importers\ImagePlan.h" />
+    <ClInclude Include="Importers\Import.h" />
+    <ClInclude Include="Importers\Obj.h" />
+    <ClInclude Include="Importers\PlanShapes.h" />
+    <ClInclude Include="Importers\QuakeMap.h" />
+    <ClInclude Include="Importers\R6vPlacements.h" />
+    <ClInclude Include="Importers\Svg.h" />
+    <ClInclude Include="Importers\T3d.h" />
+    <ClInclude Include="Importers\Tiled.h" />
+    <ClInclude Include="Importers\Vmf.h" />
+    <ClInclude Include="Importers\Xml.h" />
+    <ClInclude Include="..\Reloaded.Editor\CameraNetworkModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\LevelSnapshotModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MagicEventModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MapAuthoringModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MapDesignModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\McpBridgeModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\McpGuardModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\McpPlanModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\ObjectivePlayersModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\RecoveredBspGeometry.h" />
+    <ClInclude Include="..\Reloaded.Editor\RecoveredPolygonImport.h" />
+    <ClInclude Include="..\Reloaded.Editor\SecurityModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\StageModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\Version.h" />
+    <ClInclude Include="..\Reloaded.Editor\WorkflowModel.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Reloaded.Editor.Mcp.rc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

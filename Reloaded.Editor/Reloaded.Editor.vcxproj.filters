@@ -70,6 +70,14 @@
     <ClInclude Include="Version.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="WorkflowEditor.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="WorkflowTools.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpBridge.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpBridgeModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpEditor.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpGuardModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpOps.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpPlanModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpSafetyModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterPreview.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterPreviewModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="EmitterPreview.h"><Filter>Header Files</Filter></ClInclude>
@@ -509,6 +517,9 @@
     <ClCompile Include="WorkflowEditor.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="WorkflowGraph.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="WorkflowTools.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="McpBridge.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="McpLifecycle.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="McpOps.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="CharacterPreview.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="EmitterPreview.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="CharacterSkinsWindow.cpp"><Filter>Source Files</Filter></ClCompile>

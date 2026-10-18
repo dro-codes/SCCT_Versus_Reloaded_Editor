@@ -41,6 +41,30 @@ namespace WorkflowTools
     bool AppendObjectiveMenu(HMENU menu,const Workflow::Json& actor);
     void RunObjectiveCommand(UINT command,const Workflow::Json& snapshot);
     void Initialize();
+    // One bridge request, {"op": name, ...arguments}: the MCP ops (McpOps.h)
+    // first, then the workflow ops ReloadedWorkflowRequest has always taken.
+    // Returns the op's result and throws a sentence for the user on failure.
+    // UI thread only.
+    Workflow::Json Request(const Workflow::Json& request);
+    // The open map's entry in the workflow library (library.json: Map Design's
+    // "design", the MCP sidecar's "mcp", views, instances), and putting a copy
+    // back, which a plan that fails does after design.register or the sidecar
+    // changed it. An untitled map's entry stays in memory until its first save.
+    Workflow::Json LibraryEntry();
+    void RestoreLibraryEntry(const Workflow::Json& entry);
+    // design.register: pieces design.block / design.blockbatch placed (a piece
+    // or a list of them per entry), into Map Design's pieces, named as the
+    // panel names new ones ("Room 3"), and element records ({kind, points,
+    // members, command}) into its elements. Returns {registered, elements}.
+    Workflow::Json RegisterDesignPieces(const Workflow::Json& pieces, const Workflow::Json& elements);
+    // design.unregister: drops the pieces and elements with any of these brushes.
+    size_t UnregisterDesignPieces(const Workflow::Json& members);
+    // The geometric events Map Design and the bridge recorded (the editor keeps
+    // no list of its own that RE+ can read).
+    Workflow::Json DesignElements();
+    // The MCP sidecar (maps[key].mcp): the level spec the map was built from.
+    Workflow::Json McpSidecar();
+    void SetMcpSidecar(const Workflow::Json& sidecar);
     void FindUsages(HWND owner, void* asset, bool mesh);
     // Find Usages in All Maps for the browser's current material or mesh.
     void FindUsagesInAllMaps(HWND owner, bool mesh);
