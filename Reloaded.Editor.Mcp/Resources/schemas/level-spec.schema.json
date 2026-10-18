@@ -1,0 +1,2631 @@
+{
+  "$defs": {
+    "coordinate": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/height"
+        }
+      ]
+    },
+    "doorwayPosition": {
+      "additionalProperties": false,
+      "description": "{doorway: id}: in a doorway, on its sill.",
+      "properties": {
+        "doorway": {
+          "$ref": "#/$defs/id"
+        },
+        "h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/height"
+            }
+          ]
+        }
+      },
+      "required": [
+        "doorway"
+      ],
+      "type": "object"
+    },
+    "facing": {
+      "anyOf": [
+        {
+          "description": "Yaw in degrees (east 0, north 90).",
+          "type": "number"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "toward": {
+              "$ref": "#/$defs/target"
+            }
+          },
+          "required": [
+            "toward"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "yaw": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "yaw"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A yaw in degrees, {yaw}, or {toward: id | position}."
+    },
+    "generic": {
+      "additionalProperties": false,
+      "description": "Any actor: its class, where it is and raw properties.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/position"
+        },
+        "class": {
+          "description": "Actor class, Package.Class.",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "mesh": {
+          "description": "StaticMesh'Package.Group.Name' or Package.Group.Name.",
+          "type": "string"
+        },
+        "properties": {
+          "$ref": "#/$defs/props"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/vec3"
+            }
+          ]
+        },
+        "yaw": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "height": {
+      "description": "A height in a room: \"floor+N\" or \"ceiling-N\".",
+      "pattern": "^\\s*(floor|ceiling)\\s*([+-]\\s*[0-9]+(\\.[0-9]+)?)?\\s*$",
+      "type": "string"
+    },
+    "id": {
+      "description": "Names one thing in the level; unique ignoring case; becomes its create id and Tag.",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "type": "string"
+    },
+    "ids": {
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "type": "array"
+    },
+    "inPosition": {
+      "additionalProperties": false,
+      "description": "{in: piece, u, v, h}: a point inside a geometry piece.",
+      "properties": {
+        "h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/height"
+            }
+          ]
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        },
+        "u": {
+          "description": "Across the piece's width, -0.5 to 0.5.",
+          "maximum": 0.5,
+          "minimum": -0.5,
+          "type": "number"
+        },
+        "v": {
+          "description": "Along the piece's length, -0.5 to 0.5.",
+          "maximum": 0.5,
+          "minimum": -0.5,
+          "type": "number"
+        }
+      },
+      "required": [
+        "in"
+      ],
+      "type": "object"
+    },
+    "mission": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/position"
+        },
+        "atResetEvent": {
+          "description": "Event sent once when the mode starts.",
+          "type": "string"
+        },
+        "chained": {
+          "type": "boolean"
+        },
+        "description": {
+          "description": "The Spy text.",
+          "type": "string"
+        },
+        "descriptionDef": {
+          "description": "The Merc text.",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "minimumObjectives": {
+          "maximum": 64.0,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/props"
+        }
+      },
+      "type": "object"
+    },
+    "nearPosition": {
+      "additionalProperties": false,
+      "description": "{near: id, offset}: beside another thing in the spec.",
+      "properties": {
+        "near": {
+          "$ref": "#/$defs/id"
+        },
+        "offset": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "near"
+      ],
+      "type": "object"
+    },
+    "point": {
+      "description": "[x, y] or [x, y, z]; z may be \"floor+N\" or \"ceiling-N\" of the room under the point, and a missing z takes the usual height for the thing placed.",
+      "items": {
+        "$ref": "#/$defs/coordinate"
+      },
+      "maxItems": 3,
+      "minItems": 2,
+      "type": "array"
+    },
+    "position": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/point"
+        },
+        {
+          "$ref": "#/$defs/inPosition"
+        },
+        {
+          "$ref": "#/$defs/nearPosition"
+        },
+        {
+          "$ref": "#/$defs/doorwayPosition"
+        }
+      ],
+      "description": "[x, y, z] | {in, u, v, h} | {near, offset} | {doorway}"
+    },
+    "props": {
+      "description": "Raw map-changes property values, written as given: leaves are strings, structs objects, arrays arrays, {\"$ref\": id} for actors.",
+      "type": "object"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "$ref": "#/$defs/position"
+        }
+      ]
+    },
+    "vec2": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "vec3": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    }
+  },
+  "$id": "scct://schema/level-spec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A whole SCCT Versus level for the RE+ MCP level_build tool. Lengths are in units{unit} (Unreal units by default), yaw in degrees, Z up, east +X, north +Y.",
+  "properties": {
+    "defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "construction": {
+          "enum": [
+            "Carve",
+            "Shell"
+          ],
+          "type": "string"
+        },
+        "lights": {
+          "enum": [
+            "rooms",
+            "none"
+          ],
+          "type": "string"
+        },
+        "material": {
+          "type": "string"
+        },
+        "startsPerTeam": {
+          "maximum": 32.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "thickness": {
+          "maximum": 1024.0,
+          "minimum": 1.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "environment": {
+      "additionalProperties": false,
+      "properties": {
+        "animated": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "fish": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "ingredients": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "facing": {
+                "$ref": "#/$defs/facing"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "in": {
+                "$ref": "#/$defs/id"
+              },
+              "kind": {
+                "enum": [
+                  "ammo",
+                  "infirmary",
+                  "glass",
+                  "extinguisher",
+                  "projector",
+                  "sprinkler",
+                  "puddle",
+                  "balltrap"
+                ],
+                "type": "string"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lights": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "brightness": {
+                "maximum": 255.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "corona": {
+                "type": "boolean"
+              },
+              "hue": {
+                "maximum": 255.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "in": {
+                "$ref": "#/$defs/id"
+              },
+              "pitch": {
+                "type": "number"
+              },
+              "preset": {
+                "enum": [
+                  "ceiling",
+                  "spot",
+                  "sun",
+                  "echelon-spot"
+                ],
+                "type": "string"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "radius": {
+                "type": "number"
+              },
+              "saturation": {
+                "maximum": 255.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "switchable": {
+                "description": "An STriggerLight events can switch.",
+                "type": "boolean"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "objects": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "damageable": {
+                "type": "boolean"
+              },
+              "hitPoints": {
+                "type": "number"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "mesh",
+              "at"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "props": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "softbody": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "sounds": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "class": {
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "radius": {
+                "type": "number"
+              },
+              "sound": {
+                "description": "Sound'Package.Group.Name'",
+                "type": "string"
+              },
+              "volume": {
+                "maximum": 255.0,
+                "minimum": 0.0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "sound"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tutorials": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "vision": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "emfIntensity": {
+                "type": "number"
+              },
+              "emfOpacity": {
+                "type": "number"
+              },
+              "heatIntensity": {
+                "type": "number"
+              },
+              "heatOpacity": {
+                "type": "number"
+              },
+              "heatRadius": {
+                "type": "number"
+              },
+              "properties": {
+                "$ref": "#/$defs/props"
+              },
+              "target": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "required": [
+              "target"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "box": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "max": {
+                        "$ref": "#/$defs/point"
+                      },
+                      "min": {
+                        "$ref": "#/$defs/point"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "height": {
+                        "type": "number"
+                      },
+                      "in": {
+                        "$ref": "#/$defs/id"
+                      }
+                    },
+                    "required": [
+                      "in"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "class": {
+                "description": "Volume, SDamageVolume, ERainVolume, BlockingVolume or a full class name.",
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "locationName": {
+                "type": "string"
+              },
+              "priority": {
+                "description": "LocationPriority.",
+                "type": "number"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              }
+            },
+            "required": [
+              "id",
+              "box"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "events": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "event": {
+                "type": "string"
+              },
+              "sendAtTime": {
+                "description": "Seconds; negative counts back from the end of the match.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "event",
+              "sendAtTime"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "delay": {
+                "type": "number"
+              },
+              "from": {
+                "$ref": "#/$defs/id"
+              },
+              "to": {
+                "$ref": "#/$defs/id"
+              },
+              "untrigger": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "magic": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "document": {
+                "description": "An scct.smagic-event document (SMagicEvent Workbench export).",
+                "type": "object"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "required": [
+              "id",
+              "document"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "messages": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "merc": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "integer"
+              },
+              "spy": {
+                "type": "string"
+              },
+              "time": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "noises": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "shakers": {
+          "items": {
+            "$ref": "#/$defs/generic"
+          },
+          "type": "array"
+        },
+        "triggerLights": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "initiallyOn": {
+                "type": "boolean"
+              },
+              "light": {
+                "$ref": "#/$defs/id"
+              },
+              "object": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "required": [
+              "light"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "existing": {
+      "additionalProperties": false,
+      "properties": {
+        "refs": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "class": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "tag": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tag"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "extra": {
+      "additionalProperties": false,
+      "properties": {
+        "operations": {
+          "items": {
+            "description": "A raw scct.map-changes operation.",
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "format": {
+      "const": "scct.level-spec"
+    },
+    "gameplay": {
+      "additionalProperties": false,
+      "properties": {
+        "deathmatch": {
+          "additionalProperties": false,
+          "properties": {
+            "disableSecurity": {
+              "type": "boolean"
+            },
+            "mission": {
+              "$ref": "#/$defs/mission"
+            }
+          },
+          "type": "object"
+        },
+        "diskhunt": {
+          "additionalProperties": false,
+          "properties": {
+            "disableSecurity": {
+              "type": "boolean"
+            },
+            "disks": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "maximum": 128.0,
+                      "minimum": 1.0,
+                      "type": "integer"
+                    },
+                    "in": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/id"
+                        },
+                        {
+                          "items": {
+                            "$ref": "#/$defs/id"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "in"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "at": {
+                        "$ref": "#/$defs/position"
+                      },
+                      "group": {
+                        "maximum": 3.0,
+                        "minimum": 1.0,
+                        "type": "integer"
+                      },
+                      "id": {
+                        "$ref": "#/$defs/id"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "at"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 128,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "mission": {
+              "$ref": "#/$defs/mission"
+            },
+            "resetTime": {
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "modes": {
+          "items": {
+            "enum": [
+              "story",
+              "diskhunt",
+              "deathmatch"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "playerCounts": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "max": {
+                "maximum": 16.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "min": {
+                "maximum": 16.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "objective": {
+                "$ref": "#/$defs/id"
+              },
+              "open": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "objective"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "story": {
+          "additionalProperties": false,
+          "properties": {
+            "mission": {
+              "$ref": "#/$defs/mission"
+            },
+            "objectives": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/position"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "descriptionDef": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "props": {
+                    "$ref": "#/$defs/props"
+                  },
+                  "triggers": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "$ref": "#/$defs/position"
+                        },
+                        "captureTime": {
+                          "description": "Bomb fuse.",
+                          "type": "number"
+                        },
+                        "dominationCaptureTime": {
+                          "description": "Terminal capture time.",
+                          "type": "number"
+                        },
+                        "dropZones": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "at": {
+                                "$ref": "#/$defs/position"
+                              },
+                              "id": {
+                                "$ref": "#/$defs/id"
+                              }
+                            },
+                            "required": [
+                              "at"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 5,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "facing": {
+                          "$ref": "#/$defs/facing"
+                        },
+                        "id": {
+                          "$ref": "#/$defs/id"
+                        },
+                        "kind": {
+                          "enum": [
+                            "terminal",
+                            "flag",
+                            "bomb"
+                          ],
+                          "type": "string"
+                        },
+                        "props": {
+                          "$ref": "#/$defs/props"
+                        },
+                        "resetTime": {
+                          "description": "Flag reset.",
+                          "type": "number"
+                        },
+                        "triggerName": {
+                          "type": "string"
+                        },
+                        "yaw": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "visibilityZone": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "sectors": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "actions": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "delay": {
+                          "type": "number"
+                        },
+                        "hold": {
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "enum": [
+                            "open",
+                            "light",
+                            "sound",
+                            "announce",
+                            "trigger"
+                          ],
+                          "type": "string"
+                        },
+                        "merc": {
+                          "type": "string"
+                        },
+                        "seconds": {
+                          "type": "number"
+                        },
+                        "sound": {
+                          "type": "string"
+                        },
+                        "spy": {
+                          "type": "string"
+                        },
+                        "tag": {
+                          "type": "string"
+                        },
+                        "target": {
+                          "$ref": "#/$defs/id"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "untrigger": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "brief": {
+                    "type": "string"
+                  },
+                  "briefDefend": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "objectives": {
+                    "items": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "required": {
+                    "maximum": 64.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "objectives"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "mission": {
+                  "$ref": "#/$defs/id"
+                },
+                "sizes": {
+                  "description": "Objectives to win at 1v1 .. 8v8; 0 keeps the mission's own.",
+                  "items": {
+                    "maximum": 32.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "maxItems": 8,
+                  "minItems": 8,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "mission",
+                "sizes"
+              ],
+              "type": "object"
+            },
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "mission": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "sizes": {
+                    "description": "Objectives to win at 1v1 .. 8v8; 0 keeps the mission's own.",
+                    "items": {
+                      "maximum": 32.0,
+                      "minimum": 0.0,
+                      "type": "integer"
+                    },
+                    "maxItems": 8,
+                    "minItems": 8,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mission",
+                  "sizes"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "geTriggers": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "$ref": "#/$defs/position"
+          },
+          "geMask": {
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "toggle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "geMask"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "geometry": {
+      "additionalProperties": false,
+      "properties": {
+        "brushes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/point"
+              },
+              "class": {
+                "type": "string"
+              },
+              "csg": {
+                "enum": [
+                  "CSG_Add",
+                  "CSG_Subtract"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "polyFlags": {
+                "type": "integer"
+              },
+              "polygons": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "flags": {
+                      "type": "integer"
+                    },
+                    "origin": {
+                      "$ref": "#/$defs/vec3"
+                    },
+                    "pan": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "maxItems": 2,
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "texture": {
+                      "type": "string"
+                    },
+                    "textureU": {
+                      "$ref": "#/$defs/vec3"
+                    },
+                    "textureV": {
+                      "$ref": "#/$defs/vec3"
+                    },
+                    "vertices": {
+                      "items": {
+                        "$ref": "#/$defs/vec3"
+                      },
+                      "maxItems": 16,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "vertices"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 16384,
+                "minItems": 1,
+                "type": "array"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              }
+            },
+            "required": [
+              "id",
+              "polygons"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "doorways": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "between": {
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "depth": {
+                "type": "number"
+              },
+              "host": {
+                "$ref": "#/$defs/id"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "name": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "number"
+              },
+              "portal": {
+                "description": "A zone portal in the opening. Default: true, or with zones only where it joins two zones.",
+                "type": "boolean"
+              },
+              "side": {
+                "enum": [
+                  "north",
+                  "south",
+                  "east",
+                  "west"
+                ],
+                "type": "string"
+              },
+              "sill": {
+                "type": "number"
+              },
+              "size": {
+                "description": "[width, height]",
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "meshes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "fit": {
+                "enum": [
+                  "floor",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "scale": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "$ref": "#/$defs/vec3"
+                  }
+                ]
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "mesh",
+              "at"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "pieces": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/point"
+              },
+              "attach": {
+                "additionalProperties": false,
+                "description": "Flush against the outside of another piece's wall, running away from it.",
+                "properties": {
+                  "offset": {
+                    "description": "Along the wall: east of the centre on a north or south wall, north of it on an east or west wall.",
+                    "type": "number"
+                  },
+                  "side": {
+                    "enum": [
+                      "north",
+                      "south",
+                      "east",
+                      "west"
+                    ],
+                    "type": "string"
+                  },
+                  "to": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "required": [
+                  "to",
+                  "side"
+                ],
+                "type": "object"
+              },
+              "ceiling": {
+                "type": "boolean"
+              },
+              "construction": {
+                "enum": [
+                  "Carve",
+                  "Shell"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "kind": {
+                "enum": [
+                  "Room",
+                  "Corridor",
+                  "Vent",
+                  "Crawlway",
+                  "Doorway",
+                  "Platform",
+                  "Stairs",
+                  "Stairs L",
+                  "Stairs U",
+                  "Spiral",
+                  "Ramp"
+                ],
+                "type": "string"
+              },
+              "material": {
+                "description": "Package.Group.Name",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "portal": {
+                "type": "boolean"
+              },
+              "size": {
+                "description": "[width (local X), length (local Y), height]; a corridor, vent or crawlway is open at both ends of its length.",
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              "steps": {
+                "maximum": 128.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              "storey": {
+                "$ref": "#/$defs/id"
+              },
+              "thickness": {
+                "type": "number"
+              },
+              "yaw": {
+                "description": "Degrees; multiples of 90 keep walls on the compass.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "size"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "surfaces": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "brush": {
+                "$ref": "#/$defs/id"
+              },
+              "faces": {
+                "items": {
+                  "enum": [
+                    "floor",
+                    "ceiling",
+                    "+X",
+                    "-X",
+                    "+Y",
+                    "-Y"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 6,
+                "minItems": 1,
+                "type": "array"
+              },
+              "texture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "brush",
+              "faces",
+              "texture"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "vertical": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/inPosition"
+              },
+              "from": {
+                "$ref": "#/$defs/id"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "kind": {
+                "enum": [
+                  "stairs",
+                  "lift"
+                ],
+                "type": "string"
+              },
+              "shape": {
+                "enum": [
+                  "Stairs",
+                  "Stairs L",
+                  "Stairs U",
+                  "Spiral"
+                ],
+                "type": "string"
+              },
+              "to": {
+                "$ref": "#/$defs/id"
+              },
+              "width": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to",
+              "at"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ges": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "kind": {
+            "enum": [
+              "ledge",
+              "hoh",
+              "pipe",
+              "ladder",
+              "zipline",
+              "fence",
+              "pole"
+            ],
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/$defs/position"
+            },
+            "maxItems": 3,
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "points"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "interface": {
+      "additionalProperties": false,
+      "properties": {
+        "briefing": {
+          "type": "string"
+        },
+        "loadingAtt": {
+          "type": "string"
+        },
+        "loadingDef": {
+          "type": "string"
+        },
+        "menu": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "level": {
+      "additionalProperties": false,
+      "properties": {
+        "deathPawnHeight": {
+          "type": "number"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "event": {
+                "type": "string"
+              },
+              "sendAtTime": {
+                "description": "Seconds; negative counts back from the end of the match.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "event",
+              "sendAtTime"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "geActivationMask": {
+          "type": "integer"
+        },
+        "motionTracking": {
+          "enum": [
+            "standard",
+            "enhanced"
+          ],
+          "type": "string"
+        },
+        "song": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "map": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "File stem; default the first four letters of the name and D.",
+          "pattern": "^[A-Za-z0-9_]{1,60}$",
+          "type": "string"
+        },
+        "name": {
+          "description": "The map's name, in capitals.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "mechanisms": {
+      "additionalProperties": false,
+      "properties": {
+        "buttons": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "facing": {
+                "$ref": "#/$defs/facing"
+              },
+              "hackTime": {
+                "type": "number"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "kind": {
+                "enum": [
+                  "button",
+                  "panel"
+                ],
+                "type": "string"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "targets": {
+                "items": {
+                  "description": "An id or a Tag.",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "text": {
+                "type": "string"
+              },
+              "usableBy": {
+                "enum": [
+                  "spy",
+                  "merc",
+                  "both"
+                ],
+                "type": "string"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "doors": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "moveTime": {
+                "type": "number"
+              },
+              "open": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "offset": {
+                        "$ref": "#/$defs/vec3"
+                      }
+                    },
+                    "required": [
+                      "offset"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "yaw": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "yaw"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "stayOpen": {
+                "type": "number"
+              },
+              "trigger": {
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/position"
+                  },
+                  "hackTime": {
+                    "type": "number"
+                  },
+                  "kind": {
+                    "enum": [
+                      "button",
+                      "panel",
+                      "presence",
+                      "event"
+                    ],
+                    "type": "string"
+                  },
+                  "radius": {
+                    "type": "number"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "usableBy": {
+                    "enum": [
+                      "spy",
+                      "merc",
+                      "both"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "mesh"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lifts": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "moveTime": {
+                "type": "number"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "shaft": {
+                "$ref": "#/$defs/id"
+              },
+              "start": {
+                "$ref": "#/$defs/id"
+              },
+              "storeys": {
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "maxItems": 24,
+                "minItems": 2,
+                "type": "array"
+              },
+              "switches": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "shaft",
+              "storeys"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "movers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "class": {
+                "type": "string"
+              },
+              "encroach": {
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "initialState": {
+                "type": "string"
+              },
+              "keys": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "offset": {
+                      "$ref": "#/$defs/vec3"
+                    },
+                    "pitch": {
+                      "type": "number"
+                    },
+                    "roll": {
+                      "type": "number"
+                    },
+                    "yaw": {
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                },
+                "maxItems": 24,
+                "minItems": 1,
+                "type": "array"
+              },
+              "mesh": {
+                "type": "string"
+              },
+              "moveTime": {
+                "type": "number"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "stayOpen": {
+                "type": "number"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "mesh"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "profile": {
+      "enum": [
+        "draft",
+        "release"
+      ],
+      "type": "string"
+    },
+    "provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "frames": {
+          "items": {},
+          "type": "array"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "source": {
+          "description": "Where the level came from."
+        }
+      },
+      "type": "object"
+    },
+    "release": {
+      "description": "Release notes and options, kept with the spec.",
+      "type": "object"
+    },
+    "security": {
+      "additionalProperties": false,
+      "properties": {
+        "alarms": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "description": {
+                "description": "The Merc HUD text.",
+                "type": "string"
+              },
+              "descriptionSpy": {
+                "type": "string"
+              },
+              "duration": {
+                "type": "number"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "lockMovers": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "action": {
+                      "description": "ActionBeforeLock value.",
+                      "type": "string"
+                    },
+                    "mover": {
+                      "$ref": "#/$defs/id"
+                    }
+                  },
+                  "required": [
+                    "mover"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "lockObjectives": {
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "outputs": {
+                "items": {
+                  "description": "An id or a Tag.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "priority": {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "camnet": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "camName": {
+                "type": "string"
+              },
+              "constraints": {
+                "additionalProperties": false,
+                "properties": {
+                  "pitch": {
+                    "$ref": "#/$defs/vec2"
+                  },
+                  "roll": {
+                    "$ref": "#/$defs/vec2"
+                  },
+                  "yaw": {
+                    "$ref": "#/$defs/vec2"
+                  }
+                },
+                "type": "object"
+              },
+              "facing": {
+                "$ref": "#/$defs/facing"
+              },
+              "first": {
+                "type": "boolean"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "devices": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "alarm": {
+                "$ref": "#/$defs/id"
+              },
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "box": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "max": {
+                        "$ref": "#/$defs/point"
+                      },
+                      "min": {
+                        "$ref": "#/$defs/point"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "height": {
+                        "type": "number"
+                      },
+                      "in": {
+                        "$ref": "#/$defs/id"
+                      }
+                    },
+                    "required": [
+                      "in"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "coneAngle": {
+                "type": "number"
+              },
+              "detected": {
+                "enum": [
+                  "spy",
+                  "merc",
+                  "both"
+                ],
+                "type": "string"
+              },
+              "detectionDelay": {
+                "type": "number"
+              },
+              "facing": {
+                "$ref": "#/$defs/facing"
+              },
+              "height": {
+                "type": "number"
+              },
+              "hideLaser": {
+                "type": "boolean"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "in": {
+                "$ref": "#/$defs/id"
+              },
+              "kind": {
+                "enum": [
+                  "laser",
+                  "camera",
+                  "motion",
+                  "presence",
+                  "mine"
+                ],
+                "type": "string"
+              },
+              "length": {
+                "type": "number"
+              },
+              "maxDistance": {
+                "type": "number"
+              },
+              "patrolAngle": {
+                "type": "number"
+              },
+              "props": {
+                "$ref": "#/$defs/props"
+              },
+              "radius": {
+                "type": "number"
+              },
+              "rotationVelocity": {
+                "type": "number"
+              },
+              "spawnPercent": {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "settings": {
+      "additionalProperties": false,
+      "properties": {
+        "briefMerc": {
+          "type": "string"
+        },
+        "briefSpy": {
+          "type": "string"
+        },
+        "legend": {
+          "description": "Use | for line breaks.",
+          "type": "string"
+        },
+        "legendInBrief": {
+          "type": "string"
+        },
+        "mapName": {
+          "type": "string"
+        },
+        "modes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "handicap": {
+                "type": "integer"
+              },
+              "mode": {
+                "enum": [
+                  "story",
+                  "diskhunt",
+                  "deathmatch"
+                ],
+                "type": "string"
+              },
+              "numDisksMax": {
+                "type": "integer"
+              },
+              "respawn": {
+                "type": "number"
+              },
+              "scoreLimit": {
+                "type": "integer"
+              },
+              "sentriesLives": {
+                "type": "integer"
+              },
+              "spiesLives": {
+                "type": "integer"
+              },
+              "strings": {
+                "additionalProperties": false,
+                "properties": {
+                  "briefMerc": {
+                    "type": "string"
+                  },
+                  "briefSpy": {
+                    "type": "string"
+                  },
+                  "explicationMerc": {
+                    "type": "string"
+                  },
+                  "explicationSpy": {
+                    "type": "string"
+                  },
+                  "legendMerc": {
+                    "type": "string"
+                  },
+                  "legendSpy": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "timeLimit": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "maxItems": 3,
+          "minItems": 0,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "spawns": {
+      "additionalProperties": false,
+      "properties": {
+        "merc": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "description": "Starts on a 128-unit lattice at floor+48 in one or more rooms.",
+              "properties": {
+                "count": {
+                  "maximum": 32.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "facing": {
+                  "$ref": "#/$defs/facing"
+                },
+                "in": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/id"
+                    },
+                    {
+                      "items": {
+                        "$ref": "#/$defs/id"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "spacing": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "in"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Starts placed one by one.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/position"
+                  },
+                  "facing": {
+                    "$ref": "#/$defs/facing"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "yaw": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "at"
+                ],
+                "type": "object"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
+        "spy": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "description": "Starts on a 128-unit lattice at floor+48 in one or more rooms.",
+              "properties": {
+                "count": {
+                  "maximum": 32.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "facing": {
+                  "$ref": "#/$defs/facing"
+                },
+                "in": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/id"
+                    },
+                    {
+                      "items": {
+                        "$ref": "#/$defs/id"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "spacing": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "in"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Starts placed one by one.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/position"
+                  },
+                  "facing": {
+                    "$ref": "#/$defs/facing"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "yaw": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "at"
+                ],
+                "type": "object"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
+        "toggles": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/position"
+              },
+              "enabledBy": {
+                "description": "The event Tag that toggles it.",
+                "type": "string"
+              },
+              "facing": {
+                "$ref": "#/$defs/facing"
+              },
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "in": {
+                "$ref": "#/$defs/id"
+              },
+              "team": {
+                "enum": [
+                  "spy",
+                  "merc"
+                ],
+                "type": "string"
+              },
+              "yaw": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "team"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "storeys": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "z": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "z"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "units": {
+      "additionalProperties": false,
+      "properties": {
+        "unit": {
+          "enum": [
+            "uu",
+            "m",
+            "ft"
+          ],
+          "type": "string"
+        },
+        "uuPerMetre": {
+          "maximum": 10000.0,
+          "minimum": 1.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "const": 1
+    },
+    "zones": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "locationName": {
+            "type": "string"
+          },
+          "portals": {
+            "description": "Portals where its spaces meet other zones; default true.",
+            "type": "boolean"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "spaces"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "format",
+    "version"
+  ],
+  "title": "scct.level-spec version 1",
+  "type": "object"
+}

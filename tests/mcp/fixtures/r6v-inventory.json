@@ -1,0 +1,7 @@
+[
+ {"actor":"MyLevel.Placed_0000_Crate_1","source":{"actor":"Level.Crate_1","mesh":"Props_Vegas.Crates.CrateLarge"},"native_mesh":"VegasProps.Static.CrateLarge",
+  "native_properties":{"Location":{"X":"100.0","Y":"200.0","Z":"0.0"},"Rotation":{"Pitch":"0","Yaw":"16384","Roll":"0"},"DrawScale":"1",
+                       "DrawScale3D":{"X":"1","Y":"1","Z":"2"},"StaticMesh":"StaticMesh'VegasProps.Static.CrateLarge'","DrawType":"DT_StaticMesh","bHidden":"False",
+                       "Skins":["None","Shader'VegasProps.Shaders.Wood'"]},
+  "source_material_overrides":[],"transform_corner_error":0.0}
+]

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scct://schema/map-authoring",
+  "title": "scct.map-authoring version 1 (snapshot, summary)",
+  "description": "The Map JSON export of View > Export Map to JSON... and the bridge op authoring.export (streamed to a blob; ShipD is about 42 MB, so prefer map_query and authoring.schema for routine reads). Reference information only: import a scct.map-changes document (scct://schema/map-changes), never the snapshot. This schema describes the shape; per-class property schemas come from the live editor and describe types and enum choices, not class defaults.",
+  "type": "object",
+  "required": ["format", "version", "map", "level", "actors", "classes", "assets", "changes"],
+  "properties": {
+    "format": {"const": "scct.map-authoring"},
+    "version": {"const": 1},
+    "map": {"type": "string", "description": "Destination identity: the canonical path of a saved map, or a session identity (unsaved:*) for an unsaved one. Copy it into change files exactly."},
+    "level": {"type": "string", "description": "Native object-path prefix of the level, such as MyLevel."},
+    "instructions": {"type": "string"},
+    "actors": {
+      "type": "array",
+      "description": "Every authorable actor (LevelInfo, the builder brush and cameras excluded), then the particle components they own.",
+      "items": {"$ref": "#/$defs/actorSnapshot"}
+    },
+    "classes": {
+      "type": "array",
+      "description": "Loaded, non-abstract actor classes (sorted by class path) and particle-emitter component classes, each with its property schema.",
+      "items": {
+        "type": "object",
+        "required": ["class", "schema"],
+        "properties": {
+          "class": {"type": "string", "description": "Class path, such as SBase.SMagicEvent."},
+          "category": {"type": "string", "description": "Events, Sounds, Triggers, Movers, Emitters, Volumes or Other."},
+          "brush": {"type": "boolean", "description": "A Brush subclass: create it with geometry box or polygons."},
+          "component": {"type": "boolean", "description": "A particle-emitter component class (op component)."},
+          "schema": {"type": "object", "additionalProperties": {"$ref": "#/$defs/propertySchema"}}
+        }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "description": "Loaded assets by type. Load more packages and export again when one is missing.",
+      "properties": {
+        "Sound": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
+        "Material": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
+        "StaticMesh": {"type": "array", "items": {"$ref": "#/$defs/asset"}}
+      }
+    },
+    "geometryT3d": {"type": "string", "description": "Native T3D text of the map's actors and brushes, for spatial context (meshes refer to their assets; no mesh vertex data)."},
+    "geometryUnavailable": {"type": "string", "description": "Why geometryT3d could not be produced."},
+    "changes": {
+      "type": "object",
+      "description": "An empty scct.map-changes template carrying the right map identity (version 3).",
+      "required": ["format", "version", "map", "operations"],
+      "properties": {
+        "format": {"const": "scct.map-changes"},
+        "version": {"enum": [1, 2, 3]},
+        "map": {"type": "string"},
+        "description": {"type": "string"},
+        "operations": {"type": "array"}
+      }
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": ["path", "class"],
+      "properties": {"path": {"type": "string"}, "class": {"type": "string"}}
+    },
+    "value": {
+      "description": "Exported values: string leaves (numbers \"64\", bools \"True\"/\"False\", enums bare, text JSON-quoted, references Class'MyLevel.Name' or None), structs as objects, arrays as arrays.",
+      "anyOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/value"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "propertySchema": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["ArrayProperty", "FixedArray", "StructProperty", "BoolProperty", "ByteProperty", "IntProperty", "FloatProperty", "NameProperty", "StrProperty", "ObjectProperty", "ClassProperty"]},
+        "category": {"type": "string", "description": "The editor property category (on actor schemas)."},
+        "choices": {"type": "array", "items": {"type": "string"}, "description": "Enum names (ByteProperty), or False/True (BoolProperty)."},
+        "fields": {"type": "object", "additionalProperties": {"$ref": "#/$defs/propertySchema"}, "description": "StructProperty fields; a value must supply every one."},
+        "inner": {"$ref": "#/$defs/propertySchema", "description": "Element schema of an ArrayProperty or FixedArray."},
+        "dimension": {"type": "integer", "minimum": 2, "description": "FixedArray length; it cannot change."},
+        "type": {"type": "string", "description": "Declared class of an ObjectProperty or ClassProperty."}
+      }
+    },
+    "actorSnapshot": {
+      "type": "object",
+      "required": ["actor", "values", "schema"],
+      "properties": {
+        "actor": {"$ref": "#/$defs/identity"},
+        "values": {"type": "object", "additionalProperties": {"$ref": "#/$defs/value"}, "description": "Complete exposed values: copy them whole into update.before or delete.before."},
+        "schema": {"type": "object", "additionalProperties": {"$ref": "#/$defs/propertySchema"}},
+        "unavailable": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Properties that could not be read, with the reason."},
+        "selected": {"type": "boolean"},
+        "position": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}, "description": "[x, y, z] in Unreal units."},
+        "rotation": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}, "description": "[pitch, yaw, roll], 65536 per turn."}
+      }
+    },
+    "asset": {
+      "type": "object",
+      "required": ["path", "class"],
+      "properties": {
+        "path": {"type": "string", "description": "Package.Group.Name."},
+        "class": {"type": "string"},
+        "bounds": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"type": "number"}, "description": "Static meshes: local bounding box [minX, minY, minZ, maxX, maxY, maxZ]."}
+      }
+    }
+  }
+}

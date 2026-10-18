@@ -1,0 +1,9 @@
+class,x,y,z,yaw,id,tag,event,LightBrightness,LightColor
+Engine.Light,0,0,256,,Lamp1,,,96,
+Engine.Light,128,0,256,90,,Lamp,,64,
+SBase.SAlarm,0,512,64,,MainAlarm,,,,
+"Engine.PlayerStart",-200,0,48,45,,,,,
+,1,2,3,,,,,,
+Engine.Light,abc,0,0,,,,,,
+SBase.SMagicEvent,0,0,0,,,Fireworks,MainAlarm,,
+Engine.Light,10,10,10,,Lamp1,,,,"{""R"":""255"",""G"":""0"",""B"":""0"",""A"":""255""}"
