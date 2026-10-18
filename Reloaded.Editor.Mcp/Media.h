@@ -942,12 +942,15 @@ namespace Mcp::Media
         if (longest > 65536) warnings.push_back("The mesh is over 65,536 units across; check the OBJ's units and scale.");
         if (positions.size() > 65535 || triangles.size() > 21845) warnings.push_back("The mesh is large for the engine (65,535 vertices a section); split it if the import fails.");
         auto round3 = [](const Vec& v) { return Json::array({Round(v[0], 3), Round(v[1], 3), Round(v[2], 3)}); };
-        Json info{{"vertices", positions.size()}, {"uvs", uvs.size()}, {"triangles", triangles.size()}, {"materials", materials}, {"groups", groups}, {"skippedFaces", skipped},
+        // Names as JSON: the file's bytes may be any code page, so only ASCII is kept.
+        auto ascii = [](std::string text) { for (auto& ch : text) if (static_cast<unsigned char>(ch) >= 0x80 || static_cast<unsigned char>(ch) < 0x20) ch = '?'; return text; };
+        auto asciiList = [&](const std::vector<std::string>& list) { Json out = Json::array(); for (const auto& item : list) out.push_back(ascii(item)); return out; };
+        Json info{{"vertices", positions.size()}, {"uvs", uvs.size()}, {"triangles", triangles.size()}, {"materials", asciiList(materials)}, {"groups", asciiList(groups)}, {"skippedFaces", skipped},
                   {"up", up}, {"scale", scale}, {"unrealBounds", {{"min", round3(lo)}, {"max", round3(hi)}}}, {"size", round3(size)}, {"warnings", warnings}};
         if (!bitmaps.empty())
         {
             Json maps = Json::object();
-            for (const auto& m : materials) if (bitmaps.count(m)) maps[m] = bitmaps[m];
+            for (const auto& m : materials) if (bitmaps.count(m)) maps[ascii(m)] = ascii(bitmaps[m]);
             info["bitmaps"] = maps;
         }
         return {o.str(), info};

@@ -107,6 +107,14 @@ void Refusals()
     Check(Pointer(With("gameplay",{{"targets",{{"mission","M"},{"sizes",{1,2,3}}}}}))=="/gameplay/targets/sizes","targets take eight sizes");
     Check(Pointer(With("map",{{"file","Bad Name"}}))=="/map/file","file stems have no spaces");
     Check(Pointer(With("units",{{"unit","yd"}}))=="/units/unit","units");
+    // Lifts: the doors' mesh and how they open, and a storey's door placed by hand.
+    auto lift=With("mechanisms",Json::parse(R"({"lifts":[{"id":"L","shaft":"S","storeys":["A","B"],"mesh":"P.G.Car","doorMesh":"P.G.Door","carDoorMesh":"P.G.Inner",
+        "doorOpen":{"yaw":90},"doorMoveTime":1.5,"carSwitch":false,"doors":[{"storey":"B","doorway":"D"},{"storey":"A","at":[0,0,0],"yaw":90,"mesh":"P.G.Other"}]}]})"));
+    Spec::Parse(lift);
+    auto badDoor=lift;badDoor["mechanisms"]["lifts"][0]["doors"][0]["side"]="east";
+    Check(Pointer(badDoor)=="/mechanisms/lifts/0/doors/0/side","a lift door entry is closed");
+    auto noStorey=lift;noStorey["mechanisms"]["lifts"][0]["doors"][0].erase("storey");
+    Check(Pointer(noStorey)=="/mechanisms/lifts/0/doors/0","a lift door entry names its storey");
     // Raw bags are not looked into, so their keys are free.
     auto bag=With("security",{{"alarms",{{{"id","A"},{"props",{{"Anything",{{"id","A"}}}}}}}}});
     Spec::Parse(bag);

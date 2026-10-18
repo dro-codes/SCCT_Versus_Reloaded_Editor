@@ -790,8 +790,7 @@ int main()
             Check(Fails("design.layout",s,"release","error").message.find("Island")!=std::string::npos,"isolated room named");
             Fails("design.layout",s,"draft","warning");
             Passes("design.layout",good);
-            // A room above the spy room that only a flight of stairs reaches (the
-            // compiler leaves generated stairwells out of the scene) is joined.
+            // A room above the spy room that only a flight of stairs reaches is joined.
             auto t=good;
             t["pieces"].push_back(Piece("Room","Loft",512,512,256,{0,0,528}));
             auto stairs=Piece("Stairs","Loft stairs",128,512,528,{300,0,0});stairs["spec"]["steps"]=16;
@@ -944,6 +943,15 @@ int main()
             Passes("design.traversal",u);
             auto v=good;v["pieces"].push_back(Piece("Room","Annex",512,512,256,{300,300,0}));
             Check(Fails("design.traversal",v).message.find("carve into each other")!=std::string::npos,"rooms merging");
+            // A stairwell or shaft carves through the floors it joins on purpose, as
+            // does anything the compiler generates, listed after the room or before it.
+            auto w=v;w["pieces"][w["pieces"].size()-1]["spec"]["name"]="Stairwell";
+            Passes("design.traversal",w);
+            auto x=v;x["pieces"][x["pieces"].size()-1]["generated"]=true;
+            Passes("design.traversal",x);
+            auto y=good;y["pieces"].insert(y["pieces"].begin(),Piece("Room","Lift shaft",256,256,800,{300,300,0}));
+            Passes("design.traversal",y);
+            Passes("design.layout",y);
         }
 
         // Every rule has a failing and a passing fixture.

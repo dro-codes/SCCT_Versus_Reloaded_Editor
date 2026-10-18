@@ -34,8 +34,9 @@
 // Compiled.scene (Mcp::Rules::SceneFromJson):
 //   {actors:[{path (the id), class, cls, name, tag, event, position:[x,y,z],
 //             rotation:[p,y,r], values (the properties as written), pointer}],
-//    pieces:[{id, spec, position, rotation, pointer, zone, storey}]  (Map
-//             Design records; generated stairwells and lift shafts left out),
+//    pieces:[{id, spec, position, rotation, pointer, zone, storey,
+//             generated (true on stairwells, lift shafts, their flights and
+//             zone portals the compiler adds)}]  (Map Design records),
 //    ges:[{kind, command, points}], level:{LevelInfo changes}, mapSettings
 //    (SMapSettings fields or null), modes:[story|diskhunt|deathmatch],
 //    mapName, mapFile, profile, geometryBuilt:false, live:false,
@@ -49,7 +50,9 @@
 //   {bounds:{min:[x,y,z], max:[x,y,z]},
 //    pieces:[{id, kind (the piece kind: Room|Corridor|...|Doorway), name, storey,
 //             box:{min:[x,y,z], max:[x,y,z]}, yaw (degrees), space (bool),
-//             zone}],
+//             zone}, then each polygon brush (geometry.brushes) and sized volume
+//             as {id, kind (add|subtract|volume|mover), name, cls, storey, box, yaw 0,
+//             outline:[[x,y]...]}],
 //    doorways:[{id, at:[x,y,z], width, yaw (degrees), portal}],
 //    actors:[{id, cls, kind, at:[x,y,z], position (= at), yaw (degrees), label}]
 //      kind: spawn-spy|spawn-merc|objective|flag|dropzone|bomb|disk|camera|
@@ -304,6 +307,8 @@ namespace Mcp::Spec
             Json polygons;
             Vector at{};
             int yaw = 0;
+            bool footprint = false; // drawn by plan_render as its polygons' outline
+            std::string storey;     // a footprint's storey, for plan_render's storey filter
         };
         struct Lift { std::string id, pointer; Json args; Vector at{}; };
         // What a spec compiles to, before it becomes a plan.
@@ -841,6 +846,18 @@ namespace Mcp::Spec
                     if (std::abs(L(item.at("z")) - z) < 1) return item.at("id").get<std::string>();
                 return {};
             }
+            // The storey a height is on: the highest whose floor is not above it.
+            std::string StoreyBelow(double z) const
+            {
+                std::string best;
+                double bestZ = 0;
+                for (const auto& item : List(Section({"storeys"})))
+                {
+                    const double at = L(item.at("z"));
+                    if (at <= z + 1 && (best.empty() || at > bestZ)) { best = item.at("id").get<std::string>(); bestZ = at; }
+                }
+                return best;
+            }
             static Design::Extent Interior(const Json& spec, const Pose& pose)
             {
                 const double w = spec.at("width"), l = spec.at("length"), h = spec.at("height");
@@ -1268,8 +1285,9 @@ namespace Mcp::Spec
                         if (!p[0].is_number() || !p[1].is_number() || (p.size() == 3 && !p[2].is_number())) throw SpecError(Child(pointer, "at"), "a brush stands at [x, y] or [x, y, z] in numbers.");
                         at = {L(p[0]), L(p[1]), p.size() == 3 ? L(p[2]) : 0.0};
                     }
-                    auto& actor = Add(item.at("id").get<std::string>(), item.value("class", std::string("Engine.Brush")), "other", pointer, at, 0, false);
+                    auto& actor = Add(item.at("id").get<std::string>(), FullClass(item.value("class", std::string("Engine.Brush"))), "other", pointer, at, 0, false);
                     actor.geometry = "polygons";
+                    actor.footprint = true;
                     actor.polygons = Json::array();
                     for (const auto& polygon : item.at("polygons"))
                     {
@@ -1280,6 +1298,9 @@ namespace Mcp::Spec
                         if (polygon.contains("texture")) Package(polygon.at("texture").get<std::string>());
                         actor.polygons.push_back(out);
                     }
+                    double bottom = 1e18;
+                    for (const auto& polygon : actor.polygons) for (const auto& v : polygon.at("vertices")) bottom = std::min(bottom, v[2].get<double>() + at[2]);
+                    actor.storey = StoreyBelow(bottom);
                     actor.properties["CsgOper"] = item.value("csg", std::string("CSG_Add"));
                     if (item.contains("polyFlags")) actor.properties["PolyFlags"] = std::to_string(item.at("polyFlags").get<long long>());
                     Props(actor, item);
@@ -1829,6 +1850,8 @@ namespace Mcp::Spec
                         const Vector centre{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
                         auto& volume = Add(NewId(id + "_Volume"), "Engine.Volume", "volume", pointer, centre, 0, false);
                         volume.geometry = "polygons";
+                        volume.footprint = true;
+                        volume.storey = StoreyBelow(lo[2]);
                         volume.polygons = BoxPolygons({(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2});
                         const auto volumeId = volume.id;
                         auto& sensor = Add(id, "SBase.SVolumetricSensor", "motion", pointer, {centre[0], centre[1], lo[2]}, 0, false);
@@ -2082,7 +2105,8 @@ namespace Mcp::Spec
                 actor.properties["bInteractInFront"] = "True";
                 actor.properties["UseRelativeLocation"] = kind == "panel" ? Json{{"X", "39.5"}, {"Y", "3"}, {"Z", "0"}} : Json{{"X", "55"}, {"Y", "0"}, {"Z", "0"}};
                 actor.properties["UseRelativeRotation"] = Rot({0, 32768, 0});
-                actor.properties["iHackingTime"] = Num(hackTime);
+                // A whole number of seconds: the engine's property is an int.
+                actor.properties["iHackingTime"] = std::to_string(std::max(0L, std::lround(hackTime)));
                 actor.properties["UsableBy"] = usable;
                 actor.properties["sDescriptionText"] = Quoted(text);
                 return actor;
@@ -2179,7 +2203,7 @@ namespace Mcp::Spec
                     if (!item.contains("at")) { Diag("error", "mover.at", pointer, "a mover needs at.", "movers"); continue; }
                     const auto spot = Locate(item.at("at"), Child(pointer, "at"), Floor(0));
                     const int yaw = YawOf(item, spot.at, pointer, spot.hasYaw ? spot.yaw : 0);
-                    auto& mover = Add(item.at("id").get<std::string>(), item.value("class", std::string("Engine.Mover")), "door", pointer, spot.at, yaw);
+                    auto& mover = Add(item.at("id").get<std::string>(), FullClass(item.value("class", std::string("Engine.Mover"))), "door", pointer, spot.at, yaw);
                     Mesh(mover, item.at("mesh").get<std::string>());
                     mover.properties["InitialState"] = item.value("initialState", std::string("TriggerOpenTimed"));
                     mover.properties["MoverEncroachType"] = item.value("encroach", std::string("ME_WaitAndRetryWhenEncroach"));
@@ -2241,8 +2265,87 @@ namespace Mcp::Spec
                     SetEvent(*FindActor(pending.id), fan, Child(pending.pointer, "targets"));
                 }
             }
-            // SLift: one key per storey, the start storey first, and each storey's
-            // switch (TriggerToggle, usable on the start storey) in DoorsAndSwitches.
+            // A storey's opening onto a lift shaft: the doorway of the spec that
+            // joins them with its sill nearest the storey's floor, or the one a
+            // lift's doors entry names. inward is the side of its local Y the
+            // shaft is on (+1 or -1).
+            struct Opening { bool found = false; Pose pose; double width = 96, height = 128, depth = 16, inward = 1; };
+            Opening ShaftOpening(const Piece& shaft, double storeyZ0, const Json& given, const std::string& pointer)
+            {
+                Opening o;
+                int door = -1;
+                if (given.is_object() && given.contains("doorway"))
+                {
+                    door = FindPiece(given.at("doorway").get<std::string>());
+                    if (door < 0 || low.pieces[static_cast<size_t>(door)].kind != "Doorway")
+                    {
+                        Diag("error", "elevator.door", Child(pointer, "doorway"), "no doorway has the id \"" + given.at("doorway").get<std::string>() + "\".", "elevators");
+                        return o;
+                    }
+                }
+                else if (given.is_object() && given.contains("at"))
+                {
+                    const auto spot = Locate(given.at("at"), Child(pointer, "at"), Floor(0));
+                    o.pose = {spot.at, {0, given.contains("yaw") ? YawUnits(given.at("yaw").get<double>()) : spot.hasYaw ? spot.yaw : 0, 0}};
+                    o.found = true;
+                }
+                else
+                    for (size_t k = 0; k < low.pieces.size(); ++k)
+                    {
+                        const auto& p = low.pieces[k];
+                        if (p.kind != "Doorway" || (Fold(p.joins[0]) != Fold(shaft.id) && Fold(p.joins[1]) != Fold(shaft.id))) continue;
+                        const double above = p.pose.position[2] - storeyZ0;
+                        if (above < -1 || above > 128) continue;
+                        if (door < 0 || std::abs(above) < std::abs(low.pieces[static_cast<size_t>(door)].pose.position[2] - storeyZ0)) door = static_cast<int>(k);
+                    }
+                if (door >= 0)
+                {
+                    const auto& p = low.pieces[static_cast<size_t>(door)];
+                    o.pose = p.pose;
+                    o.width = p.spec.at("width");
+                    o.height = p.spec.at("height");
+                    o.depth = p.spec.at("length");
+                    o.found = true;
+                }
+                if (!o.found) return o;
+                const double a = o.pose.rotation[1] * 2 * kPi / 65536;
+                o.inward = -std::sin(a) * (shaft.pose.position[0] - o.pose.position[0]) + std::cos(a) * (shaft.pose.position[1] - o.pose.position[1]) >= 0 ? 1 : -1;
+                return o;
+            }
+            // A lift door: a Mover (or the car's SLiftDoor) whose Key 0 is open
+            // and Key 1 closed, the reverse of an ordinary door. Location is its
+            // Key 0 pose, as for every mover the compiler writes; keyNum 1 puts it
+            // closed.
+            Actor& LiftDoor(const std::string& id, const std::string& cls, const std::string& pointer, const std::string& mesh, const Vector& closed, int yaw, const Json& item, double height, int keyNum)
+            {
+                Vector offset{0, 0, height};
+                int turn = 0;
+                if (item.contains("doorOpen"))
+                {
+                    const auto& open = item.at("doorOpen");
+                    if (open.contains("offset")) offset = {L(open.at("offset")[0]), L(open.at("offset")[1]), L(open.at("offset")[2])};
+                    else { offset = {}; turn = YawUnits(open.at("yaw").get<double>()); }
+                }
+                auto& door = Add(id, cls, "door", pointer, {closed[0] + offset[0], closed[1] + offset[1], closed[2] + offset[2]}, (yaw + turn) % 65536);
+                Mesh(door, mesh);
+                door.properties["MoverEncroachType"] = "ME_WaitAndRetryWhenEncroach";
+                door.properties["MoveTime"] = Num(item.value("doorMoveTime", 1.0));
+                door.properties["KeyNum"] = std::to_string(keyNum);
+                door.properties["NumKeys"] = "2";
+                Json rotations;
+                door.properties["KeyPos"] = Keys(door.cls, {Vector{}, Vector{-offset[0], -offset[1], -offset[2]}}, {Rotation{}, Rotation{0, -turn, 0}}, rotations);
+                door.properties["KeyRot"] = rotations;
+                return door;
+            }
+            // SLift (scct://wiki/elevators): one key per storey, the start storey
+            // first. Each storey's opening onto the shaft gets an external door
+            // (Key 0 open, Key 1 closed; KeyNum 0 on the start storey, 1 on the
+            // others) and a call switch beside it; the car gets an SLiftDoor on
+            // each side a door opens and a switch that rides with it. Every
+            // switch is TriggerToggle, sending the lift's Tag.
+            // DoorsAndSwitches[k] lists storey k's door and the switches that
+            // work while the car is there: the car's and every other storey's
+            // call switch, so those are the ones usable at the start.
             void Lifts()
             {
                 const auto& lifts = List(Section({"mechanisms", "lifts"}));
@@ -2276,36 +2379,145 @@ namespace Mcp::Spec
                     if (!item.contains("mesh"))
                     {
                         if (floors.size() != 2) { Diag("error", "elevator.mesh", pointer, "a lift without a mesh is a two-key brush platform (design.lift); give mesh for a lift of more storeys.", "elevators"); continue; }
+                        if (item.contains("doorMesh")) Diag("warning", "elevator.doors", Child(pointer, "doorMesh"), id + " has no mesh, so it is a design.lift platform, which has no doors; doorMesh is not used.", "elevators");
                         usedIds.insert(Fold(id));
                         low.lifts.push_back({id, pointer, {{"position", Point({base[0], base[1], std::min(floors[0].second, floors[1].second) - 8})}, {"width", 192}, {"length", 192}, {"thickness", 16}, {"rise", std::abs(floors[1].second - floors[0].second)}, {"moveTime", moveTime}}, base});
                         continue;
                     }
-                    auto& lift = Add(id, "SBase.SLift", "lift", pointer, base, 0);
-                    lift.label = "lift " + id;
-                    Mesh(lift, item.at("mesh").get<std::string>());
-                    lift.properties["MoveTime"] = Num(moveTime);
-                    lift.properties["KeyNum"] = "0";
-                    lift.properties["NumKeys"] = std::to_string(floors.size());
-                    std::vector<Vector> offsets;
-                    for (const auto& f : floors) offsets.push_back({0, 0, f.second - floors[0].second});
-                    Json rotations;
-                    lift.properties["KeyPos"] = Keys(lift.cls, offsets, {}, rotations);
-                    lift.properties["KeyRot"] = rotations;
-                    Props(lift, item);
-                    if (!item.value("switches", true)) continue;
-                    Json floorsJson = Json::array();
-                    const double w = shaft.spec.at("width");
+                    {
+                        auto& lift = Add(id, "SBase.SLift", "lift", pointer, base, 0);
+                        lift.label = "lift " + id;
+                        Mesh(lift, item.at("mesh").get<std::string>());
+                        lift.properties["MoveTime"] = Num(moveTime);
+                        lift.properties["KeyNum"] = "0";
+                        lift.properties["NumKeys"] = std::to_string(floors.size());
+                        std::vector<Vector> offsets;
+                        for (const auto& f : floors) offsets.push_back({0, 0, f.second - floors[0].second});
+                        Json rotations;
+                        lift.properties["KeyPos"] = Keys(lift.cls, offsets, {}, rotations);
+                        lift.properties["KeyRot"] = rotations;
+                        Props(lift, item);
+                    }
+                    low.lines.push_back({{"from", Point(base)}, {"to", Point({base[0], base[1], base[2] + rise})}, {"kind", "lift"}, {"ids", {id}}});
+                    const auto liftTag = TagOf(id, pointer, true);
+                    // Each storey's opening, from doors[] or the doorways onto the shaft.
+                    std::map<std::string, Json> given;
+                    const auto& doorList = List(item.value("doors", Json::array()));
+                    for (size_t k = 0; k < doorList.size(); ++k)
+                    {
+                        const auto storey = doorList[k].at("storey").get<std::string>();
+                        if (std::none_of(floors.begin(), floors.end(), [&](const auto& f) { return Fold(f.first) == Fold(storey); }))
+                            Diag("error", "elevator.door", Child(Child(Child(pointer, "doors"), k), "storey"), "\"" + storey + "\" is not one of " + id + "'s storeys.", "elevators");
+                        else { given[Fold(storey)] = doorList[k]; given[Fold(storey)]["pointer"] = Child(Child(pointer, "doors"), k); }
+                    }
+                    std::vector<Opening> openings;
+                    for (const auto& f : floors)
+                    {
+                        const auto found = given.find(Fold(f.first));
+                        const Json entry = found == given.end() ? Json() : found->second;
+                        openings.push_back(ShaftOpening(shaft, f.second, entry, entry.is_object() ? entry.at("pointer").get<std::string>() : pointer));
+                        if (!openings.back().found)
+                            Diag("warning", "elevator.opening", pointer, "storey " + f.first + " has no doorway onto " + shaft.id + ", so the lift gives it no door or call switch. Add a doorway between a room and the shaft, or doors[{storey, doorway | at}].", "elevators");
+                    }
+                    const auto doorMesh = item.value("doorMesh", std::string());
+                    Json doors = Json::array(), liftDoors = Json::array();
+                    std::vector<std::string> doorless;
                     for (size_t k = 0; k < floors.size(); ++k)
                     {
-                        const auto at = Workflow::TransformPoint({w / 2 - 8, 0, 100 + (floors[k].second - shaft.pose.position[2])}, shaft.pose);
-                        auto& button = Switch(NewId(id + "_Switch" + std::to_string(k + 1)), "button", pointer, at, (shaft.pose.rotation[1] + 32768) % 65536, "U_BOTH", 0, "Lift");
-                        button.properties["TriggerMethode"] = "TriggerToggle";
-                        button.properties["bInitiallyUsable"] = Flag(k == 0);
-                        SetEvent(button, id, pointer);
-                        floorsJson.push_back({{"Doors", Json::array()}, {"Switches", Json::array({Ref(button.id)})}});
+                        Json here = Json::array();
+                        const auto& o = openings[k];
+                        const auto found = given.find(Fold(floors[k].first));
+                        const auto mesh = found != given.end() && found->second.contains("mesh") ? found->second.at("mesh").get<std::string>() : doorMesh;
+                        if (o.found && mesh.empty()) doorless.push_back(floors[k].first);
+                        if (o.found && !mesh.empty())
+                        {
+                            auto& door = LiftDoor(NewId(id + "_Door_" + floors[k].first), "Engine.Mover", pointer, mesh, o.pose.position, o.pose.rotation[1], item, o.height, k == 0 ? 0 : 1);
+                            door.label = "lift door " + floors[k].first;
+                            // The lift moves it; a bump or a stray event must not.
+                            door.properties["InitialState"] = "TriggerControl";
+                            here.push_back(Ref(door.id));
+                        }
+                        doors.push_back(here);
                     }
-                    FindActor(id)->properties["DoorsAndSwitches"] = floorsJson;
-                    low.lines.push_back({{"from", Point(base)}, {"to", Point({base[0], base[1], base[2] + rise})}, {"kind", "lift"}, {"ids", {id}}});
+                    if (!doorless.empty())
+                    {
+                        std::string list;
+                        for (const auto& s : doorless) list += (list.empty() ? "" : ", ") + s;
+                        Diag("warning", "elevator.doors", pointer, id + " has no doorMesh, so " + list + (doorless.size() == 1 ? " gets" : " get") + " no door: players can step into the shaft where the car is not. Give doorMesh, a static mesh, for the storeys' doors and the car's SLiftDoor.", "elevators");
+                    }
+                    // The car's doors: one SLiftDoor on each side a storey's door opens,
+                    // just inside the opening, at the start storey where the car waits.
+                    const auto carMesh = item.value("carDoorMesh", doorMesh);
+                    std::set<std::pair<long, long>> sides;
+                    for (size_t k = 0; k < floors.size() && !carMesh.empty(); ++k)
+                    {
+                        const auto& o = openings[k];
+                        if (!o.found || doors[k].empty()) continue;
+                        const double a = o.pose.rotation[1] * 2 * kPi / 65536;
+                        const double nx = -std::sin(a) * o.inward, ny = std::cos(a) * o.inward;
+                        if (!sides.insert({std::lround(nx * 8), std::lround(ny * 8)}).second) continue;
+                        const double in = o.depth / 2 + 12;
+                        const Vector closed{o.pose.position[0] + nx * in, o.pose.position[1] + ny * in, floors[0].second + (o.pose.position[2] - floors[k].second)};
+                        auto& carDoor = LiftDoor(NewId(id + "_CarDoor" + std::to_string(sides.size())), "SBase.SLiftDoor", pointer, carMesh, closed, o.pose.rotation[1], item, o.height, 0);
+                        carDoor.label = "car door";
+                        liftDoors.push_back(Ref(carDoor.id));
+                    }
+                    // Switches: a call switch beside each storey's opening, outside the
+                    // shaft facing the room, and one in the car.
+                    std::vector<std::string> calls(floors.size());
+                    std::string car;
+                    if (item.value("switches", true))
+                    {
+                        for (size_t k = 0; k < floors.size(); ++k)
+                        {
+                            const auto& o = openings[k];
+                            if (!o.found) continue;
+                            const double side = -o.inward;
+                            const auto at = Workflow::TransformPoint({-(o.width / 2 + 48), side * (o.depth / 2 + 2), 100}, o.pose);
+                            auto& button = Switch(NewId(id + "_Switch_" + floors[k].first), "button", pointer, at, (o.pose.rotation[1] + 65536 + (side > 0 ? 16384 : -16384)) % 65536, "U_BOTH", 0, "Call lift");
+                            button.properties["TriggerMethode"] = "TriggerToggle";
+                            button.properties["bInitiallyUsable"] = Flag(k != 0);
+                            SetEvent(button, liftTag, pointer);
+                            calls[k] = button.id;
+                        }
+                        if (item.value("carSwitch", true))
+                        {
+                            const auto& o = openings[0];
+                            Vector at{};
+                            int facing = 0;
+                            if (o.found)
+                            {
+                                at = Workflow::TransformPoint({-(o.width / 2 + 32), o.inward * (o.depth / 2 + 16), 100}, o.pose);
+                                facing = (o.pose.rotation[1] + 65536 + (o.inward > 0 ? 16384 : -16384)) % 65536;
+                            }
+                            else
+                            {
+                                at = Workflow::TransformPoint({shaft.spec.at("width").get<double>() / 2 - 24, 0, floors[0].second - shaft.pose.position[2] + 100}, shaft.pose);
+                                facing = (shaft.pose.rotation[1] + 32768) % 65536;
+                            }
+                            auto& button = Switch(NewId(id + "_CarSwitch"), "button", pointer, at, facing, "U_BOTH", 0, "Lift");
+                            button.properties["TriggerMethode"] = "TriggerToggle";
+                            button.properties["bInitiallyUsable"] = "True";
+                            // It rides with the car: an actor whose AttachTag is a
+                            // mover's Tag is based on that mover.
+                            button.properties["AttachTag"] = liftTag;
+                            SetEvent(button, liftTag, pointer);
+                            car = button.id;
+                        }
+                    }
+                    Json floorsJson = Json::array();
+                    for (size_t k = 0; k < floors.size(); ++k)
+                    {
+                        Json switches = Json::array();
+                        if (!car.empty()) switches.push_back(Ref(car));
+                        for (size_t j = 0; j < floors.size(); ++j) if (j != k && !calls[j].empty()) switches.push_back(Ref(calls[j]));
+                        floorsJson.push_back({{"Doors", doors[k]}, {"Switches", switches}});
+                    }
+                    // Props given for the lift win over what is worked out here.
+                    auto& lift = *FindActor(id);
+                    const auto own = item.value("props", Json::object());
+                    if (!own.contains("DoorsAndSwitches")) lift.properties["DoorsAndSwitches"] = floorsJson;
+                    if (!liftDoors.empty() && !own.contains("LiftDoors")) lift.properties["LiftDoors"] = liftDoors;
                 }
             }
 
@@ -2318,7 +2530,7 @@ namespace Mcp::Spec
                 Objects();
                 Generic("props", "Engine.StaticMeshActor", "other");
                 Generic("fish", "SBase.SFish", "other");
-                Generic("softbody", "Echelon.ESoftBodyActor", "other");
+                Generic("softbody", "Echelon.ESBPatchActor", "other");
                 Generic("animated", "SBase.SAnimatedMesh", "other");
                 Generic("tutorials", "SBase.SZoneTips", "other");
                 Meshes();
@@ -2424,6 +2636,8 @@ namespace Mcp::Spec
                     const Vector centre{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
                     auto& volume = Add(item.at("id").get<std::string>(), cls, "volume", pointer, centre, 0, false);
                     volume.geometry = "polygons";
+                    volume.footprint = true;
+                    volume.storey = StoreyBelow(lo[2]);
                     volume.polygons = BoxPolygons({(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2});
                     if (item.contains("locationName")) { volume.properties["LocationName"] = Quoted(item.at("locationName").get<std::string>()); volume.label = item.at("locationName").get<std::string>(); }
                     if (item.contains("priority")) volume.properties["LocationPriority"] = Num(item.at("priority").get<double>());
@@ -2499,17 +2713,66 @@ namespace Mcp::Spec
                     objectIds.insert(Fold(object.id));
                 }
             }
+            // A class written without its package: Engine's own actors, Echelon's
+            // E classes, SBase for the rest (the live schema corrects a guess).
+            static std::string FullClass(const std::string& cls)
+            {
+                if (cls.find('.') != std::string::npos) return cls;
+                static const std::set<std::string> engine{"actor", "staticmeshactor", "mover", "light", "playerstart", "volume", "blockingvolume", "zoneinfo", "ambientsound",
+                                                          "soundtrigger", "musictrigger", "note", "brush", "emitter", "trigger"};
+                if (engine.count(Fold(cls))) return "Engine." + cls;
+                if (cls.size() > 1 && cls[0] == 'E' && std::isupper(static_cast<unsigned char>(cls[1]))) return "Echelon." + cls;
+                return "SBase." + cls;
+            }
             void Generic(const char* section, const char* cls, const char* role)
             {
+                const std::string kind = section;
                 const auto& list = List(Section({"environment", section}));
                 for (size_t i = 0; i < list.size(); ++i)
                 {
                     const auto& item = list[i];
                     const auto pointer = Child(std::string("/environment/") + section, i);
                     if (!item.contains("at")) { Diag("error", "actor.at", pointer, "needs at."); continue; }
+                    const auto type = FullClass(item.value("class", std::string(cls)));
+                    if (kind == "softbody" && Fold(type.substr(type.find_last_of('.') + 1)) == "esoftbodyactor")
+                    {
+                        Diag("error", "softbody.class", Child(pointer, "class"), "ESoftBodyActor is the SoftBody base class and cannot be placed; use ESBPatchActor (the usual cloth), ESBStripeDoorActor, ESBRopeActor or ESBChainActor.", "softbody-actors");
+                        continue;
+                    }
                     const auto at = Locate(item.at("at"), Child(pointer, "at"), Floor(0)).at;
-                    auto& actor = Add(item.at("id").get<std::string>(), item.value("class", std::string(cls)), role, pointer, at, YawOf(item, at, pointer, 0));
-                    if (item.contains("mesh")) Mesh(actor, item.at("mesh").get<std::string>());
+                    auto& actor = Add(item.at("id").get<std::string>(), type, role, pointer, at, YawOf(item, at, pointer, 0));
+                    if (item.contains("mesh"))
+                    {
+                        const auto mesh = item.at("mesh").get<std::string>();
+                        const auto given = Fold(mesh.substr(0, mesh.find('\'')));
+                        if (kind == "softbody")
+                        {
+                            // A SoftBody draws its own cloth (DT_SoftBody); a mesh is a chain's links.
+                            actor.properties["LinkMesh"] = Asset("StaticMesh", mesh);
+                            Package(Asset("StaticMesh", mesh));
+                        }
+                        else if ((kind == "animated" || kind == "fish") && (mesh.find('\'') == std::string::npos || given != "staticmesh"))
+                        {
+                            // An animated mesh, not a static one.
+                            actor.properties["Mesh"] = Asset("Mesh", mesh);
+                            actor.properties["DrawType"] = "DT_Mesh";
+                            Package(Asset("Mesh", mesh));
+                        }
+                        else Mesh(actor, mesh);
+                    }
+                    if (kind == "tutorials")
+                    {
+                        const auto shortName = Fold(type.substr(type.find_last_of('.') + 1));
+                        // Shown in the editor as a sprite, never in game, and only in
+                        // Visit a Map's tutorials (scct://wiki/map-tutorials).
+                        if (shortName == "szonetips" || shortName == "sendzonetip")
+                        {
+                            actor.properties["DrawType"] = "DT_Sprite";
+                            actor.properties["bHidden"] = "True";
+                            actor.properties["bShowOnlyWithIngameHelp"] = "True";
+                            actor.properties["bStayPermanently"] = "False";
+                        }
+                    }
                     if (item.contains("scale"))
                     {
                         const auto& s = item.at("scale");
@@ -2517,10 +2780,15 @@ namespace Mcp::Spec
                         else actor.properties["DrawScale3D"] = Loc({s[0].get<double>(), s[1].get<double>(), s[2].get<double>()});
                     }
                     Props(actor, item);
-                    if (std::string(section) == "softbody")
+                    // Two entries alike in everything but their id are one cloth twice.
+                    if (kind == "softbody")
                         for (size_t k = 0; k < i; ++k)
-                            if (list[k].value("mesh", std::string()) == item.value("mesh", std::string()) && item.contains("mesh") && list[k].value("class", std::string()) == item.value("class", std::string()))
-                                Diag("warning", "softbody.duplicate", pointer, "this SoftBody repeats " + list[k].at("id").get<std::string>() + "; duplicated SoftBody actors break in game. Create each one fresh.", "softbody-actors");
+                        {
+                            auto a = list[k], b = item;
+                            a.erase("id");
+                            b.erase("id");
+                            if (a == b) Diag("warning", "softbody.duplicate", pointer, "this SoftBody repeats " + list[k].at("id").get<std::string>() + " in the same place with the same properties. Each SoftBody is its own actor (never a duplicate of another); place this one where its own cloth goes.", "softbody-actors");
+                        }
                 }
             }
             void Meshes()
@@ -2582,7 +2850,7 @@ namespace Mcp::Spec
                         const auto& item = list[i];
                         const auto pointer = Child(std::string("/events/") + section, i);
                         const auto at = item.contains("at") ? Locate(item.at("at"), Child(pointer, "at"), Floor(64)).at : Fallback(144);
-                        auto& actor = Add(item.at("id").get<std::string>(), item.value("class", std::string(cls)), "other", pointer, at, YawOf(item, at, pointer, 0));
+                        auto& actor = Add(item.at("id").get<std::string>(), FullClass(item.value("class", std::string(cls))), "other", pointer, at, YawOf(item, at, pointer, 0));
                         Props(actor, item);
                     }
                 }
@@ -2873,6 +3141,35 @@ namespace Mcp::Spec
             for (const auto& a : low.actors) take(a.at, a.at);
             return {{"min", Point(lo)}, {"max", Point(hi)}};
         }
+        // A polygon brush's top-down outline (the hull of its vertices) and
+        // bounds, as a plan_render piece: add, subtract, volume or mover.
+        inline Json Footprint(const Actor& a)
+        {
+            std::vector<Vector> points;
+            for (const auto& polygon : a.polygons)
+                for (const auto& v : polygon.at("vertices")) points.push_back({v[0].get<double>() + a.at[0], v[1].get<double>() + a.at[1], v[2].get<double>() + a.at[2]});
+            if (points.empty()) return Json();
+            Vector lo = points[0], hi = points[0];
+            for (const auto& p : points) for (int k = 0; k < 3; ++k) { lo[k] = std::min(lo[k], p[k]); hi[k] = std::max(hi[k], p[k]); }
+            std::sort(points.begin(), points.end(), [](const Vector& x, const Vector& y) { return x[0] < y[0] || (x[0] == y[0] && x[1] < y[1]); });
+            auto turn = [](const Vector& o, const Vector& x, const Vector& y) { return (x[0] - o[0]) * (y[1] - o[1]) - (x[1] - o[1]) * (y[0] - o[0]); };
+            std::vector<Vector> hull(points.size() * 2);
+            size_t n = 0;
+            for (const auto& p : points) { while (n >= 2 && turn(hull[n - 2], hull[n - 1], p) <= 0) --n; hull[n++] = p; }
+            for (size_t i = points.size() - 1, lower = n + 1; i > 0; --i)
+            {
+                while (n >= lower && turn(hull[n - 2], hull[n - 1], points[i - 1]) <= 0) --n;
+                hull[n++] = points[i - 1];
+            }
+            Json outline = Json::array();
+            for (size_t i = 0; i + 1 < n; ++i) outline.push_back(Json::array({hull[i][0], hull[i][1]}));
+            const auto cls = Fold(a.cls);
+            const std::string kind = cls.find("volume") != std::string::npos ? "volume" : cls.find("mover") != std::string::npos ? "mover" :
+                                     a.properties.value("CsgOper", std::string()) == "CSG_Subtract" ? "subtract" : "add";
+            Json piece{{"id", a.id}, {"kind", kind}, {"name", a.label}, {"cls", a.cls}, {"storey", a.storey}, {"box", {{"min", Point(lo)}, {"max", Point(hi)}}}, {"yaw", 0}};
+            if (outline.size() >= 3) piece["outline"] = outline;
+            return piece;
+        }
         inline Json Render(const Lowered& low)
         {
             Json pieces = Json::array(), doorways = Json::array(), actors = Json::array();
@@ -2883,6 +3180,10 @@ namespace Mcp::Spec
                 if (p.kind == "Doorway")
                     doorways.push_back({{"id", p.id}, {"at", Point(p.pose.position)}, {"width", p.spec.at("width")}, {"yaw", Degrees(p.pose.rotation[1])}, {"portal", p.spec.value("portal", false)}});
             }
+            // Polygon brushes and sized volumes are drawn as their outlines
+            // (Map Design pieces above; in brushMode polygons those are the pieces).
+            for (const auto& a : low.actors)
+                if (a.footprint) if (auto piece = Footprint(a); !piece.is_null()) pieces.push_back(std::move(piece));
             for (const auto& a : low.actors)
                 actors.push_back({{"id", a.id}, {"cls", a.cls}, {"kind", a.role}, {"at", Point(a.at)}, {"position", Point(a.at)}, {"yaw", Degrees(a.yaw)}, {"label", a.label}});
             for (const auto& lift : low.lifts)
@@ -2892,7 +3193,14 @@ namespace Mcp::Spec
             Json labels = low.labels;
             for (const auto& p : low.pieces)
                 if (p.kind == "Room" && !p.generated) labels.push_back({{"at", Point({p.pose.position[0], p.pose.position[1], p.box.lo[2]})}, {"text", p.spec.value("name", p.id)}, {"kind", "room"}});
-            return {{"bounds", Bounds(low)}, {"pieces", pieces}, {"doorways", doorways}, {"actors", actors}, {"lines", low.lines}, {"labels", labels}};
+            Json bounds = Bounds(low);
+            for (const auto& p : pieces)
+                for (size_t k = 0; k < 3; ++k)
+                {
+                    bounds["min"][k] = std::min(bounds["min"][k].get<double>(), p.at("box").at("min")[k].get<double>());
+                    bounds["max"][k] = std::max(bounds["max"][k].get<double>(), p.at("box").at("max")[k].get<double>());
+                }
+            return {{"bounds", bounds}, {"pieces", pieces}, {"doorways", doorways}, {"actors", actors}, {"lines", low.lines}, {"labels", labels}};
         }
         inline Json Scene(const Lowered& low, const Json& spec, const std::map<std::string, std::string>& pointers, const Json& schema)
         {
@@ -2906,12 +3214,15 @@ namespace Mcp::Spec
             for (const auto& lift : low.lifts)
                 actors.push_back({{"path", lift.id}, {"class", "SBase.SLift"}, {"cls", "SBase.SLift"}, {"name", lift.id}, {"tag", lift.id}, {"event", "None"}, {"position", Point(lift.at)},
                                   {"rotation", Json::array({0, 0, 0})}, {"values", {{"NumKeys", "2"}}}, {"pointer", lift.pointer}});
-            // A generated stairwell or lift shaft is the hole a flight or a lift
-            // passes through: the Map Design check would call it a room without
-            // a doorway, so the rules see the flight and the rooms instead.
+            // What the compiler adds on purpose (stairwells, lift shafts and
+            // flights, zone portals) is marked generated: it carves into what it
+            // joins, which the rules expect of it.
             for (const auto& p : low.pieces)
-                if (!p.generated || !Design::SpansFloors(p.spec.value("name", std::string())))
-                    pieces.push_back({{"id", p.id}, {"spec", p.spec}, {"position", p.pose.position}, {"rotation", p.pose.rotation}, {"pointer", p.pointer}, {"zone", p.zone}, {"storey", p.storey}});
+            {
+                Json piece{{"id", p.id}, {"spec", p.spec}, {"position", p.pose.position}, {"rotation", p.pose.rotation}, {"pointer", p.pointer}, {"zone", p.zone}, {"storey", p.storey}};
+                if (p.generated) piece["generated"] = true;
+                pieces.push_back(piece);
+            }
             for (const auto& ge : low.ges) ges.push_back({{"kind", ge.at("kind")}, {"command", ge.at("command")}, {"points", ge.at("points")}});
             for (const auto& [id, pointer] : pointers) pointerJson[id] = pointer;
             Json players = Json::array(), targets = Json::array(), operations = Json::array();

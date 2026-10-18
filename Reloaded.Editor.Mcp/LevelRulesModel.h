@@ -529,7 +529,7 @@ namespace Mcp::Rules
             std::string mapName;
             std::vector<SettingsMode> modes;
             std::optional<size_t> strings;
-            Json textures, interface;
+            Json textures, images; // mapsettings.get's textures; the spec's interface section
         };
         inline Settings ReadSettings(const Json& given)
         {
@@ -538,7 +538,7 @@ namespace Mcp::Rules
             s.given = true;
             if (given.contains("settings") && given.at("settings").is_boolean()) s.exists = given.at("settings").get<bool>();
             if (given.contains("textures") && given.at("textures").is_object()) s.textures = given.at("textures");
-            if (given.contains("interface") && given.at("interface").is_object()) s.interface = given.at("interface");
+            if (given.contains("interface") && given.at("interface").is_object()) s.images = given.at("interface");
             Json values = given.contains("values") ? given.at("values") : given;
             if (!values.is_object()) return s;
             if (const auto* name = Field(values, "MapName")) { s.mapName = Text(*name); s.known = true; }
@@ -776,13 +776,13 @@ namespace Mcp::Rules
         // Unknown (false) away from every piece.
         inline bool InSolid(const std::vector<Placed>& placed, const std::vector<Workflow::Design::WorldSolid>& carved, const Workflow::Vector& p)
         {
-            bool near = false;
+            bool walled = false;
             for (const auto& piece : placed)
             {
-                if (Space(piece.kind) && Inside(piece.extent, p, piece.thickness + 48)) near = true;
+                if (Space(piece.kind) && Inside(piece.extent, p, piece.thickness + 48)) walled = true;
                 if (Connector(piece.kind) && Inside(piece.extent, p, -1)) return true;
             }
-            return near && !Workflow::Design::InsideCarved(carved, p);
+            return walled && !Workflow::Design::InsideCarved(carved, p);
         }
 
         struct Index
@@ -1761,11 +1761,11 @@ namespace Mcp::Rules
                             Add("interface.textures", std::string(slot.name) + " is " + std::to_string(width) + "x" + std::to_string(height) + " " + have + "; the game expects " + std::to_string(size) + "x" +
                                 std::to_string(size) + " " + format + ".", {}, Fix("map_settings", {{"interface", {{slot.spec, "path to the image"}}}}, "interface.texture converts and imports it."));
                     }
-                Json interface = s.interface;
-                if (!interface.is_object() && scene.release.is_object() && scene.release.contains("interface")) interface = scene.release.at("interface");
-                if (interface.is_object() && !s.textures.is_object())
+                Json images = s.images;
+                if (!images.is_object() && scene.release.is_object() && scene.release.contains("interface")) images = scene.release.at("interface");
+                if (images.is_object() && !s.textures.is_object())
                     for (const auto& slot : slots)
-                        if (!Field(interface, slot.spec) && !Field(interface, slot.name))
+                        if (!Field(images, slot.spec) && !Field(images, slot.name))
                             Add("interface.textures", std::string("The spec gives no ") + slot.name + " image (interface." + slot.spec + ", " + std::to_string(slot.size) + "x" + std::to_string(slot.size) + " " + slot.format + ").", {},
                                 Fix("map_settings", {{"interface", {{slot.spec, "path to the image"}}}}));
             }
@@ -1906,7 +1906,7 @@ namespace Mcp::Rules
                     for (const auto& issue : Workflow::Design::DesignIssues(pieces, Json::object()))
                     {
                         // A room only stairs, a lift or a climb reach (a storey
-                        // above, its stairwell left out) is joined all the same.
+                        // above) is joined all the same.
                         if (issue.severity == "error" && issue.text.find("has no doorway") != std::string::npos)
                         {
                             const auto at = std::find_if(placed.begin(), placed.end(), [&](const Placed& p) { return p.index == issue.piece; });
@@ -1922,11 +1922,20 @@ namespace Mcp::Rules
                         // climbing GE reaches is reached.
                         if (issue.severity == "warning" && issue.text.find("step height") != std::string::npos && PlatformReached(issue.piece)) continue;
                         // What the compiler adds on purpose (zone portals, joints)
-                        // cuts into what it joins; it marks those generated.
+                        // cuts into what it joins; it marks those generated. A
+                        // stairwell or lift shaft carves through the floors it
+                        // joins, whoever made it, and needs no doorway.
                         const auto* piece = PlacedPiece(issue.piece);
-                        if (piece && issue.piece >= 0 && static_cast<size_t>(issue.piece) < pieces.size() && pieces[static_cast<size_t>(issue.piece)].value("generated", false) &&
-                            (piece->kind == "Doorway" || issue.text.find("carve into each other") != std::string::npos))
+                        if (piece && Passes(issue.piece) && (piece->kind == "Doorway" || issue.text.find("carve into each other") != std::string::npos || issue.text.find("has no doorway") != std::string::npos))
                             continue;
+                        if (piece && issue.text.rfind(piece->name + " and ", 0) == 0 && issue.text.find(" carve into each other") != std::string::npos)
+                        {
+                            const auto other = issue.text.substr(piece->name.size() + 5, issue.text.find(" carve into each other") - piece->name.size() - 5);
+                            bool passing = false;
+                            for (const auto& p : placed)
+                                if (p.index > issue.piece && p.name == other && Workflow::Design::Overlaps(piece->extent, p.extent, -2) && Passes(p.index)) passing = true;
+                            if (passing) continue;
+                        }
                         // A corridor, vent or crawlway joins what it overlaps:
                         // that merge is the junction, not a mistake. Two rooms
                         // carving into each other still is.
@@ -1958,6 +1967,16 @@ namespace Mcp::Rules
             {
                 const auto at = std::find_if(placed.begin(), placed.end(), [&](const Placed& p) { return p.index == piece; });
                 return at == placed.end() ? nullptr : &*at;
+            }
+            // A piece that carves into what it joins on purpose: one the
+            // compiler generated, or a stairwell, floor opening or shaft.
+            bool Passes(int piece) const
+            {
+                if (piece < 0 || static_cast<size_t>(piece) >= pieces.size()) return false;
+                const auto& p = pieces[static_cast<size_t>(piece)];
+                if (p.value("generated", false)) return true;
+                const auto& spec = p.at("spec");
+                return spec.value("kind", std::string()) == "Room" && Workflow::Design::SpansFloors(spec.value("name", std::string()));
             }
             bool PlatformReached(int piece) const
             {

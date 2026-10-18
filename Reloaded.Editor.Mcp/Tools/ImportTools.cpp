@@ -170,7 +170,7 @@ namespace
             next = Json::array({Next("assets_import", "Import the mesh into the map's <Map>_STM package; then place it with geometry.meshes (options.mesh here does it for you).", {{"items", items}})});
         }
         Json result{{"format", kind}, {"source", pathText.empty() ? Json("live") : Json(pathText)}, {"report", report}, {"specFile", PathText(file)}, {"specBytes", text.size()},
-                    {"diagnostics", diagnostics}, {"errors", errors}, {"warnings", warnings}, {"next", next}};
+                    {"diagnostics", diagnostics}, {"compile", {{"errors", errors}, {"warnings", warnings}}}, {"next", next}};
         if (!summary.is_null()) result["summary"] = summary;
         const bool inlineSpec = text.size() <= kInlineSpec;
         if (inlineSpec) result["spec"] = spec;
@@ -203,12 +203,10 @@ namespace
         std::string pending;                               // bytes to write to file first
         Json warnings = Json::array();
         std::string Path() const { return package + (group.empty() ? "" : "." + group) + "." + name; }
+        // Its file in the work folder, unique per asset.
+        std::string FileName(const std::string& extension) const { return Media::SafeName(package + "_" + (group.empty() ? "" : group + "_") + name, "asset") + extension; }
     };
-    std::string Extension(const fs::path& file)
-    {
-        auto ext = Lower(Media::Utf8(file.extension()));
-        return ext;
-    }
+    std::string Extension(const fs::path& file) { return Lower(Media::Utf8(file.extension())); }
     std::string ReadHeader(const fs::path& file)
     {
         std::ifstream in(file, std::ios::binary);
@@ -285,7 +283,7 @@ namespace
                     throw std::runtime_error(Media::Utf8(file.filename()) + " is " + std::to_string(image.width) + "x" + std::to_string(image.height) +
                                              "; texture sides must be powers of two up to 8192. image_convert {file, size} makes one (fit pad, crop or stretch).");
                 p.pending = Image::EncodeTga(alpha || masked ? image : Media::Fit(image, image.width, image.height, "stretch", false, {0, 0, 0}), false);
-                const auto converted = folder / (Media::SafeName(p.name, "texture") + ".tga");
+                const auto converted = folder / p.FileName(".tga");
                 readable = Media::Utf8(converted);
                 p.source["convertedTo"] = readable;
                 p.source["width"] = image.width;
@@ -324,7 +322,7 @@ namespace
                 for (const auto& w : ase.info.value("warnings", Json::array())) p.warnings.push_back(w);
                 ase.info.erase("warnings");
                 p.pending = std::move(ase.text);
-                const auto converted = folder / (Media::SafeName(p.name, "mesh") + ".ase");
+                const auto converted = folder / p.FileName(".ase");
                 readable = Media::Utf8(converted);
                 p.source["convertedTo"] = readable;
                 p.source["mesh"] = ase.info;
@@ -337,7 +335,7 @@ namespace
         if (p.pending.empty() && !Bridge::EngineSafePath(readable))
         {
             p.pending = Media::ReadFile(file, 512u * 1024 * 1024);
-            readable = Media::Utf8(folder / (Media::SafeName(p.name, "asset") + ext));
+            readable = Media::Utf8(folder / p.FileName(ext));
             p.source["copiedTo"] = readable;
         }
         if (!Bridge::EngineSafePath(readable))
@@ -368,6 +366,9 @@ namespace
             try { plan.push_back(Prepare(items[i], i, stem, folder, packageKinds)); }
             catch (const std::exception& e) { problems.push_back("items[" + std::to_string(i) + "]: " + e.what()); }
         }
+        std::set<std::string> assets;
+        for (const auto& p : plan)
+            if (!assets.insert(Lower(p.Path())).second) problems.push_back("items[" + std::to_string(p.item) + "]: " + p.Path() + " is listed twice; give one of them another name or group.");
         if (!problems.empty())
             return Fail("Nothing was imported: " + Count(problems.size(), "item") + " cannot be imported as given. " + problems.at(0).get<std::string>(), {{"problems", problems}});
         auto describe = [](const Prepared& p)

@@ -455,6 +455,10 @@ void MapSettingsTool()
     Check(settings.at("values").at("MapName")=="\"VERSUS STARTER\"","the values are listed");
     Check(r.structured.at("interface")[0].at("applied")==true && r.structured.at("minimap").at("applied")==true,"the interface and minimap steps are reported");
     Check(WarningHas(r.structured,"Map Settings were NOT written") && WarningHas(r.structured,"not a file on this machine"),"the warnings say what did not happen");
+    // mapName alone is a Map Settings change (and names a new spec too).
+    Check(h.registry.FindTool("map_settings")->inputSchema.at("properties").at("mapName").value("description",std::string()).find("Map Settings")!=std::string::npos,"map_settings mapName is the Map Settings name");
+    h.Ok("map_settings",{{"mapName","STARTER"}});
+    Check(h.editor.sidecar.at("spec").at("settings").at("mapName")=="STARTER","mapName alone changes MapName");
     // Settings given as one object, and a mode dropped.
     h.Ok("map_settings",{{"mapSettings",{{"legend","STARTER|Three rooms"}}},{"removeModes",Json::array({"deathmatch"})}});
     Check(h.editor.sidecar.at("spec").at("settings").at("modes").size()==2 && h.editor.sidecar.at("spec").at("settings").at("legend")=="STARTER|Three rooms","mapSettings and removeModes apply");

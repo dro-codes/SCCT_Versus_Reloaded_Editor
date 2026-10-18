@@ -125,7 +125,7 @@ namespace
         properties["screenshot"] = S::Boolean("A top-view screenshot afterwards. Default: when it builds.");
         properties["save"] = S::String("Save the map to this path afterwards (Packages\\MapsEd\\<Name>D.sdc).");
         properties["force"] = S::Boolean("Apply despite errors the change brings.");
-        properties["mapName"] = S::String("For a map with no level spec yet: the new spec's name (capitals). Default: the map file's.");
+        if (!properties.contains("mapName")) properties["mapName"] = S::String("For a map with no level spec yet: the new spec's name (capitals). Default: the map file's.");
         return S::Mutating(S::Input(properties));
     }
 
@@ -241,7 +241,7 @@ namespace
         if (build != "auto" && build != "geometry" && build != "all" && build != "none") throw std::runtime_error("build is auto, geometry, all or none.");
         static const std::set<std::string> common{"mode", "dryRun", "label", "build", "screenshot", "save", "force", "mapName", "brushMode"};
         bool given = false;
-        for (auto it = a.begin(); it != a.end(); ++it) given = given || (!common.count(it.key()) && !it.value().is_null());
+        for (auto it = a.begin(); it != a.end(); ++it) given = given || ((!common.count(it.key()) || t.extra.contains(it.key())) && !it.value().is_null());
         if (!given)
         {
             if (t.empty) return t.empty(c);
@@ -657,10 +657,15 @@ namespace
                         {"mapSettings", {"settings"}, "All the Map Settings as one object (the spec's settings section).", "id", false},
                         {"settings", {"settings"}, "The same as mapSettings.", "id", false},
                         {"modes", {"settings", "modes"}, "Map Settings per mode, matched by mode.", "mode", false}};
-            for (const char* key : {"mapName", "briefSpy", "briefMerc", "legend", "legendInBrief"})
+            for (const auto& [key, text] : std::vector<std::pair<std::string, std::string>>{
+                     {"mapName", "Map Settings MapName, in capitals (it also names a new spec)."},
+                     {"briefSpy", "Map Settings ExpliMapInBriefSpy: the Spy brief, shared by every mode."},
+                     {"briefMerc", "Map Settings ExpliMapInBriefSentry: the Merc brief, shared by every mode."},
+                     {"legend", "Map Settings LegendMap: date, place and a one-line story; | breaks lines."},
+                     {"legendInBrief", "Map Settings LegendMapInBrief: the numbered minimap zones; | breaks lines."}})
             {
                 auto schema = settings.at(key);
-                if (!schema.contains("description")) schema["description"] = std::string("Map Settings ") + key + ".";
+                schema["description"] = text;
                 t.extra[key] = schema;
             }
             t.extra["removeModes"] = S::Array(S::Enum({"story", "diskhunt", "deathmatch"}, "A mode."), "Map Settings modes to drop.");

@@ -1,5 +1,6 @@
 // Reading the map: map_query, view_screenshot, plan_render.
 #include "Common.h"
+#include <set>
 #if !defined(RE_MCP_STANDALONE) && __has_include("../PlanRender.h")
 #include "../PlanRender.h"
 #define RE_MCP_RENDER 1
@@ -290,6 +291,27 @@ namespace
     }
 
     // ---------------------------------------------------------- plan_render
+#ifdef RE_MCP_RENDER
+    // The live map as a render scene: design.scene's brushes and actors, with
+    // every actor's TeamNumber (team colours), LocationName (zone labels), Tag
+    // and Event (wiring lines) from actors.query (PlanRender.h SceneFromLive).
+    Json LiveScene(ToolContext& c)
+    {
+        const auto design = Call(c, "design.scene", Json::object(), {}, false, 300000);
+        Json actors = Json::array();
+        try
+        {
+            Json meta;
+            actors = AllActors(c, {{"fields", {"TeamNumber", "LocationName"}}}, 40000, meta);
+        }
+        catch (const Bridge::Error& e)
+        {
+            if (e.code == Bridge::Code::NotConnected || e.code == Bridge::Code::Busy) throw;
+        }
+        catch (const std::exception&) {}
+        return Render::SceneFromLive(design, {{"actors", actors}});
+    }
+#else
     std::string ActorKind(const std::string& cls, const std::string& team)
     {
         const auto c = Lower(cls);
@@ -336,6 +358,7 @@ namespace
         }
         return scene;
     }
+#endif
 
     ToolResult RenderPlan(const Json& a, ToolContext& c)
     {
@@ -353,6 +376,16 @@ namespace
                 options.screenshot = false;
                 const auto compiled = Spec::Compile(spec, options);
                 scene = compiled.render;
+#ifdef RE_MCP_RENDER
+                // Compiled.render draws geometry.brushes; one that does not gets
+                // them from the renderer.
+                std::set<std::string> drawn;
+                for (const auto& p : scene.value("pieces", Json::array())) drawn.insert(Lower(p.value("id", std::string())));
+                bool missing = false;
+                if (spec.contains("geometry") && spec.at("geometry").is_object())
+                    for (const auto& b : spec.at("geometry").value("brushes", Json::array())) missing = missing || (b.is_object() && !drawn.count(Lower(b.value("id", std::string()))));
+                if (missing) Render::AddBrushes(scene, spec);
+#endif
                 for (const auto& d : compiled.diagnostics)
                     diagnostics.push_back({{"severity", d.severity}, {"rule", d.rule}, {"pointer", d.pointer}, {"message", d.message}, {"wikiPage", d.wikiPage}});
             }
@@ -528,8 +561,9 @@ void RegisterQueryTools(Registry& registry)
         t.name = "plan_render";
         t.title = "Draw a top-down plan";
         t.description =
-            "A top-down PNG plan, north up: of a scct.level-spec (spec; works offline, without the editor) or of the live map (no spec: brushes as their "
-            "bounds, spawns, objectives, cameras, security, lights). Use it to check a spec against the source drawing or video frames before level_build, "
+            "A top-down PNG plan, north up: of a scct.level-spec (spec; works offline, without the editor: its pieces, polygon brushes and volumes, "
+            "actors, wiring and zones) or of the live map (no spec: brushes as their outlines, spawns in team colours, objectives, cameras, security, lights, "
+            "Event links and zone names). Use it to check a spec against the source drawing or video frames before level_build, "
             "and the built map against the spec. For a spec, the compiler's diagnostics come back too. options are passed to the renderer (see its "
             "documentation: storey filter, labels, grid).";
         t.inputSchema = S::Input({{"spec", S::Free("A scct.level-spec document to draw (scct://schema/level-spec). Omit to draw the live map.")},

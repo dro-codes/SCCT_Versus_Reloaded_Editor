@@ -32,7 +32,8 @@
     "merc": {"in": "RoofFloor", "count": 4, "facing": {"toward": "Shaft"}}
   },
   "mechanisms": {
-    "lifts": [{"id": "MainLift", "shaft": "Shaft", "storeys": ["Ground", "First", "Top"], "start": "Ground", "mesh": "ToweD_STM.Lift.Car256", "moveTime": 3}]
+    "lifts": [{"id": "MainLift", "shaft": "Shaft", "storeys": ["Ground", "First", "Top"], "start": "Ground", "mesh": "ToweD_STM.Lift.Car256", "moveTime": 3,
+               "doorMesh": "ToweD_STM.Lift.Door160", "doorOpen": {"offset": [0, 0, 192]}, "doorMoveTime": 1}]
   },
   "gameplay": {
     "modes": ["story", "diskhunt", "deathmatch"],
@@ -96,5 +97,5 @@
     ]
   },
   "level": {"deathPawnHeight": -512, "motionTracking": "standard", "geActivationMask": 1},
-  "provenance": {"source": "Hand-written example", "notes": ["MainLift is an SLift with one key per storey; ServiceLift is a design.lift platform.", "Mesh and sound paths are placeholders in the map's own ToweD_STM and ToweD_Snd packages."]}
+  "provenance": {"source": "Hand-written example", "notes": ["MainLift is an SLift with one key per storey, a door and a call switch on each storey's opening onto the shaft, a switch and an SLiftDoor in the car; ServiceLift is a design.lift platform.", "Mesh and sound paths are placeholders in the map's own ToweD_STM and ToweD_Snd packages."]}
 }

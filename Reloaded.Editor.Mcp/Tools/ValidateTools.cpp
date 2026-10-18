@@ -164,28 +164,72 @@ namespace
         sources["trace"] = std::to_string(segments.size() + again.size()) + " segments traced";
     }
 
+    // The Map Design pieces of the live map, as the Map Design window keeps
+    // them (design.pieces: the library's records, with hand edits). Null when
+    // the editor has no such op or it fails, and the sidecar stands in.
+    Json LibraryPieces(ToolContext& c, Json& sources, Json& elements)
+    {
+        try
+        {
+            const auto design = Call(c, "design.pieces");
+            if (!design.is_object() || !design.contains("pieces") || !design.at("pieces").is_array()) { sources["design"] = "design.pieces gave no pieces list"; return Json(); }
+            if (design.contains("elements") && design.at("elements").is_array()) elements = design.at("elements");
+            sources["design"] = "design.pieces: " + Count(design.at("pieces").size(), "piece") + " from the Map Design library";
+            return design.at("pieces");
+        }
+        catch (const Bridge::Error& e)
+        {
+            if (e.code == Bridge::Code::NotConnected || e.code == Bridge::Code::Busy || e.code == Bridge::Code::Timeout) throw;
+            sources["design"] = std::string("design.pieces failed: ") + e.what();
+        }
+        catch (const std::exception& e) { sources["design"] = std::string("design.pieces failed: ") + e.what(); }
+        return Json();
+    }
 #ifdef RE_MCP_SPEC
-    // Map Design pieces for the live map: the level spec level_build applied
-    // last (the sidecar), compiled again. The bridge has no op that reads the
-    // Map Design library's pieces themselves.
+    // The level spec level_build applied last (the sidecar), compiled again:
+    // the modes the map plays, its name, which pieces the compiler generated,
+    // and the pieces themselves when the library cannot be read.
     Json SidecarScene(ToolContext& c, Json& sources)
     {
-        const auto sidecar = Optional(c, sources, "design", "mcp.sidecar.get");
+        const auto sidecar = Optional(c, sources, "sidecar", "mcp.sidecar.get");
         const auto stored = sidecar.is_object() ? sidecar.value("sidecar", Json()) : Json();
         if (!stored.is_object())
         {
-            if (sources.value("design", std::string()) == "mcp.sidecar.get") sources["design"] = "no level spec has been applied to this map, so there are no pieces to check";
+            if (sources.value("sidecar", std::string()) == "mcp.sidecar.get") sources["sidecar"] = "no level spec has been applied to this map";
             return Json();
         }
         const auto spec = stored.contains("spec") ? stored.at("spec") : stored;
         try
         {
             auto compiled = Spec::Compile(spec);
-            sources["design"] = "pieces from the level spec level_build last applied (edits made by hand since are not seen)";
+            sources["sidecar"] = "the level spec level_build last applied";
             return compiled.scene;
         }
-        catch (const std::exception& e) { sources["design"] = std::string("the applied level spec no longer compiles: ") + e.what(); }
+        catch (const std::exception& e) { sources["sidecar"] = std::string("the applied level spec no longer compiles: ") + e.what(); }
         return Json();
+    }
+    // Library pieces the compiler generated (stairwells, shafts, flights, zone
+    // portals) marked as the compiled scene marks them, matched by kind, name
+    // and place, so the rules expect them to carve into what they join.
+    void MarkGenerated(Json& pieces, const Json& applied)
+    {
+        for (auto& piece : pieces)
+        {
+            if (!piece.is_object() || !piece.contains("spec") || !piece.contains("position")) continue;
+            for (const auto& made : applied.value("pieces", Json::array()))
+            {
+                if (!made.value("generated", false)) continue;
+                try
+                {
+                    const auto& a = piece.at("spec");
+                    const auto& b = made.at("spec");
+                    if (a.value("kind", std::string()) != b.value("kind", std::string()) || a.value("name", std::string()) != b.value("name", std::string())) continue;
+                    const auto p = Ge::Point(piece.at("position"), "position"), q = Ge::Point(made.at("position"), "position");
+                    if (Ge::Distance(p, q) < 1) { piece["generated"] = true; break; }
+                }
+                catch (const std::exception&) {}
+            }
+        }
     }
 #endif
     // The scct.map-changes documents a compiled plan applies, for Authoring::Validate.
@@ -306,17 +350,26 @@ namespace
             }
             Json ges = include.count("wiki") || include.count("design") ? Optional(c, sources, "ges", "ge.list") : Json();
             if (include.count("release")) extra["mapSettings"] = Optional(c, sources, "mapSettings", "mapsettings.get");
+            Json library, elements;
+            if (include.count("design")) library = LibraryPieces(c, sources, elements);
+            // GEs Map Design recorded, when the editor's own list is not to be had.
+            if (ges.is_null() && elements.is_array() && !elements.empty()) { ges = elements; sources["ges"] = "design.pieces elements"; }
 #ifdef RE_MCP_SPEC
             if (include.count("design") || !Has(a, "modes"))
                 if (const auto applied = SidecarScene(c, sources); applied.is_object())
                 {
-                    if (include.count("design")) extra["pieces"] = applied.value("pieces", Json::array());
+                    if (include.count("design") && library.is_null())
+                    {
+                        extra["pieces"] = applied.value("pieces", Json::array());
+                        sources["design"] = sources.value("design", std::string()) + "; pieces from the level spec level_build last applied instead (edits made by hand since are not seen)";
+                    }
+                    else if (library.is_array()) MarkGenerated(library, applied);
                     extra["modes"] = applied.value("modes", Json::array());
                     extra["mapName"] = applied.value("mapName", std::string());
                 }
-#else
-            sources["design"] = "this build has no level-spec compiler, so no Map Design pieces are checked";
 #endif
+            if (library.is_array()) extra["pieces"] = library;
+            else if (include.count("design") && !extra.contains("pieces")) sources["design"] = sources.value("design", std::string("no Map Design pieces")) + "; no Map Design pieces are checked";
             if (include.count("mapcheck"))
             {
                 extra["mapCheck"] = Optional(c, sources, "mapCheck", "mapcheck.run", Json::object(), 300000);
@@ -403,7 +456,7 @@ void RegisterValidateTools(Registry& registry)
     t.title = "Check the map against the wiki";
     t.description =
         "Checks a Versus map against the SCCT Versus Reloaded wiki and returns what to fix. Read-only. Without spec it checks the map open in the editor "
-        "(it reads the actors, Level Properties, Map Settings and GEs, runs Map Check and the lighting budget, and traces the built level for floor heights); "
+        "(it reads the actors, Level Properties, Map Settings, GEs and the Map Design pieces, runs Map Check and the lighting budget, and traces the built level for floor heights); "
         "with spec it compiles that scct.level-spec offline and checks what level_build would make, with no editor needed.\n"
         "What it checks (scct://rules lists every rule with its severities):\n"
         "- spawns: PlayerStarts for both teams (TeamNumber 0 spy, 1 merc), at least 3 each; spy starts not within 512 units of an objective, the teams not within 768 "

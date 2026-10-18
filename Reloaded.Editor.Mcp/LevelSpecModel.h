@@ -232,8 +232,15 @@ namespace Mcp::Spec
             const auto mover = Obj({{"id", Ref("id")}, {"class", Str()}, {"mesh", Str()}, {"at", Ref("position")}, {"yaw", Num()}, {"keys", Arr(key, 1, 24)},
                                     {"moveTime", Num()}, {"stayOpen", Num()}, {"initialState", Str()}, {"encroach", Str()}, {"props", Ref("props")}},
                                    {"id", "mesh"});
-            const auto lift = Obj({{"id", Ref("id")}, {"shaft", Ref("id")}, {"storeys", Arr(Ref("id"), 2, 24)}, {"start", Ref("id")}, {"mesh", Str()},
-                                   {"moveTime", Num()}, {"switches", Bool()}, {"props", Ref("props")}},
+            const auto liftDoor = Obj({{"storey", Ref("id")}, {"doorway", Ref("id")}, {"at", Ref("position")}, {"yaw", Num()}, {"mesh", Str()}},
+                                      {"storey"}, "Where one storey's external door goes, when no doorway of the spec joins that storey to the shaft (or another than the one found).");
+            const auto lift = Obj({{"id", Ref("id")}, {"shaft", Ref("id")}, {"storeys", Arr(Ref("id"), 2, 24)}, {"start", Ref("id")}, {"mesh", Str("The car: an SLift static mesh. Without it a two-storey lift is a design.lift platform.")},
+                                   {"moveTime", Num()}, {"switches", Bool("A call switch on each storey and one in the car. Default true.")},
+                                   {"carSwitch", Bool("The switch inside the car, which rides with it (AttachTag). Default true.")},
+                                   {"doorMesh", Str("Static mesh of each storey's external door (a Mover: Key 0 open, Key 1 closed). Without it the lift has no doors.")},
+                                   {"carDoorMesh", Str("Static mesh of the car's SLiftDoor; default doorMesh.")},
+                                   {"doorOpen", Any({Obj({{"offset", Ref("vec3")}}, {"offset"}), Obj({{"yaw", Num()}}, {"yaw"})}, "How a lift door opens from closed: {offset} or {yaw}. Default: up by its height.")},
+                                   {"doorMoveTime", Num()}, {"doors", Arr(liftDoor)}, {"props", Ref("props")}},
                                   {"id", "shaft", "storeys"});
             const auto button = Obj({{"id", Ref("id")}, {"kind", Enum({"button", "panel"})}, {"at", Ref("position")}, {"yaw", Num()}, {"facing", Ref("facing")},
                                      {"targets", Arr(Str("An id or a Tag."), 1)}, {"hackTime", Num()}, {"usableBy", usable}, {"text", Str()}, {"mesh", Str()},

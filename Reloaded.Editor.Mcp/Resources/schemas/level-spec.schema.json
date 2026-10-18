@@ -1893,10 +1893,83 @@
           "items": {
             "additionalProperties": false,
             "properties": {
+              "carDoorMesh": {
+                "description": "Static mesh of the car's SLiftDoor; default doorMesh.",
+                "type": "string"
+              },
+              "carSwitch": {
+                "description": "The switch inside the car, which rides with it (AttachTag). Default true.",
+                "type": "boolean"
+              },
+              "doorMesh": {
+                "description": "Static mesh of each storey's external door (a Mover: Key 0 open, Key 1 closed). Without it the lift has no doors.",
+                "type": "string"
+              },
+              "doorMoveTime": {
+                "type": "number"
+              },
+              "doorOpen": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "offset": {
+                        "$ref": "#/$defs/vec3"
+                      }
+                    },
+                    "required": [
+                      "offset"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "yaw": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "yaw"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "description": "How a lift door opens from closed: {offset} or {yaw}. Default: up by its height."
+              },
+              "doors": {
+                "items": {
+                  "additionalProperties": false,
+                  "description": "Where one storey's external door goes, when no doorway of the spec joins that storey to the shaft (or another than the one found).",
+                  "properties": {
+                    "at": {
+                      "$ref": "#/$defs/position"
+                    },
+                    "doorway": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "mesh": {
+                      "type": "string"
+                    },
+                    "storey": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "yaw": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "storey"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "id": {
                 "$ref": "#/$defs/id"
               },
               "mesh": {
+                "description": "The car: an SLift static mesh. Without it a two-storey lift is a design.lift platform.",
                 "type": "string"
               },
               "moveTime": {
@@ -1920,6 +1993,7 @@
                 "type": "array"
               },
               "switches": {
+                "description": "A call switch on each storey and one in the car. Default true.",
                 "type": "boolean"
               }
             },

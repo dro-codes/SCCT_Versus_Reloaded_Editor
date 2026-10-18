@@ -106,7 +106,7 @@ namespace
         std::string id;
         const Json* at = &spec;
         size_t start = 1;
-        while (start <= pointer.size() && start > 0)
+        while (start <= pointer.size())
         {
             const auto end = pointer.find('/', start);
             std::string token = pointer.substr(start, end == std::string::npos ? std::string::npos : end - start);
@@ -267,7 +267,11 @@ namespace
     // Nothing for the editor to do: the spec the map was built from, again.
     bool Unchanged(const Spec::Compiled& compiled, const Json& before)
     {
-        if (!before.is_object() || Text(before, "hash") != Text(compiled.sidecar, "hash") || compiled.plan.contains("pre")) return false;
+        if (!before.is_object() || Text(before, "hash") != Text(compiled.sidecar, "hash")) return false;
+        // Package loads alone change nothing; imports and saves do.
+        for (const auto& step : compiled.plan.value("pre", Json::array()))
+            for (const auto& o : step.value("args", Json::object()).value("document", Json::object()).value("operations", Json::array()))
+                if (Text(o, "op") != "load") return false;
         for (const auto& step : compiled.plan.value("steps", Json::array()))
         {
             const auto op = Text(step, "op");
@@ -576,6 +580,10 @@ namespace
         request["label"] = Label(a, "level_build " + (map.is_object() ? Text(map, "name") : std::string()));
         std::vector<Content> images;
         const auto context = BuildContext(c, mode == "apply");
+        // A merge adds to the stored spec, as the intent tools do: errors it
+        // already had do not block.
+        const auto sidecar = context.value("sidecar", Json());
+        if (Text(request, "sync") == "merge" && sidecar.is_object() && sidecar.contains("spec")) request["baseline"] = sidecar.at("spec");
         auto report = LevelBuild(c, context, spec, request, images);
         report["source"] = source;
         return BuildResult(c, report, images);
@@ -830,6 +838,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
         report["warnings"] = warnings;
         report["undo"] = Json();
         if (options.build) next.push_back(Next("map_build", "Rebuild the geometry anyway.", {{"what", build == "all" ? "all" : "geometry"}}));
+        if (state.contains("dirty") && state.at("dirty") == true) next.push_back(Next("map_file", "The map has unsaved changes.", {{"action", Text(state, "mapFile").empty() ? "save_as" : "save"}}));
         report["next"] = next;
         return report;
     }
@@ -863,7 +872,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
                            findingText + ".";
         if (report.contains("preview")) text += " " + Count(report.value("previewTotal", 0u), "preview row") + " from the editor.";
         text += " The image is the plan, north up.";
-        if (blocking && !Bool(request, "force")) text += " " + Count(blocking, "error") + " block apply; fix them first, or pass force:true.";
+        if (blocking && !Bool(request, "force")) text += " " + Count(blocking, "error") + (blocking == 1 ? " blocks" : " block") + " apply; fix " + (blocking == 1 ? "it" : "them") + " first, or pass force:true.";
         else text += " Run again with mode \"apply\" to build it (one Undo step).";
         if (blocking) next.insert(next.begin(), Next("level_spec_validate", "See every error with its pointer; fix them before applying.", {{"path", "scct://map/spec"}}));
         else next.push_back(Next(tool, "Build it.", {{"mode", "apply"}}));
@@ -877,7 +886,8 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
 
     if (blocking && !Bool(request, "force"))
     {
-        report["error"] = "The level spec has " + Count(blocking, "error") + " that block this build; nothing was built. Fix them (validation lists each with its JSON pointer and wiki page), or pass force:true to build anyway.";
+        report["error"] = "The level spec has " + Count(blocking, "error") + (blocking == 1 ? " that blocks" : " that block") +
+                          " this build; nothing was built. Fix " + (blocking == 1 ? "it" : "them") + " (validation lists each error with its JSON pointer and wiki page), or pass force:true to build anyway.";
         report["warnings"] = warnings;
         next.insert(next.begin(), Next("level_spec_validate", "Check the whole spec offline."));
         report["next"] = next;

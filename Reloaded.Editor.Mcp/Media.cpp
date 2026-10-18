@@ -103,14 +103,15 @@ namespace
         Extracted out;
         out.backend = "ffmpeg";
         const auto log = o.outDir / "ffmpeg.log";
-        const auto input = Utf8(video);
+        // file: keeps ffmpeg from reading the name as another protocol's URL.
+        const auto input = "file:" + Utf8(video);
         // ffmpeg with an input and no output describes the input and exits 1.
         RunProcess(ffmpeg, {"-hide_banner", "-nostdin", "-i", input}, log, 60000);
         const auto probe = ReadLog(log);
         if (probe.find("Video:") == std::string::npos)
         {
             Remove(log);
-            throw std::runtime_error("ffmpeg found no video stream in " + input + (probe.empty() ? std::string(".") : ": " + Tail(probe)));
+            throw std::runtime_error("ffmpeg found no video stream in " + Utf8(video) + (probe.empty() ? std::string(".") : ": " + Tail(probe)));
         }
         out.duration = FfmpegDuration(probe);
         std::tie(out.width, out.height) = FfmpegVideoSize(probe);
@@ -156,7 +157,7 @@ namespace
         const auto pattern = o.outDir / "candidate-%04d.png";
         const int code = RunProcess(ffmpeg, {"-hide_banner", "-nostdin", "-loglevel", "error", "-ss", Seconds(o.start), "-t", Seconds(span), "-i", input, "-an",
                                              "-vf", std::string("fps=") + rateText + "," + scale + ",setsar=1", "-frames:v", std::to_string(times.size()), "-y", Utf8(pattern)},
-                                    log, 1800000);
+                                    log, 600000);
         std::vector<fs::path> candidates;
         std::vector<Histogram> histograms;
         for (size_t i = 0; i < times.size(); ++i)
@@ -552,6 +553,7 @@ Image::Rgba DecodeImageFile(const fs::path& path)
         try { return WicDecode(path); }
         catch (const std::exception& wic)
         {
+            if (format.empty()) throw std::runtime_error(Utf8(path.filename()) + " is not an image this build reads (" + ImageFormats() + "): " + wic.what());
             if (format != "png" && format != "bmp") throw std::runtime_error(Utf8(path.filename()) + ": " + wic.what());
         }
     }

@@ -14,7 +14,6 @@
 #include <iostream>
 #include <source_location>
 using namespace Mcp;
-using Json=Workflow::Json;
 namespace fs=std::filesystem;
 void Check(bool value,const std::string& message,std::source_location where=std::source_location::current())
 {
@@ -279,6 +278,8 @@ void ObjToAse()
     const auto tiny=Media::ObjToAse("v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n");
     Check(tiny.info.at("warnings").size()==1 && tiny.info.at("warnings").at(0).get<std::string>().find("scale 100")!=std::string::npos,"a metre-sized mesh is flagged");
     Check(tiny.text.find("*MESH_TFACE 0\t0\t1\t2")!=std::string::npos,"tfaces index uvs");
+    const auto latin=Media::ObjToAse("usemtl Caf\xe9\nv 0 0 0\nv 9 0 0\nv 0 9 0\nf 1 2 3\n");
+    Check(latin.info.at("materials")==Json({"Caf?"}) && latin.info.dump().size()>0 && latin.text.find("Caf\xe9")!=std::string::npos,"names stay bytes in the ASE and ASCII in JSON");
     const auto negative=Media::ObjToAse("v 0 0 0\nv 9 0 0\nv 0 9 0\nv 0 0 9\nf -4 -3 -2 -1\n");
     Check(negative.info.at("triangles")==2,"negative indices and a fan");
     Reject([]{Media::ObjToAse("v 0 0 0\n");},"no faces");
@@ -299,7 +300,11 @@ void Decoding()
         Check(image.width==expected.width && image.height==expected.height && image.pixels==expected.pixels,std::string("decodes ")+name);
     }
     Reject([&]{Media::DecodeImageFile(dir/"crate.obj");},"not an image");
+#ifdef _WIN32
+    Check(Media::DecodeImageFile(dir/"interlaced.png").width==4,"WIC reads interlaced PNGs");
+#else
     Reject([&]{Media::DecodeImageFile(dir/"interlaced.png");},"interlaced.png");
+#endif
     Reject([&]{Media::DecodeImageFile(dir/"missing.png");},"does not exist");
     const auto image=Media::DecodeImageFile(dir/"rgba8.png");
     Check(Image::DecodePng(Media::PngBytes(image)).pixels==image.pixels,"PngBytes round trip");
@@ -415,7 +420,7 @@ void MediaTools(const fs::path& ffmpeg)
     Check(r.isError && Text(r).find("power of two")!=std::string::npos,"sizes are powers of two");
     r=t.Run("image_convert",{{"file",(dir/"rgba8.png").string()},{"slot","Menu"},{"size",512}});
     Check(r.isError && Text(r).find("256")!=std::string::npos,"slot sizes are fixed");
-    r=t.Run("image_convert",{{"file",(dir/"rgba8.png").string()},{"size",16},{"out","/etc/x.tga"}});
+    r=t.Run("image_convert",{{"file",(dir/"rgba8.png").string()},{"size",16},{"out",(fs::temp_directory_path()/"elsewhere"/"x.tga").string()}});
     Check(r.isError && Text(r).find("WriteRoots")!=std::string::npos,"writes stay in the work folder");
     const auto out=t.work/"mine"/"tex.tga";
     r=t.Run("image_convert",{{"file",(dir/"rgba8.png").string()},{"size",16},{"out",out.string()}});
@@ -445,7 +450,7 @@ void MediaTools(const fs::path& ffmpeg)
     t.Ini("");
     r=t.Run("media_extract_frames",{{"video",(t.scratch.dir/"clip.mp4").string()},{"attach","sheet"}});
     Check(r.isError && Text(r).find("sheet: true")!=std::string::npos,"attach sheet needs a sheet");
-    r=t.Run("media_extract_frames",{{"video",(t.scratch.dir/"clip.mp4").string()},{"outDir","/tmp/elsewhere"}});
+    r=t.Run("media_extract_frames",{{"video",(t.scratch.dir/"clip.mp4").string()},{"outDir",(fs::temp_directory_path()/"elsewhere-frames").string()}});
     Check(r.isError && Text(r).find("WriteRoots")!=std::string::npos,"frames stay in the work folder");
     if(ffmpeg.empty())return;
     const auto video=t.scratch.dir/"scenes.avi";
@@ -553,7 +558,7 @@ void AssetsImport()
     const auto& grass=t.fake.calls[3].args;
     Check(grass.at("format")=="DXT5" && grass.at("alphaTexture")==true && grass.at("name")=="Grass","alpha means DXT5");
     const fs::path grassFile=grass.at("file").get<std::string>();
-    Check(Media::Inside(grassFile,t.work/"imports") && grassFile.extension()==".tga" && Image::DecodeTga(Media::ReadFile(grassFile)).width==8,"the PNG became a TGA in the work folder");
+    Check(Media::Inside(grassFile,t.work/"imports") && grassFile.filename()=="AquaD_TXT_Grass.tga" && Image::DecodeTga(Media::ReadFile(grassFile)).width==8,"the PNG became a TGA in the work folder");
     const auto& mesh=t.fake.calls[4].args;
     const fs::path aseFile=mesh.at("file").get<std::string>();
     Check(mesh.at("package")=="AquaD_STM" && mesh.at("name")=="crate" && aseFile.extension()==".ase","the OBJ became an ASE: "+mesh.dump());
@@ -579,7 +584,7 @@ void AssetsImport()
     auto refused=[&](const Json& item,const std::string& expected)
     {
         const auto before=t.fake.calls.size();
-        auto result=t.Run("assets_import",{{"items",Json::array({item})}});
+        auto result=t.Run("assets_import",{{"items",item.is_array()?item:Json::array({item})}});
         bool imported=false;for(size_t i=before;i<t.fake.calls.size();++i)imported=imported||t.fake.calls[i].op.rfind("asset.",0)==0;
         Check(result.isError && Text(result).find(expected)!=std::string::npos && !imported,"refused ("+expected+"): "+Text(result));
     };
@@ -598,6 +603,7 @@ void AssetsImport()
     auto r2=t.Run("assets_import",{{"items",Json::array({{{"kind","texture"},{"file",(t.scratch.dir/"Brick.tga").string()},{"package","AquaD_Mix"}},
                                                           {{"kind","staticmesh"},{"file",(t.scratch.dir/"crate.obj").string()},{"package","AquaD_Mix"}}})}});
     Check(r2.isError && Text(r2).find("separate packages")!=std::string::npos,"one package, one kind");
+    refused(Json::array({items[0],items[0]}),"listed twice");
     // A map without a file.
     t.fake.Clear("editor.state");
     t.fake.On("editor.state",Json{{"open",true},{"mapFile",""}});

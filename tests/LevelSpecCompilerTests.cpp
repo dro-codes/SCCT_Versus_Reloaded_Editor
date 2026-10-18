@@ -242,6 +242,18 @@ void Examples()
         const auto name=entry.path().filename().string();
         const auto c=Spec::Compile(spec);
         Check(Count(c.diagnostics,"error")==0,name+" compiles without errors:"+Errors(c));
+        for(const char* profile:{"draft","release"})
+        {
+            auto other=spec;other["profile"]=profile;
+            const auto o=Spec::Compile(other);
+            Check(Count(o.diagnostics,"error")==0,name+" compiles without errors in "+profile+":"+Errors(o));
+        }
+        // What the compiler adds on purpose is marked for the rules.
+        for(const auto& piece:c.scene.at("pieces"))
+        {
+            const auto n=piece.at("spec").value("name",std::string());
+            if(Design::SpansFloors(n) && piece.at("id").get<std::string>().find("_")!=std::string::npos)Check(piece.value("generated",false),"a generated stairwell or shaft is in the scene, marked: "+piece.dump());
+        }
         const auto parsed=Plan::Check(c.plan);
         Check(!parsed.steps.empty() && parsed.steps.back().op=="mcp.sidecar.set","the sidecar is stored last in "+name);
         ValidDocuments(c.plan);
@@ -439,9 +451,38 @@ void Mechanisms()
     const auto e=Spec::Compile(Example("elevator-3floors"));
     const auto& lift=Props(e,"MainLift");
     Check(Create(e,"MainLift").at("class")=="SBase.SLift" && lift.at("NumKeys")=="3" && lift.at("KeyPos")[2].at("Z")=="768" && lift.at("KeyNum")=="0","an SLift key per storey");
+    // scct://wiki/elevators: each storey's door and the switches that work while the car is there.
     const auto& floors=lift.at("DoorsAndSwitches");
-    Check(floors.size()==3 && floors[1].at("Switches")==Json::array({{{"$ref","MainLift_Switch2"}}}) && floors[0].at("Doors")==Json::array(),"DoorsAndSwitches per storey");
-    Check(Props(e,"MainLift_Switch1").at("TriggerMethode")=="TriggerToggle" && Props(e,"MainLift_Switch1").at("bInitiallyUsable")=="True" && Props(e,"MainLift_Switch2").at("bInitiallyUsable")=="False","switches toggle, usable on the start storey");
+    Check(floors.size()==3 && floors[0].at("Doors")==Json::array({{{"$ref","MainLift_Door_Ground"}}}) && floors[2].at("Doors")==Json::array({{{"$ref","MainLift_Door_Top"}}}),"DoorsAndSwitches: each storey's door");
+    Check(floors[0].at("Switches")==Json::array({{{"$ref","MainLift_CarSwitch"}},{{"$ref","MainLift_Switch_First"}},{{"$ref","MainLift_Switch_Top"}}}) &&
+          floors[1].at("Switches")==Json::array({{{"$ref","MainLift_CarSwitch"}},{{"$ref","MainLift_Switch_Ground"}},{{"$ref","MainLift_Switch_Top"}}}),"the car's switch and the other storeys' call switches");
+    for(const char* id:{"MainLift_Switch_Ground","MainLift_Switch_First","MainLift_Switch_Top","MainLift_CarSwitch"})
+        Check(Create(e,id).at("class")=="SBase.SInterrupteur" && Props(e,id).at("TriggerMethode")=="TriggerToggle" && Props(e,id).at("Event")=="MainLift","lift switches toggle the lift");
+    Check(Props(e,"MainLift_Switch_Ground").at("bInitiallyUsable")=="False" && Props(e,"MainLift_Switch_First").at("bInitiallyUsable")=="True" && Props(e,"MainLift_CarSwitch").at("bInitiallyUsable")=="True",
+          "usable at the start: the car's switch and the calls from the other storeys");
+    Check(Props(e,"MainLift_CarSwitch").at("AttachTag")=="MainLift","the car's switch rides with the car");
+    // External doors: Key 0 open, Key 1 closed; KeyNum 0 on the start storey, 1 elsewhere.
+    const auto& ground=Props(e,"MainLift_Door_Ground");
+    const auto& first=Props(e,"MainLift_Door_First");
+    Check(Create(e,"MainLift_Door_Ground").at("class")=="Engine.Mover" && ground.at("StaticMesh")=="StaticMesh'ToweD_STM.Lift.Door160'" && ground.at("NumKeys")=="2","an external door is a Mover");
+    Check(ground.at("KeyNum")=="0" && first.at("KeyNum")=="1" && Props(e,"MainLift_Door_Top").at("KeyNum")=="1","KeyNum 0 on the start storey, 1 on the others");
+    Check(ground.at("KeyPos")[0]==Json({{"X","0"},{"Y","0"},{"Z","0"}}) && ground.at("KeyPos")[1]==Json({{"X","0"},{"Y","0"},{"Z","-192"}}) && ground.at("Location").at("Z")=="192" && first.at("Location").at("Z")=="576",
+          "Key 0 open (Location, raised), Key 1 closed in the opening");
+    Check(ground.at("Location").at("X")=="528" && ground.at("InitialState")=="TriggerControl","the door in the doorway onto the shaft");
+    const auto& call=Props(e,"MainLift_Switch_Ground");
+    Check(std::stod(call.at("Location").at("X").get<std::string>())<512 && call.at("Location").at("Z")=="100","a call switch outside the shaft, beside its door");
+    Check(lift.at("LiftDoors")==Json::array({{{"$ref","MainLift_CarDoor1"}}}) && Create(e,"MainLift_CarDoor1").at("class")=="SBase.SLiftDoor" && Props(e,"MainLift_CarDoor1").at("KeyNum")=="0" &&
+          std::stod(Props(e,"MainLift_CarDoor1").at("Location").at("X").get<std::string>())>544,"the car's SLiftDoor, open at the start storey, inside the shaft");
+    auto doorless=Example("elevator-3floors");doorless["mechanisms"]["lifts"][0].erase("doorMesh");
+    const auto d=Spec::Compile(doorless);
+    Check(Diagnostic(d.diagnostics,"elevator.doors") && Diagnostic(d.diagnostics,"elevator.doors")->severity=="warning" && Count(d.diagnostics,"error")==0,"a lift without a door mesh is built doorless, with a warning");
+    Check(Props(d,"MainLift").at("DoorsAndSwitches")[0].at("Doors")==Json::array() && !Find(Operations(d),"MainLift_Door_Ground") && !Props(d,"MainLift").contains("LiftDoors") && Find(Operations(d),"MainLift_Switch_Top"),"no doors, still switches");
+    auto shut=Example("elevator-3floors");shut["geometry"]["doorways"].erase(1);
+    const auto s=Spec::Compile(shut);
+    Check(Diagnostic(s.diagnostics,"elevator.opening") && !Find(Operations(s),"MainLift_Door_First") && !Find(Operations(s),"MainLift_Switch_First"),"a storey with no opening onto the shaft gets no door or call switch");
+    auto placed=shut;placed["mechanisms"]["lifts"][0]["doors"]=Json::parse(R"([{"storey":"First","at":[544,0,384],"yaw":90}])");
+    const auto pl=Spec::Compile(placed);
+    Check(Find(Operations(pl),"MainLift_Door_First") && Props(pl,"MainLift_Door_First").at("Rotation").at("Yaw")=="16384" && !Diagnostic(pl.diagnostics,"elevator.opening"),"doors[] places a storey's door");
     Check(Step(e.plan,"lift_ServiceLift").at("args").at("rise")==384 && Step(e.plan,"lift_ServiceLift").at("op")=="design.lift","a lift without a mesh is design.lift");
     Check(e.sidecar.at("actors").at("ServiceLift")==Json({{"$bind",{{"step","lift_ServiceLift"}}}}),"the sidecar binds the lift's identity");
     auto tall=Example("elevator-3floors");tall["mechanisms"]["lifts"][0].erase("mesh");
@@ -470,6 +511,10 @@ void Environment()
     Check(hx==512 && hz==160,"its polygons span the box, not the 256 cube");
     const auto& sensor=Props(c,"VaultMotion");
     Check(sensor.at("Volumes")==Json::array({{{"$ref","VaultMotion_Volume"}}}) && Create(c,"VaultMotion_Volume").at("geometry")=="polygons","a motion sensor watches its own polygon volume");
+    size_t outlined=0;
+    for(const auto& piece:c.render.at("pieces"))
+        if(piece.at("kind")=="volume" && (piece.at("id")=="VaultName" || piece.at("id")=="VaultMotion_Volume"))outlined+=piece.at("outline").size()==4 && piece.at("box").at("max")[0].get<double>()>piece.at("box").at("min")[0].get<double>();
+    Check(outlined==2,"plan_render draws sized volumes as outlines");
     auto odd=Level(R"({"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"environment":{"lights":[{"id":"Disco","in":"Hall","props":{"LightEffect":"LE_Disco"}},{"id":"Sun","preset":"sun","at":{"in":"Hall"}}]}})");
     const auto o=Spec::Compile(odd);
     bool effect=false;
@@ -585,7 +630,7 @@ void Rest()
         "mechanisms":{"movers":[{"id":"Fan","class":"Engine.Mover","mesh":"Fans.Blades.Fan","at":{"in":"Hall","h":"ceiling-40"},"keys":[{"yaw":180},{"yaw":360}],"initialState":"TriggerToggle","moveTime":2}]},
         "events":{"shakers":[{"id":"Quake","at":{"in":"Hall"},"properties":{"ShakeEvents":[]}}],"noises":[{"id":"Hum","at":{"in":"Hall"},"properties":{"fIntensity":0.5}}]},
         "environment":{"fish":[{"id":"Fish1","at":{"in":"Hall"}}],"animated":[{"id":"Flag1","class":"SBase.SAnimatedMesh","at":{"in":"Hall"}}],"tutorials":[{"id":"Tip1","at":{"in":"Hall"}}],
-            "softbody":[{"id":"Rope1","class":"Echelon.ESBRopeActor","mesh":"Ropes.Rope","at":{"in":"Hall"}},{"id":"Rope2","class":"Echelon.ESBRopeActor","mesh":"Ropes.Rope","at":{"in":"Hall","u":0.2}}]},
+            "softbody":[{"id":"Chain1","class":"ESBChainActor","mesh":"Ropes.Link","at":{"in":"Hall"}},{"id":"Chain2","class":"ESBChainActor","mesh":"Ropes.Link","at":{"in":"Hall"}},{"id":"Curtain","at":{"in":"Hall","u":0.2}}]},
         "interface":{"menu":"art/menu.dds","loadingDef":"art/def.dds"},
         "release":{"packages":["RestD_TXT"]},
         "extra":{"operations":[{"op":"load","package":"Extra"},{"op":"create","id":"Raw1","class":"Engine.Note","properties":{"Location":{"X":"0","Y":"0","Z":"64"}}}]},
@@ -603,7 +648,20 @@ void Rest()
     Check(fan.at("NumKeys")=="3" && fan.at("KeyRot")[1].at("Yaw")=="32768" && fan.at("KeyRot")[2].at("Yaw")=="0" && fan.at("InitialState")=="TriggerToggle" && fan.at("Location").at("Z")=="280","a mover with its keys");
     Check(Create(c,"Quake").at("class")=="SBase.SShaker" && Create(c,"Hum").at("class")=="SBase.SNotifyNoise" && Props(c,"Hum").at("fIntensity")=="0.5","shakers and noises");
     Check(Create(c,"Fish1").at("class")=="SBase.SFish" && Create(c,"Tip1").at("class")=="SBase.SZoneTips" && Create(c,"Flag1").at("class")=="SBase.SAnimatedMesh","generic environment actors");
-    Check(Diagnostic(c.diagnostics,"softbody.duplicate").has_value(),"a repeated SoftBody is a warning");
+    Check(Props(c,"Tip1").at("bHidden")=="True" && Props(c,"Tip1").at("DrawType")=="DT_Sprite" && Props(c,"Tip1").at("bShowOnlyWithIngameHelp")=="True" && Props(c,"Tip1").at("bStayPermanently")=="False","tutorial tips as the wiki sets them");
+    Check(Diagnostic(c.diagnostics,"softbody.duplicate").has_value() && Diagnostic(c.diagnostics,"softbody.duplicate")->pointer=="/environment/softbody/1","a SoftBody repeated exactly is a warning");
+    Check(Create(c,"Curtain").at("class")=="Echelon.ESBPatchActor" && Create(c,"Chain1").at("class")=="Echelon.ESBChainActor","SoftBody: ESBPatchActor by default, short classes completed");
+    Check(Props(c,"Chain1").at("LinkMesh")=="StaticMesh'Ropes.Link'" && !Props(c,"Chain1").contains("DrawType"),"a SoftBody's mesh is a chain's links; it keeps DT_SoftBody");
+    auto base=spec;base["environment"]["softbody"]=Json::parse(R"([{"id":"Cloth","class":"Echelon.ESoftBodyActor","at":{"in":"Hall"}}])");
+    const auto b=Spec::Compile(base);
+    Check(Diagnostic(b.diagnostics,"softbody.class") && Diagnostic(b.diagnostics,"softbody.class")->severity=="error" && !Find(Operations(b),"Cloth"),"the SoftBody base class cannot be placed");
+    auto animated=spec;animated["environment"]["animated"][0]["mesh"]="Anims.Flag";animated["environment"]["fish"][0]["mesh"]="SkeletalMesh'Fish.Shark'";
+    const auto an=Spec::Compile(animated);
+    Check(Props(an,"Flag1").at("Mesh")=="Mesh'Anims.Flag'" && Props(an,"Flag1").at("DrawType")=="DT_Mesh" && Props(an,"Fish1").at("Mesh")=="SkeletalMesh'Fish.Shark'" && !Props(an,"Flag1").contains("StaticMesh"),"animated meshes and fish draw a Mesh");
+    // Polygon brushes and sized volumes show in plan_render as their outlines.
+    const Json* pillarPiece=nullptr;
+    for(const auto& piece:c.render.at("pieces"))if(piece.at("id")=="Pillar")pillarPiece=&piece;
+    Check(pillarPiece && pillarPiece->at("kind")=="add" && pillarPiece->at("outline").size()==4 && pillarPiece->at("box").at("max")[2]==256,"geometry.brushes in the render scene");
     Check(!Find(Operations(c),"Hall_Light"),"lights: none places no room lights");
     Check(Find(Operations(c),"Raw1") && Step(c.plan,"interface1").at("args")==Json({{"slot","Menu"},{"file","art/menu.dds"}}) && Step(c.plan,"interface2").at("args").at("slot")=="LoadingDEF0" && Step(c.plan,"interface1").value("optional",false),"raw operations and interface textures");
     Check(c.scene.at("release").at("packages")==Json::array({"RestD_TXT"}) && c.scene.at("release").at("interface").at("menu")=="art/menu.dds","release notes reach the rules");
