@@ -102,7 +102,9 @@ namespace
             {
                 const auto chunk = Json(list.begin() + static_cast<std::ptrdiff_t>(at), list.begin() + static_cast<std::ptrdiff_t>(std::min(list.size(), at + 4096)));
                 const auto result = Call(c, "scene.trace", {{"segments", chunk}}, {}, false, 300000);
-                for (const auto& h : result.is_object() ? result.value("hits", Json::array()) : result) hits.push_back(h);
+                // Named first: MSVC 14.44 cannot resolve Json:: in this range expression inside the lambda (C2653).
+                const Json got = result.is_object() ? result.value("hits", Json::array()) : result;
+                for (const auto& h : got) hits.push_back(h);
             }
             return hits;
         };
@@ -239,8 +241,11 @@ namespace
         if (scene.contains("documents") && scene.at("documents").is_array() && !scene.at("documents").empty()) return;
         Json documents = Json::array();
         for (const char* section : {"pre", "steps"})
-            for (const auto& step : plan.is_object() ? plan.value(section, Json::array()) : Json::array())
+        {
+            const Json steps = plan.is_object() ? plan.value(section, Json::array()) : Json::array();
+            for (const auto& step : steps)
                 if (step.value("op", std::string()) == "authoring.apply" && step.contains("args") && step.at("args").contains("document")) documents.push_back(step.at("args").at("document"));
+        }
         if (!documents.empty()) scene["documents"] = documents;
     }
 
