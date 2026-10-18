@@ -380,23 +380,17 @@ void RegisterMediaTools(Registry& registry)
         t.name = "media_extract_frames";
         t.title = "Extract frames from a video";
         t.description =
-            "Pulls still frames out of a video file (MP4, MOV, AVI, WMV, MKV... whatever Windows Media Foundation or ffmpeg can decode) as PNG files, "
-            "and attaches them as images so you can look at them: the first step of building a level from a walkthrough, trailer or reference clip.\n"
-            "Modes:\n"
-            "- interval (default): one frame every intervalS seconds (default 2) from start, up to count frames (default and most 64).\n"
-            "- count: exactly count frames (default 12), spread evenly between start and end.\n"
-            "- scene: the first frame plus each cut or big change: 4 x count frames are sampled evenly, and those whose brightness histogram "
-            "differs from the one before by threshold or more (0-1, default 0.3) are kept, up to count.\n"
-            "start and end are seconds (end defaults to the video's end). Each frame is at most maxEdge pixels on its longer side (64-1280, default 768; "
-            "never enlarged). sheet: true also writes a contact sheet (all frames tiled with their numbers and times). attach chooses what comes back as "
-            "images: frames (default), sheet (default with sheet), both or none; at most about 4 MiB of images come back, and every frame is also a file "
-            "(paths in frames[]). Files go to <work folder>\\frames\\<stamp>\\ unless outDir (inside the work folder or [Mcp] WriteRoots) is given.\n"
-            "Decoding: Media Foundation on Windows; when it cannot read the file, ffmpeg from [Mcp] Ffmpeg in System\\Reloaded_Editor.ini or PATH "
-            "(backend forces one). With neither, the error says how to install ffmpeg.\n"
-            "The server does not interpret the frames: you look at them and decide what they show (rooms, doors, heights, objectives), then write a "
-            "scct.level-spec. Measure frames with media_read_image (grid, palette), calibrate scale against known sizes (a player stands about 180 uu, "
-            "doors are about 96 x 128 uu, about 100 uu to the metre), and compare your spec with plan_render. The create_level_from_media prompt walks "
-            "through the whole process.";
+            "Pulls still frames out of a video (MP4, MOV, AVI, WMV, MKV: whatever Media Foundation or ffmpeg decodes) as PNG files and attaches them as "
+            "images to look at: the first step of building a level from a walkthrough, trailer or reference clip.\n"
+            "- mode interval (default) takes a frame every intervalS from start; count spreads count frames evenly from start to end; scene keeps the "
+            "first frame and each cut (4 x count frames are sampled, and kept when their brightness histogram changes by threshold or more).\n"
+            "- sheet also writes a contact sheet of every frame, numbered and timed; attach picks what comes back as images (at most about 4 MiB; every "
+            "frame is also a file, frames[].file). Files go to <work folder>\\frames\\<stamp> unless outDir (inside the work folder or [Mcp] WriteRoots).\n"
+            "- Decoding: Media Foundation on Windows, else ffmpeg from [Mcp] Ffmpeg or PATH (backend forces one); with neither, the error says how to "
+            "get ffmpeg.\n"
+            "The server does not interpret the frames: you decide what they show and write a scct.level-spec. Measure frames with media_read_image, "
+            "calibrate against known sizes (a player about 180 uu tall, a door about 96 x 128 uu, about 100 uu to the metre) and compare with "
+            "plan_render; the create_level_from_media prompt walks through it.";
         t.inputSchema = S::Input(
             {{"video", S::String("Full path of the video file.")},
              {"mode", S::Enum({"interval", "count", "scene"}, "How frames are chosen. Default interval.")},
@@ -422,22 +416,18 @@ void RegisterMediaTools(Registry& registry)
         t.name = "media_read_image";
         t.title = "Read and measure an image";
         t.description =
-            "Opens an image (" + Media::ImageFormats() + ") and returns it as an image to look at, with measurements: "
-            "use it on floor plans, maps, screenshots, concept art and extracted video frames.\n"
-            "- crop {x, y, width, height} (source pixels) reads one part; maxEdge (64-2048, default 1024) caps the longer side shown (enlarge: true "
-            "blows small pictures up, by whole pixels, to near maxEdge).\n"
-            "- grid draws a labelled measurement grid over it: spacingPx (source pixels between lines), or cellUu with uuPerPx (Unreal units per source "
-            "pixel) to space lines in Unreal units; origin [x, y] (source pixels, default 0,0) is where 0 is, drawn cyan; labels (default true) count "
-            "pixels, or Unreal units when uuPerPx is given, from the origin, x rightwards and y downwards as in the image (Unreal +Y is north, so up "
-            "the image is +Y: world Y = -label). Every fifth line is brighter. With a grid, cells.cells maps how much of each grid cell is drawn (one "
-            "character per cell), which turns a plan into a grid you can transcribe for import_to_spec's grid format or a spec.\n"
-            "- palette (default true): the paletteSize (default 12) most common colours with their shares, for picking a raster plan's legend "
-            "(import_to_spec format image, options.colors).\n"
-            "- occupancy: the background (the most common colour, or background), and what share of the picture is drawn (differs from it by more than "
-            "tolerance, default 48), transparent, dark and light, with the drawn part's bounding box in source pixels.\n"
-            "To calibrate: find something of known size (a door about 96 uu wide, a player about 180 uu tall, a grid square of known metres at 100 uu "
-            "each), measure it in pixels with a grid, and set uuPerPx = its size in uu / its size in pixels. The server only measures; you interpret "
-            "what the picture shows.";
+            "Opens an image (" + Media::ImageFormats() + ") and returns it to look at, with measurements: for floor plans, maps, screenshots, concept "
+            "art and video frames.\n"
+            "- crop reads one part (source pixels); maxEdge caps the longer side shown; enlarge blows small pictures up by whole pixels.\n"
+            "- grid draws a labelled measurement grid: spacingPx, or cellUu with uuPerPx (Unreal units per source pixel); origin (cyan) is 0; labels "
+            "count pixels, or uu with uuPerPx, x rightwards and y downwards as in the image (up the image is Unreal +Y, so world Y = -label); every "
+            "fifth line is brighter. cells.cells then maps how much of each cell is drawn, one character per cell, to transcribe for import_to_spec's "
+            "grid format or a spec.\n"
+            "- palette: the most common colours with their shares, for a raster plan's legend (import_to_spec format image, options.colors).\n"
+            "- occupancy: the background (the most common colour, or background) and the share drawn (more than tolerance from it), transparent, dark "
+            "and light, with the drawn part's bounding box.\n"
+            "Calibrate with something of known size (a door about 96 uu wide, a player about 180 uu tall, a grid square of known metres at 100 uu "
+            "each): uuPerPx = its size in uu / its size in pixels. The server only measures; you interpret what the picture shows.";
         t.inputSchema = S::Input(
             {{"path", S::String("Full path of the image file.")},
              {"maxEdge", S::Integer("Longer side of the returned image in pixels, 64-2048. Default 1024.", 64, 2048)},
@@ -468,16 +458,14 @@ void RegisterMediaTools(Registry& registry)
         t.title = "Make a texture-ready image";
         t.description =
             "Converts an image (PNG, JPEG, GIF, TIFF, BMP, TGA) into a texture the editor imports: power-of-two sides, as TGA (default; keeps alpha), "
-            "BMP or PNG. Use it before assets_import (texture files must be .tga, .bmp, .pcx or .dds with power-of-two sides) and for interface "
-            "pictures.\n"
-            "- size: one power of two up to 8192 for a square (256, 512, 1024...), or [width, height]; default each side rounded to the nearest power "
-            "of two. 4096 is the practical most for the 32-bit editor.\n"
-            "- slot: Menu or Briefing (256 x 256 with alpha) or LoadingATT0 / LoadingDEF0 (512 x 512, no alpha), the map's interface textures from the "
-            "wiki's Map Settings page, sets the size and alpha for you.\n"
-            "- fit: pad (default: the whole picture, the rest background, or transparent with alpha), crop (fills the square, cutting the overflow "
-            "evenly) or stretch (distorts). background #rrggbb (default #000000). alpha (default true; false makes every pixel opaque over background).\n"
-            "- out: full path of the file to write, inside the work folder or [Mcp] WriteRoots (default <work folder>\\converted\\<stamp>\\<name>_<w>x<h>.<format>); "
-            "an existing file is replaced only with overwrite: true.\n"
+            "BMP or PNG. Use it before assets_import (textures must be .tga, .bmp, .pcx or .dds with power-of-two sides) and for interface pictures.\n"
+            "- size: a power of two up to 8192 (a square) or [width, height]; default each side rounded to the nearest power of two. 4096 is the "
+            "practical most for the 32-bit editor.\n"
+            "- slot: Menu or Briefing (256 square, alpha) or LoadingATT0 / LoadingDEF0 (512 square, no alpha), the map's interface textures (wiki: Map "
+            "Settings); sets size and alpha.\n"
+            "- fit: pad (default; the rest is background, or transparent with alpha), crop (fills, cutting the overflow evenly) or stretch (distorts).\n"
+            "- out: the file to write, inside the work folder or [Mcp] WriteRoots (default <work folder>\\converted\\<stamp>\\<name>_<w>x<h>.<format>); "
+            "an existing file is replaced only with overwrite.\n"
             "Returns the file, its size and a small preview image.";
         t.inputSchema = S::Input(
             {{"file", S::String("Full path of the source image.")},

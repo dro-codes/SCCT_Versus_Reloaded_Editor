@@ -94,6 +94,16 @@ Worth adding, as the wine harness below runs them only against stubs:
   `modal` naming its title, `editor.state` says `busy:"modal"`, nothing runs
   inside the box's loop; and a dialog owned by an RE+ tool window, which
   leaves the frame enabled, does the same;
+- RE+'s own prompts, windows of their own classes that disable their tool
+  window and run their own `IsDialogMessage` loop: the Magic Event
+  Workbench's Create event actor picker (`ReloadedMagicClassPicker`), Undo
+  History's Add Checkpoint (`ReloadedUndoCheckpointName`) and a Workflow
+  Tools form (`ReloadedWorkflowForm`): `busy` / `modal` naming the prompt;
+  with Undo History or the workbench merely open, calls run;
+- with approval on, the `busy` / `approval_pending` reply to a second call
+  carries the review's ticket in `error.details.ticket`;
+- `undo.call` of a call number the editor has no record of: `invalid` /
+  `unknown_call`; of a recorded one, `{call, done, steps}`;
 - an `mcp.plan` whose post `map.save` meets an unknown question: `dialog_blocked`
   with `stoppedAt`, `ran`, `wrote` (the `.sdc`) and `rolledBack:false`, the steps
   after it not run and the map changes kept (`undo.call` takes them back);
@@ -102,7 +112,9 @@ Worth adding, as the wine harness below runs them only against stubs:
   `folder` outside `Releases`, the work folder and `WriteRoots`: `refused` /
   `outside_write_roots`;
 - with `AllowRawExec=1`: `exec` of `SAVEMAPPROP`, `MAP EXPORT FILE=...` and
-  `EXEC <file>` refused (`denied_command`), and `FILE=` outside the write roots
+  `EXEC <file>` refused (`denied_command`), also when punctuation ends the
+  word as the engine's ParseCommand allows (`QUIT;`, `EXEC"x"`,
+  `SAVEMAPPROP;MAP=X`), and `FILE=` outside the write roots
   (`outside_write_roots`).
 
 What the section learned about the editor:
@@ -183,6 +195,21 @@ refuses keys that differ only in case.
   through the WH_MSGFILTER hook (code MSGF_DIALOGBOX), one from the thread's
   own `GetMessage` loop does not, and the message box's text is the static
   with id 0xFFFF (its icon is 0x440 in wine, 0x14 in Windows).
+  A later run added 14 checks (122):
+  - a window of its own class (`ReloadedMagicClassPicker`, WS_EX_DLGMODALFRAME)
+    owned by the tool window it disables, with its own `GetMessage` /
+    `IsDialogMessage` loop as MagicEventWorkbench.cpp's CreateActor has, and a
+    tooltip-like window of the tool shown above it: `busy` / `modal` naming the
+    prompt, not the tip, no change runs, calls run again once it closes; a
+    modeless window of its own class owned by the frame (Undo History) and a
+    modeless ownerless dialog made only of a 0xFFFF static and push buttons
+    (a message box's shape) do not make the editor busy. With the earlier
+    `FindModal` (dialogs only, the shape alone enough) the prompt let calls
+    run and the panel made every call busy;
+  - the `busy` / `approval_pending` reply carries `details.ticket`;
+  - `undo.call` through McpOps.cpp: an unknown call gives `invalid` /
+    `unknown_call`, a recorded one `{call, done:1, steps:1}`, then
+    `already_undone`.
 - MinGW cannot see MSVC's `min`/`max` macros (libstdc++ defines `NOMINMAX`).
   To check a DLL file for them, copy it beside a `pch.h` that includes the
   real one, then every standard header, then `#define min(a,b)` and

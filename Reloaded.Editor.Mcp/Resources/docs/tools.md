@@ -23,12 +23,12 @@
 - **Busy:** the editor is in a dialog, a menu, a drag or a rebuild. The server retries with backoff. If that keeps failing, ask the user to finish what they are doing in the editor (the reason says what). Two reasons come back at once instead, since waiting cannot help: approval_pending (a change waits in the review window: call `approval_wait` with its ticket, which the error's details carry) and `another_client` (another MCP client holds the editor).
 - **Cancelling** a request stops it: the editor is asked to drop the call in flight, and waits (`editor_launch`, `editor_restart`, `approval_wait`) and long tools stop at their next progress report. Check `editor_status` before repeating a cancelled change.
 - **Never allowed:**
-  - writing stock packages (only the map's own: `<Map>`, `<Map>-i`, `Amb_<Map>`, `<Map>_*`);
+  - writing stock packages (only the map's own: `<Map>`, `<Map>-i`, `Amb_<Map>`, `<Map>_*`). Imports, package saves and a Map JSON document's `texture` and `save` operations (`map_changes_apply`, `workflow_request` authoring.apply) write only `<Map>_<name>` (a Map JSON texture may also go into `MyLevel`); another package is refused (reason not_map_owned, package_name or interface_package), and so is any of them before the map's first save (unsaved_map), since those packages are named after its file. A `load` alone is allowed;
   - deleting actors without `allowDeletes`;
   - discarding unsaved work unless the user asked (`discardUnsaved`);
   - overwriting files without `overwrite`;
   - writing outside the work folder and `[Mcp] WriteRoots` (media and import tools; `editor_exec` `FILE=`), or a release copy outside `<Game>\Releases`, the work folder and `WriteRoots`;
-  - raw console commands, unless the user set `AllowRawExec=1`.
+  - raw console commands, unless the user set `AllowRawExec=1`. Even then `editor_exec` refuses (reason denied_command) any command that starts with QUIT, EXIT, RELAUNCH, DEBUG, EXEC, MAP NEW/LOAD/SAVE/IMPORT/EXPORT, OBJ SAVEPACKAGE/EXPORT/IMPORT/LOAD, SAVEMAPPROP, LOADMAPPROP, TEXTURE IMPORT/EXPORT, STATICMESH IMPORT/EXPORT, MESH IMPORT, BRUSH IMPORT/EXPORT, DUMPINT, TRANSACTION or AUDIO, read as the console reads it (any case; `QUIT;` and `EXEC"x"` count); a `FILE=` anywhere outside the work folder and WriteRoots (`outside_write_roots`); a `PACKAGE=` other than MyLevel or the map's own (not_map_owned); and more than one command. Use the tool that does the job with its checks.
 
 ## Tools (32)
 
@@ -68,7 +68,7 @@ Mutating tools return `{summary, created[], changed[], warnings[], validation[],
 - `build`: `auto` (the default: a geometry build when brushes changed), `geometry`, `all` (with lighting) or `none`. `screenshot` (default: when it builds), `save` (a map path to save to afterwards), `label` (the Undo History name).
 - The result has `created`, `changed` and `removed` by id (with the actor paths), `validation` (this part's findings: JSON pointer, `wikiPage`, `fix`), `undo` and `next`.
 
-Every field of every tool, and the wiki defaults the compiler applies: `scct://docs/tool-reference`. Every bridge op `workflow_request` can call, with its policy and arguments: `scct://docs/ops`.
+Every field of every tool, and the wiki defaults the compiler applies: `scct://docs/tool-reference`. A tool description's `scct://docs/tool-reference#<tool>` is that tool's section of it (read the URI as given; the server returns the whole document). Every bridge op `workflow_request` can call, with its policy and arguments: `scct://docs/ops`.
 
 **Fixes.** A finding's `fix` takes one of two forms:
 - On the live map (`map_validate` without a spec, the intent tools): `{tool, args, note?}`, the call that repairs it.
@@ -171,9 +171,9 @@ Each prompt is a step-by-step recipe that embeds the wiki pages it needs and poi
 | `busy` | The editor is occupied (reason given: modal, menu, drag, rebuild); the server already retried. Ask the user to close dialogs. approval_pending (call `approval_wait` with the ticket) and `another_client` come back at once |
 | `stale` | The map changed since you read it; re-read and retry |
 | `invalid` | Bad arguments or document; the message names the field (reason several editors: pass `pid` to `editor_status`) |
-| `refused` | Blocked op, or one that needs a setting the user has not enabled (`AllowRawExec`, `AllowPlay`), unsaved changes, or a package that is not the map's own |
+| `refused` | A blocked op, or the reason says what: a setting the user has not enabled (`AllowRawExec`, `AllowPlay`), unsaved changes, a package that is not the map's own (not_map_owned, package_name, interface_package), a map not saved yet (unsaved_map), a folder or `FILE=` outside the write roots (`outside_write_roots`), a console command `editor_exec` never runs (denied_command) |
 | `denied` | The user declined in the approval window |
-| `dialog_blocked` | An unexpected editor dialog appeared; the call was rolled back. Its title and text are in the details |
+| `dialog_blocked` | An unexpected editor dialog appeared. It was answered with its most cautious button (Cancel, No, Close, Abort by control id; OK only when alone) or closed, and the call stopped there. details.dialogs has its title, text and answer; details.stoppedAt the step, details.ran the steps that finished, details.wrote the files and packages already written (they stay). details.rolledBack says whether the map changes were undone: a plan that had already saved or written files keeps them, so map and file stay alike, and then `editor_undo` with the call the message names takes them back |
 | `editor_error` | The editor refused the change; the message says why (nothing was changed) |
 | `timeout` | Too slow; reason `awaiting_approval` comes with a ticket for `approval_wait` |
 | `cancelled` | The client cancelled the request |

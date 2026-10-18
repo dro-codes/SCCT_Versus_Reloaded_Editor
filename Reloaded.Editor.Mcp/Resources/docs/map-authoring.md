@@ -111,6 +111,8 @@ Coordinates and rotation:
 - An existing file is replaced only with `overwrite: true`, and is backed up first.
 - Save the package **before** saving a map that uses it.
 
+**Packages over MCP.** Through `map_changes_apply`, `workflow_request` (authoring.apply or authoring.preview) and `level_build`, a `texture` or `save` may only name the map's own `<Map>_<name>` package, such as `<Map>_TXT` (a `texture` may also go into `MyLevel`, which is saved with the map). Any other is refused before anything runs, with code refused and reason not_map_owned (a stock or other map's package), package_name (`<Map>` or `Amb_<Map>`, or a name another kind of package already has) or interface_package (`<Map>-i`, which the interface textures write), and before the map's first save every one but a `texture` into `MyLevel` is refused (unsaved_map), since those packages are named after its file. A `load` alone is always allowed.
+
 **polygon brushes** (v2: create with `geometry:"polygons"`, `polygons:[{vertices, texture?, flags?, origin?, textureU?, textureV?, pan?}]`)
 - Vertices are local to `Location`.
 - Each polygon has **3-16** vertices, wound as the editor winds brush faces. Split larger faces.

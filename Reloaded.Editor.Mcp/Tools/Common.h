@@ -201,13 +201,21 @@ namespace Mcp::Tools
     // server that made Undo steps, newest last (editor_undo with no
     // arguments takes the newest; one it undid moves to undone, and comes
     // back when redone), and where editor_log stopped. A new editor process
-    // numbers its calls afresh, so editor_launch and editor_restart forget.
+    // numbers its calls afresh, so the calls are forgotten when another
+    // editor answers (Editor), and by editor_launch and editor_restart.
     struct Session
     {
         struct Made { unsigned call = 0; int steps = 0; std::string op; };
         std::mutex lock;
         std::vector<Made> calls, undone;
         uint64_t logSeen = 0;
+        unsigned long pid = 0; // the editor the calls were made in
+        void Editor(unsigned long id)
+        {
+            if (!id) return;
+            if (pid && pid != id) Reset();
+            pid = id;
+        }
         void Push(unsigned call, int steps, const std::string& op)
         {
             if (!call) return;
@@ -226,6 +234,26 @@ namespace Mcp::Tools
     {
         static Session session;
         return session;
+    }
+    // Which editor answered: known's pid (a hello or a state block that has
+    // one), else the connected editor's hello. Never connects by itself.
+    inline void NoteEditor(ToolContext& c, const Json& known = Json())
+    {
+        unsigned long pid = 0;
+        if (known.is_object() && known.contains("pid") && known.at("pid").is_number_unsigned()) pid = known.at("pid").get<unsigned long>();
+        if (!pid)
+            try
+            {
+                if (c.bridge.Connected())
+                {
+                    const auto hello = c.bridge.Hello();
+                    if (hello.is_object() && hello.contains("pid") && hello.at("pid").is_number_unsigned()) pid = hello.at("pid").get<unsigned long>();
+                }
+            }
+            catch (const std::exception&) {}
+        auto& memory = Memory();
+        std::lock_guard<std::mutex> guard(memory.lock);
+        memory.Editor(pid);
     }
 
     // ---------------------------------------------------------- cancelling
@@ -302,6 +330,7 @@ namespace Mcp::Tools
         const auto undo = last.value("undo", Json());
         if (!undo.is_object() || undo.value("steps", 0) <= 0) return Json();
         const auto call = undo.value("call", 0u);
+        NoteEditor(c);
         {
             auto& memory = Memory();
             std::lock_guard<std::mutex> guard(memory.lock);
@@ -357,7 +386,12 @@ namespace Mcp::Tools
         if (e.code == C::NotConnected) return "editor_status shows the running editors; editor_launch starts one.";
         if (e.code == C::Disabled) return "The editor's MCP server is off. Only the user can turn it on: RE+ Tools > MCP > Enable MCP server.";
         if (e.code == C::Denied) return "The user declined the change in the editor's review window. Ask the user what to change before trying again.";
-        if (e.code == C::DialogBlocked) return "A dialog opened during the change; it was answered with its most conservative button and the change was rolled back. details names the dialog.";
+        // The editor's message says exactly what ran and what was undone; a
+        // plan that had already written a file keeps its map edits.
+        if (e.code == C::DialogBlocked)
+            return "A dialog opened during the change and was answered with its most cautious button, so the change stopped. details.stoppedAt ({step, op, section}, when a plan was running) names the step, "
+                   "details.rolledBack whether the map edits were undone, and details.wrote what had already been written (files and packages stay); the editor's "
+                   "message says how to undo what was kept.";
         if (e.code == C::Timeout && e.reason == "awaiting_approval") return "Call approval_wait with the ticket in details.";
         if (e.code == C::Refused && e.reason == "raw_exec_off") return "Only the user can allow raw commands, with [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini.";
         if (e.code == C::ProtocolMismatch) return "Install Reloaded.Editor.dll and Reloaded.Editor.Mcp.exe from the same RE+ release.";
@@ -540,8 +574,8 @@ namespace Mcp::Tools
 
     // Where each intent tool's arguments go in a scct.level-spec (the
     // tools' own field lists, IntentTools.cpp; McpSpecToolsTests keeps the
-    // two in step). "" for an argument with no section of its own.
-    inline std::string SpecPointer(const std::string& tool, const std::string& argument)
+    // two in step), by tool and argument.
+    inline const std::map<std::string, std::map<std::string, std::string>>& SpecPointers()
     {
         static const std::map<std::string, std::map<std::string, std::string>> table{
             {"blockout", {{"pieces", "/geometry/pieces"}, {"doorways", "/geometry/doorways"}, {"vertical", "/geometry/vertical"}, {"brushes", "/geometry/brushes"},
@@ -560,6 +594,14 @@ namespace Mcp::Tools
             {"map_settings", {{"level", "/level"}, {"interface", "/interface"}, {"mapSettings", "/settings"}, {"settings", "/settings"}, {"modes", "/settings/modes"},
                               {"mapName", "/settings/mapName"}, {"briefSpy", "/settings/briefSpy"}, {"briefMerc", "/settings/briefMerc"}, {"legend", "/settings/legend"},
                               {"legendInBrief", "/settings/legendInBrief"}}}};
+        return table;
+    }
+    // An intent tool: it changes the open map's stored spec and builds it.
+    inline bool IntentTool(const std::string& tool) { return SpecPointers().count(tool) != 0; }
+    // "" for an argument with no section of its own.
+    inline std::string SpecPointer(const std::string& tool, const std::string& argument)
+    {
+        const auto& table = SpecPointers();
         const auto found = table.find(tool);
         if (found == table.end()) return {};
         const auto field = found->second.find(argument);

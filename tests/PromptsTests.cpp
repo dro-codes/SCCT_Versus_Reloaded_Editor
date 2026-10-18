@@ -46,7 +46,7 @@ const std::set<std::string> kPrompts = {"create_level_from_description", "create
     "design_security", "ge_pass", "review_map_against_wiki", "fix_validation", "prepare_release"};
 // snake_case words in backticks that are not tools: tool actions, error codes and outside names.
 const std::set<std::string> kOtherWords = {"rename_tag", "copy_properties", "save_as", "awaiting_approval", "not_connected", "protocol_mismatch", "dialog_blocked",
-    "editor_error", "another_client", "io_scene_ase"};
+    "editor_error", "another_client", "io_scene_ase", "approval_pending", "outside_write_roots"};
 
 // Every `snake_case` word in backticks names a tool, a prompt or a known code.
 void CheckToolNames(const std::string& path, const std::string& text)

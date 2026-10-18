@@ -4,6 +4,8 @@
 // Windows-free: McpOps.cpp, McpLifecycle.cpp and McpBridge.cpp apply these,
 // McpOpCoverageTests tests them.
 #include "McpBridgeModel.h"
+#include "SaveBackupModel.h"
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -167,18 +169,21 @@ namespace Mcp::Safety
 
     // -------------------------------------------------------- raw commands --
 
-    // The console's words, upper case, runs of spaces as one.
-    inline std::string Words(const std::string& command)
+    // Whether a command is phrase ("MAP NEW") as the engine's ParseCommand
+    // reads it, word by word (SaveBackupModel.h): any case, the blanks
+    // around each word skipped, and a word followed by anything but a letter
+    // or digit, so QUIT; is QUIT, EXEC"x" is EXEC and SAVEMAPPROP;MAP=X is
+    // SAVEMAPPROP.
+    inline bool CommandIs(const std::string& command, const std::string& phrase)
     {
-        std::string words;
-        bool space = true;
-        for (unsigned char c : command)
+        size_t at = 0;
+        for (size_t start = 0; start < phrase.size();)
         {
-            if (c == ' ' || c == '\t') { if (!space) words += ' '; space = true; }
-            else { words += static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c); space = false; }
+            const auto end = (std::min)(phrase.find(' ', start), phrase.size());
+            if (!SaveBackups::Word(command, at, phrase.substr(start, end - start).c_str())) return false;
+            start = end + 1;
         }
-        if (!words.empty() && words.back() == ' ') words.pop_back();
-        return words;
+        return true;
     }
     // What the engine's Parse(command, "KEY=", ...) can read: it finds the
     // key anywhere, in any case (PROFILE= holds FILE=), and takes a quoted
@@ -222,9 +227,8 @@ namespace Mcp::Safety
         for (unsigned char c : command)
             if (c < 0x20 && c != '\t') return Invalid("exec runs one command, on one line.");
         if (command.find('|') != std::string::npos) return Invalid("exec runs one command, without |.");
-        const auto words = Words(command);
         for (const std::string denied : DeniedCommands())
-            if (words == denied || words.rfind(denied + " ", 0) == 0)
+            if (CommandIs(command, denied))
                 return Refuse("exec does not run " + denied + " commands. Use the map, package and undo tools, which check before they act.", "denied_command");
         // Any other command that names a file: only in the folders the
         // server may write in.

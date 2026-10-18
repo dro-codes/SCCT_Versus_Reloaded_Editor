@@ -169,7 +169,12 @@ namespace
         CheckUndoable();
         const auto records=McpBridge::Records();
         const auto record=std::find_if(records.begin(),records.end(),[&](const McpBridge::CallRecord& r){return r.call==call;});
-        if(record==records.end())Invalid("Bridge call "+std::to_string(call)+" changed nothing that can be undone.");
+        // No record: the call changed nothing, is older than the records the
+        // bridge keeps, or was made in another editor session. The client
+        // can forget it.
+        if(record==records.end())
+            throw Bridge::Error(Bridge::Code::Invalid,"This editor has no record of bridge call "+std::to_string(call)+
+                                " with Undo steps: it changed nothing, is too old, or was made before the editor last started.","unknown_call");
         const auto name="Call "+std::to_string(call)+(record->label.empty()?std::string():" ("+record->label+")");
         const auto state=Editor::UndoRecords();
         const size_t undoable=state.stamps.size()-static_cast<size_t>(state.undone);
@@ -191,7 +196,7 @@ namespace
             Refuse("The undo buffer dropped some of "+name+"'s steps when it filled; undo by steps instead.","trimmed");
         const auto done=Step(false,own);
         if(done!=own)throw std::runtime_error("The editor stopped after undoing "+std::to_string(done)+" of "+name+"'s "+std::to_string(own)+" steps.");
-        return {{"call",call},{"done",done}};
+        return {{"call",call},{"done",done},{"steps",own}};
     }
 
     // mcp.plan (McpPlanModel.h): pre, then the steps in one Undo step, then post.

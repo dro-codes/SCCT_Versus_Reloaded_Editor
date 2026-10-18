@@ -91,7 +91,7 @@ Tip: `O` toggles volume visibility in the editor.
 - `alarms[{id, description, descriptionSpy, duration, priority (0-5), outputs, lockMovers, lockObjectives}]`
   - The output is an `SAlarm`.
   - `outputs` fill `Events`.
-  - `lockMovers[{mover, action}]` fill `MoversToLock`. Each entry is written as the complete struct `{ActionBeforeLock, MoverToLock}`, as the RE+ Security window writes it. `ActionBeforeLock` defaults to `ActionBeforeLock_None`; the wiki does not document its other values, so read them from `map_query what:"schema" classes:["SAlarm"]`.
+  - `lockMovers[{mover, action}]` fill `MoversToLock`. Each entry is written as the complete struct `{ActionBeforeLock, MoverToLock}`, as the RE+ Security window writes it. `ActionBeforeLock` defaults to `ActionBeforeLock_None`; the wiki does not document its other values, so read them from `map_query what:"schema" classes:["SBase.SAlarm"]` (the schema takes full class names).
   - `lockObjectives` fill `ObjectiveTriggersToLock`. Bomb targets are refused.
 - `devices[{id, kind: laser|camera|motion|presence|mine, at|in|box, facing, alarm, detected: spy|merc|both, length, ...}]`
   - Each device's `Event` is set to its alarm's Tag.

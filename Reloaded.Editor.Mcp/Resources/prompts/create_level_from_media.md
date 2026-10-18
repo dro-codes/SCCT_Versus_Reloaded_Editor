@@ -93,7 +93,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 
 8. **Build.**
    - Call `level_build` with `mode:"preview"`, then `mode:"apply"` with `build:"geometry"`.
-   - Call `view_screenshot` with a `camera` (`{location:[x,y,z], rotation:[pitch,yaw,roll]}`) placed where a key source frame was taken. Compare the two images, adjust the spec, and run `level_build` with `sync:"incremental"`.
+   - Call `view_screenshot` with a `camera` (`{location:[x,y,z], rotation:[pitch,yaw,roll]}`, the rotation in engine units, 65536 per turn, not the spec's degrees) placed where a key source frame was taken. Compare the two images, adjust the spec, and run `level_build` with `sync:"incremental"`.
 
 9. **Validate.** Call `map_validate` with `profile:"draft"`, and fix the findings (each has a `fix`). Check climbing GEs against the measurements in the embedded geometric-events page.
 

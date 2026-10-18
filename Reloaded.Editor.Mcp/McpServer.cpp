@@ -16,10 +16,24 @@ namespace
 
     bool IsReply(const Json& message) { return message.is_object() && message.contains("id") && (message.contains("result") || message.contains("error")); }
 
+    // A URI without its #fragment: scct://docs/tool-reference#level_build
+    // names a section of one resource, which is read (and watched) whole.
+    std::string WithoutFragment(const std::string& uri)
+    {
+        const auto hash = uri.find('#');
+        return hash == std::string::npos ? uri : uri.substr(0, hash);
+    }
+    // A prompt argument given as blanks is not given.
+    bool Blank(const Json& value)
+    {
+        return value.is_string() && value.get<std::string>().find_first_not_of(" \t\r\n") == std::string::npos;
+    }
+
     // The editor as one request sees it, noting whether a call changed
     // anything there: only then do subscribers of the live resources hear
     // about it. Dry runs and reads change nothing; a plan that failed after
-    // some of its steps ran (rolledBack false) did.
+    // some of its steps ran (rolledBack false) did. It also notes which
+    // editor said hello, so a newly connected one is announced too.
     class Watched : public IBridge
     {
     public:
@@ -41,13 +55,19 @@ namespace
                 throw;
             }
         }
-        Json Hello() override { return inner.Hello(); }
+        Json Hello() override
+        {
+            auto hello = inner.Hello();
+            if (hello.is_object() && hello.contains("pid") && hello.at("pid").is_number_unsigned()) pid = hello.at("pid").get<unsigned long>();
+            return hello;
+        }
         bool Connected() override { return inner.Connected(); }
         Json State() override { return inner.State(); }
         Json Editors() override { return inner.Editors(); }
-        void Select(unsigned long pid) override { inner.Select(pid); }
+        void Select(unsigned long id) override { inner.Select(id); }
         void Disconnect() override { inner.Disconnect(); }
         bool changed = false;
+        unsigned long pid = 0; // the last hello's editor, 0 when none answered
 
     private:
         void Note(const std::string& op, const Json& args, const CallOptions& options, const Json& result)
@@ -265,8 +285,9 @@ void Server::Request(const Protocol::Message& m)
         if (method == "resources/subscribe" || method == "resources/unsubscribe")
         {
             if (!params.contains("uri") || !params.at("uri").is_string()) { invalid("uri is required."); return; }
-            const auto uri = params.at("uri").get<std::string>();
-            if (!FindResource(uri)) { Send(Protocol::Error(m.id, E::ResourceNotFound, "Resource not found: " + uri, {{"uri", uri}})); return; }
+            const auto requested = params.at("uri").get<std::string>();
+            const auto uri = WithoutFragment(requested);
+            if (!FindResource(uri)) { Send(Protocol::Error(m.id, E::ResourceNotFound, "Resource not found: " + requested, {{"uri", requested}})); return; }
             {
                 std::lock_guard<std::mutex> guard(lock);
                 if (method == "resources/subscribe") subscriptions.insert(uri);
@@ -287,7 +308,7 @@ void Server::Request(const Protocol::Message& m)
         {
             if (!params.contains("uri") || !params.at("uri").is_string()) { invalid("uri is required."); return; }
             const auto uri = params.at("uri").get<std::string>();
-            const auto* resource = FindResource(uri);
+            const auto* resource = FindResource(WithoutFragment(uri));
             if (!resource) { Send(Protocol::Error(m.id, E::ResourceNotFound, "Resource not found: " + uri, {{"uri", uri}})); return; }
             if (resource->live) { Enqueue(m); return; }
             ToolContext context{bridge, options.systemDir, options.workDir};
@@ -301,8 +322,14 @@ void Server::Request(const Protocol::Message& m)
             if (!prompt) { invalid("Unknown prompt: " + params.at("name").get<std::string>()); return; }
             const auto arguments = params.contains("arguments") && !params.at("arguments").is_null() ? params.at("arguments") : Json::object();
             if (!arguments.is_object()) { invalid("A prompt's arguments are an object of strings."); return; }
+            // Missing and blank are the same: the prompt cannot be written without it.
             for (const auto& a : prompt->arguments)
-                if (a.required && !arguments.contains(a.name)) { invalid("The prompt needs the argument \"" + a.name + "\"."); return; }
+                if (a.required && (!arguments.contains(a.name) || arguments.at(a.name).is_null() || Blank(arguments.at(a.name))))
+                {
+                    invalid("The prompt " + prompt->name + " needs the argument \"" + a.name + "\"" + (arguments.contains(a.name) ? ", given blank" : "") +
+                            (a.description.empty() ? std::string(".") : ": " + a.description));
+                    return;
+                }
             for (auto it = arguments.begin(); it != arguments.end(); ++it)
             {
                 const bool known = std::any_of(prompt->arguments.begin(), prompt->arguments.end(), [&](const PromptArgument& a) { return a.name == it.key(); });
@@ -444,7 +471,16 @@ Json Server::Execute(const Job& job)
     if (job.method == "tools/call")
     {
         auto reply = CallTool(job, context);
-        if (watched.changed) MapChanged();
+        // A newly connected editor (editor_launch, editor_restart, editor_status
+        // choosing another) is a new state and map too.
+        bool another = false;
+        if (watched.pid)
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            another = watched.pid != editor;
+            editor = watched.pid;
+        }
+        if (watched.changed || another) MapChanged();
         return reply;
     }
     if (job.method == "resources/read") return ReadResource(job.id, job.params.value("uri", std::string()), context);
@@ -474,20 +510,23 @@ Json Server::CallTool(const Job& job, ToolContext& context)
     return Protocol::Response(job.id, Protocol::ToolResultJson(result, NegotiatedVersion(), tool->outputSchema));
 }
 
-Json Server::ReadResource(const Json& id, const std::string& uri, ToolContext& context)
+Json Server::ReadResource(const Json& id, const std::string& requested, ToolContext& context)
 {
+    // The contents are the whole resource, under its own URI; errors name
+    // the URI as asked for.
+    const auto uri = WithoutFragment(requested);
     const auto* resource = FindResource(uri);
-    if (!resource || !resource->read) return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + uri, {{"uri", uri}});
+    if (!resource || !resource->read) return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + requested, {{"uri", requested}});
     Json read;
     try { read = resource->read(uri, context); }
     catch (const Bridge::Error& e)
     {
         const auto hint = Tools::Hint(e);
-        return Protocol::Error(id, E::Internal, "Could not read " + uri + ": " + e.what() + (hint.empty() ? "" : " " + hint), {{"uri", uri}, {"code", e.code}});
+        return Protocol::Error(id, E::Internal, "Could not read " + requested + ": " + e.what() + (hint.empty() ? "" : " " + hint), {{"uri", requested}, {"code", e.code}});
     }
-    catch (const Tools::NotFound& e) { return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + uri + ". " + e.what(), {{"uri", uri}}); }
-    catch (const std::exception& e) { return Protocol::Error(id, E::Internal, "Could not read " + uri + ": " + e.what(), {{"uri", uri}}); }
-    if (read.is_null()) return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + uri, {{"uri", uri}});
+    catch (const Tools::NotFound& e) { return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + requested + ". " + e.what(), {{"uri", requested}}); }
+    catch (const std::exception& e) { return Protocol::Error(id, E::Internal, "Could not read " + requested + ": " + e.what(), {{"uri", requested}}); }
+    if (read.is_null()) return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + requested, {{"uri", requested}});
     return Protocol::Response(id, Protocol::ReadContents(uri, read, resource->mimeType));
 }
 

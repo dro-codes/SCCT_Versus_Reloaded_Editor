@@ -25,7 +25,7 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `authoring.mapid` {} → {map}
 - `authoring.schema` {classes} → {classes: {class: {schema, choices, writable}}}
 - `authoring.export` {} → {blob, size} (read it with blob.read)
-- `authoring.preview` {document, baseDirectory} → {rows, tally, identities}
+- `authoring.preview` {document, baseDirectory} → {rows, tally, identities}; refuses texture and save operations as authoring.apply does
 - `assets.search` {kind, query, limit} → {assets: [{path, kind, bounds}]}
 - `view.screenshot` {viewport, maxEdge, camera {location, rotation}, frame} → {png, width, height}
 - `view.capture`
@@ -82,11 +82,11 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 
 ## Undoable
 
-- `mcp.plan` (not joinable) {label, pre, steps, post, dryRun}: steps are {id, op, args, optional}; {"$bind": {step, ptr}} in an argument takes a value from an earlier step's result. pre runs first (loads, imports, saves; not undoable), steps are one Undo step and roll back together, post runs after (builds, texturing, Map Check, saves, screenshots), each on its own; an optional post step may fail. Deletes come before any add. scct://schema/build-plan
-- `undo.call` (not joinable) {call}: undoes MCP call n while its steps are the newest (refused: not_newest, already_undone, gone)
+- `mcp.plan` (not joinable) {label, pre, steps, post, dryRun}: steps are {id, op, args, optional}; {"$bind": {step, ptr}} in an argument takes a value from an earlier step's result. pre runs first (loads, imports, saves; not undoable), steps are one Undo step and roll back together, post runs after (builds, texturing, Map Check, saves, screenshots), each on its own; an optional post step may fail. Deletes come before any add. A dialog the bridge does not know stops the plan at that step (dialog_blocked, with details stoppedAt, ran, wrote, built, rolledBack). scct://schema/build-plan
+- `undo.call` (not joinable) {call} → {call, done, steps}: undoes MCP call n while its steps are the newest (refused: not_newest, already_undone, gone; invalid: unknown_call for a call the editor has no record of)
 - `undo.steps` (not joinable) {count} → {done}
 - `redo.steps` (not joinable) {count} → {done}
-- `authoring.apply` {document, baseDirectory} → {identities: {create id: {path, class}}, deleted}; texture and save operations only for the map's own packages
+- `authoring.apply` {document, baseDirectory} → {identities: {create id: {path, class}}, deleted}; texture and save operations only into the map's own <Map>_<name> package (a texture also into MyLevel), else refused before anything runs: not_map_owned, package_name (<Map>, Amb_<Map>, or a base name another kind of package has), interface_package (<Map>-i), unsaved_map (the map has no file yet); a load alone is allowed
 - `select` {actors, focus}
 - `design.block` {spec, position, rotation, previous}
 - `design.blockbatch` {items}
@@ -161,7 +161,7 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `minimap.apply` {floors, framing, style, objectives, spawns, meshes, briefing, briefingFloor}
 - `uas.build` {packages, quality}
 - `mapsettings.set` {changes}
-- `optimise.release` {packs, destination: map|package, assetPackage, folder, overwrite}: folder only inside <Game>\Releases, the work folder or [Mcp] WriteRoots
+- `optimise.release` {packs, destination: map|package, assetPackage, folder, overwrite}: the map must be saved (unsaved_map); folder (default <Game>\Releases\<Map>) a full path only inside <Game>\Releases, the work folder or [Mcp] WriteRoots, else refused as outside_write_roots, so overwrite only replaces files there; assetPackage the map's own <Map>_<name>
 - `conveyor.prepare`
 - `emitterlib.save` {entry, members, map}
 - `emitterlib.delete` {id}
@@ -179,7 +179,7 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 
 ## Raw
 
-- `exec` {command} → {ok, output}; needs [Mcp] AllowRawExec=1 (use editor_exec)
+- `exec` {command} → {ok, output}; needs [Mcp] AllowRawExec=1 (use editor_exec). Even then refused: a command starting with QUIT, EXIT, RELAUNCH, DEBUG, EXEC, MAP NEW/LOAD/SAVE/IMPORT/EXPORT, OBJ SAVEPACKAGE/EXPORT/IMPORT/LOAD, SAVEMAPPROP, LOADMAPPROP, TEXTURE IMPORT/EXPORT, STATICMESH IMPORT/EXPORT, MESH IMPORT, BRUSH IMPORT/EXPORT, DUMPINT, TRANSACTION or AUDIO, read word by word as the console reads it (denied_command); a FILE= anywhere outside the work folder and WriteRoots (outside_write_roots); a PACKAGE= other than MyLevel or the map's own (not_map_owned); more than one command, | or a line break (invalid)
 
 ## Blocked
 

@@ -59,7 +59,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
    - Saving produces `Packages\Textures\<File>-i.utc`. Delete any `-i.utx` it leaves; the game does not use it.
 {{^images}}   - No images were given. Ask the user for them, or render placeholders with `view_screenshot` (`maxEdge` 512) and convert those.
 {{/images}}
-6. **Minimap (optional).** Use `map_settings` with `minimap` (`true`, or `{floors, framing, ...}`), which fills `MapSnapshotInfo` (`MapFloors` per floor with `FloorZ`, plus `SnapshotCamera`) for the F7 Strategic Map.
+6. **Minimap (optional).** Use `map_settings` with `minimap` (`true`, or `{floors, framing, ...}`), which fills the LevelInfo's `MapFloors` (one entry per floor, with `FloorZ`) and `SnapshotCamera`, listed under `MapSnapshotInfo` in Level Properties, for the F7 Strategic Map.
 7. **Sound.** Call `release` with `action:"sounds"` to build `Sounds\<File>.uas`.
    - Always include `Interface` (objective sounds, win/lose music), plus `Amb_<Map>` if the map has its own ambient package.
    - Quality is 5.0. Build it even when the map has no streamed audio.

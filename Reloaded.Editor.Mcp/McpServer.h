@@ -11,7 +11,9 @@
 // 2025-03-26 and older) is answered with one array once all of it is; later
 // protocols have no batches and get an error. Subscribers of the live
 // resources hear of a change after a tool call that changed something in the
-// editor. Every write is one whole line under a lock.
+// editor or connected to another editor. A resource URI may carry a
+// #fragment (a section of a document), which is read and watched as the whole
+// resource. Every write is one whole line under a lock.
 #include "McpProtocolModel.h"
 #include <atomic>
 #include <condition_variable>
@@ -103,6 +105,7 @@ namespace Mcp
         // The running request was cancelled: Tools::Cancelled() on the worker.
         std::atomic<bool> stopRunning{false};
         int logRank = 1; // info
+        unsigned long editor = 0; // the editor that last said hello in a tool call
         std::thread worker;
     };
 

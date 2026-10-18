@@ -1,6 +1,7 @@
 // Media.h's platform parts: WIC and Media Foundation on Windows, ImageCodec.h
 // and an ffmpeg child process everywhere.
 #include "Media.h"
+#include <exception>
 #include <thread>
 #include <tuple>
 #ifdef _WIN32
@@ -45,9 +46,16 @@ namespace Mcp::Media
 {
 namespace
 {
+    // What the progress callback throws (the request was cancelled) is the
+    // caller's own: carried past the decoders' error handling, so it is never
+    // taken for a video Media Foundation cannot read, and ExtractFrames
+    // throws it again as it was.
+    struct Interrupted { std::exception_ptr cause; };
     void Report(const FrameOptions& o, double done, double total, const std::string& message)
     {
-        if (o.progress) o.progress(done, total, message);
+        if (!o.progress) return;
+        try { o.progress(done, total, message); }
+        catch (...) { throw Interrupted{std::current_exception()}; }
     }
     // The last lines of a log, for an error message.
     std::string Tail(const std::string& log, size_t lines = 4)
@@ -759,33 +767,41 @@ int RunProcess(const fs::path& program, const std::vector<std::string>& argument
 }
 
 // ---------------------------------------------------------------- frames
+namespace
+{
+    Extracted Frames(const fs::path& video, const FrameOptions& options)
+    {
+        CheckFrameOptions(options);
+        std::error_code error;
+        if (!fs::is_regular_file(video, error)) throw std::runtime_error("The video " + Utf8(video) + " does not exist or is not a file.");
+        fs::create_directories(options.outDir, error);
+        if (!fs::is_directory(options.outDir, error)) throw std::runtime_error("Cannot create the frame folder " + Utf8(options.outDir) + ".");
+        const auto backend = Lower(options.backend);
+        std::string mediaFoundation;
+#ifdef _WIN32
+        if (backend != "ffmpeg")
+        {
+            try { return MediaFoundationFrames(video, options); }
+            catch (const std::exception& e)
+            {
+                if (backend == "mediafoundation") throw;
+                mediaFoundation = e.what();
+            }
+        }
+#else
+        if (backend == "mediafoundation") throw std::runtime_error("Media Foundation exists only on Windows; use backend auto or ffmpeg here.");
+#endif
+        const auto ffmpeg = FindFfmpeg(options.ffmpeg);
+        if (ffmpeg.empty()) throw std::runtime_error(NoBackend(mediaFoundation));
+        auto out = FfmpegFrames(ffmpeg, video, options);
+        if (!mediaFoundation.empty()) out.notes.insert(out.notes.begin(), "Media Foundation could not read the video (" + mediaFoundation + "), so ffmpeg did.");
+        return out;
+    }
+}
 Extracted ExtractFrames(const fs::path& video, const FrameOptions& options)
 {
-    CheckFrameOptions(options);
-    std::error_code error;
-    if (!fs::is_regular_file(video, error)) throw std::runtime_error("The video " + Utf8(video) + " does not exist or is not a file.");
-    fs::create_directories(options.outDir, error);
-    if (!fs::is_directory(options.outDir, error)) throw std::runtime_error("Cannot create the frame folder " + Utf8(options.outDir) + ".");
-    const auto backend = Lower(options.backend);
-    std::string mediaFoundation;
-#ifdef _WIN32
-    if (backend != "ffmpeg")
-    {
-        try { return MediaFoundationFrames(video, options); }
-        catch (const std::exception& e)
-        {
-            if (backend == "mediafoundation") throw;
-            mediaFoundation = e.what();
-        }
-    }
-#else
-    if (backend == "mediafoundation") throw std::runtime_error("Media Foundation exists only on Windows; use backend auto or ffmpeg here.");
-#endif
-    const auto ffmpeg = FindFfmpeg(options.ffmpeg);
-    if (ffmpeg.empty()) throw std::runtime_error(NoBackend(mediaFoundation));
-    auto out = FfmpegFrames(ffmpeg, video, options);
-    if (!mediaFoundation.empty()) out.notes.insert(out.notes.begin(), "Media Foundation could not read the video (" + mediaFoundation + "), so ffmpeg did.");
-    return out;
+    try { return Frames(video, options); }
+    catch (const Interrupted& stop) { std::rethrow_exception(stop.cause); }
 }
 
 Image::Rgba ContactSheet(const std::vector<Frame>& frames, int columns, int maxEdge)

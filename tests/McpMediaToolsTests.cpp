@@ -12,6 +12,7 @@
 #include "../Reloaded.Editor.Mcp/Importers/Import.h"
 #include <cstdlib>
 #include <iostream>
+#include <set>
 #include <source_location>
 using namespace Mcp;
 namespace fs=std::filesystem;
@@ -360,6 +361,15 @@ void Processes(const fs::path& ffmpeg)
     Check(out.frames.size()==2 && out.frames[0].time==0 && std::abs(out.frames[1].time-1.0)<0.13 && out.frames[1].change>0.3,"scene finds the cut: "+std::to_string(out.frames.size()));
     size_t pngs=0;for(const auto& e:fs::directory_iterator(o.outDir))pngs+=e.path().extension()==".png";
     Check(pngs==2,"unpicked candidates are removed");
+    // What progress throws (a cancelled request) ends the extraction as it
+    // is; no other decoder is tried.
+    {
+        Media::FrameOptions stop=o;stop.mode="interval";stop.outDir=s.dir/"stopped";stop.backend="auto";
+        stop.progress=[](double,double,const std::string&){throw Bridge::Error(Bridge::Code::Cancelled,"The request was cancelled.");};
+        std::string code;
+        try{Media::ExtractFrames(video,stop);}catch(const Bridge::Error& e){code=e.code;}
+        Check(code==Bridge::Code::Cancelled,"a cancel from progress is passed on, not taken for a decoder failure");
+    }
     o.mode="interval";o.start=5;o.outDir=s.dir/"late";
     Reject([&]{Media::ExtractFrames(video,o);},"past the end");
     const auto sheet=Media::ContactSheet(out.frames,0,400);
@@ -375,6 +385,8 @@ void MediaTools(const fs::path& ffmpeg)
         const auto* tool=t.registry.FindTool(name);
         Check(tool && tool->description.size()>600 && tool->inputSchema.value("additionalProperties",true)==false,std::string(name)+" is described and closed");
         Check(!Protocol::CheckArguments(tool->inputSchema,{{"nonsense",1}}).empty(),std::string(name)+" refuses unknown arguments");
+        const auto listed=Protocol::ToolJson(*tool,"2025-06-18").dump().size();
+        Check(listed<4500,std::string(name)+" is "+std::to_string(listed)+" bytes in tools/list");
     }
     // media_read_image: a crop, enlarged, with a grid.
     auto r=t.Run("media_read_image",{{"path",(dir/"rgba8.png").string()},{"crop",{{"x",5},{"y",5},{"width",20},{"height",10}}},{"enlarge",true},{"maxEdge",256},
@@ -468,6 +480,12 @@ void MediaTools(const fs::path& ffmpeg)
     Check(!t.progress.empty(),"progress forwarded");
     r=t.Run("media_extract_frames",{{"video",Media::Utf8(video)},{"mode","scene"},{"attach","none"},{"backend","ffmpeg"}});
     Check(!r.isError && r.structured.at("frames").size()==2 && Images(r)==0 && r.structured.at("frames").at(1).contains("change"),"scene mode through the tool: "+Text(r));
+    // A cancelled request (the server's progress throws) ends the tool with code cancelled.
+    const auto report=t.context->progress;
+    t.context->progress=[](double,double,const std::string&){throw Bridge::Error(Bridge::Code::Cancelled,"The request was cancelled.");};
+    r=t.Run("media_extract_frames",{{"video",Media::Utf8(video)},{"mode","count"},{"count",2},{"attach","none"}});
+    t.context->progress=report;
+    Check(r.isError && r.structured.at("code")==Bridge::Code::Cancelled,"a cancelled extraction says so: "+Text(r));
     t.Ini("");
 }
 
@@ -479,6 +497,8 @@ void ImportTools()
     {
         const auto* tool=t.registry.FindTool(name);
         Check(tool && tool->description.size()>800 && tool->inputSchema.value("additionalProperties",true)==false,std::string(name)+" is described and closed");
+        const auto listed=Protocol::ToolJson(*tool,"2025-06-18").dump().size();
+        Check(listed<4500,std::string(name)+" is "+std::to_string(listed)+" bytes in tools/list");
     }
     Check(t.registry.FindTool("import_to_spec")->description.find("tiled (.tmj .tmx)")!=std::string::npos,"formats listed from Import::Formats");
     Check(t.registry.FindTool("assets_import")->inputSchema.at("properties").contains("dryRun"),"assets_import takes dryRun and label");
@@ -492,6 +512,23 @@ void ImportTools()
     Check(Images(r)==1 && ImageAt(r,0).width<=1024 && r.structured.contains("summary"),"a plan of the compiled spec");
 #endif
     Check(Text(r).find("starting point")!=std::string::npos && r.structured.at("next").at(0).at("tool")=="plan_render","next steps");
+    // The import is a document: its fixes are edits of the spec and its next
+    // steps take the spec, never an intent tool, which would change the map.
+    const std::set<std::string> intents{"blockout","gameplay","security","mechanisms","events","environment","geometric_events","map_settings"};
+    for(const auto& n:r.structured.at("next"))
+        Check(!intents.count(n.value("tool",std::string())) && n.at("args").value("spec",std::string())=="<the spec>","next takes the returned spec: "+n.dump());
+    for(const auto& d:r.structured.at("diagnostics"))
+        if(d.contains("fix"))Check(!intents.count(d.at("fix").value("tool",std::string())),"an import's fix is a spec edit: "+d.dump());
+    // A spec too big to return is passed on as its file.
+    {
+        std::string table="class,x,y,z,yaw,id,tag,event,LightBrightness\n";
+        for(int i=0;i<12000;++i)table+="Engine.Light,"+std::to_string(i%100*64)+","+std::to_string(i/100*64)+",256,,Lamp"+std::to_string(i)+",,,96\n";
+        Media::WriteFile(t.scratch.dir/"lamps.csv",table);
+        auto big=t.Run("import_to_spec",{{"source",(t.scratch.dir/"lamps.csv").string()},{"plan",false}});
+        Check(!big.isError && !big.structured.contains("spec") && big.structured.at("specBytes").get<size_t>()>1024u*1024,"a big import is not returned inline: "+Text(big).substr(0,300));
+        for(const auto& n:big.structured.at("next"))
+            Check(n.at("args").value("path",std::string())==big.structured.at("specFile").get<std::string>() && !n.at("args").contains("spec"),"next takes the saved file: "+n.dump());
+    }
     r=t.Run("import_to_spec",{{"source",(dir/"plan.svg").string()},{"plan",false}});
     Check(!r.isError && r.structured.at("format")=="svg" && Images(r)==0,"svg, no plan");
     r=t.Run("import_to_spec",{{"source",(dir/"cube.vmf").string()},{"maxEdge",256}});

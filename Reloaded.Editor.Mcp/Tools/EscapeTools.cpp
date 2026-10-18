@@ -305,9 +305,11 @@ void RegisterEscapeTools(Registry& registry)
         t.description =
             "Applies a scct.map-changes document (docs: scct://docs/map-authoring; schema: scct://schema/map-changes) in one Undo step: create actors and "
             "components, update with before, link events, version 2 package loads, texture imports and saves (run first, not undoable) and polygon brushes, "
-            "version 3 deletes (allowDeletes and the exact map id; map \"*\" is refused for deletes). dryRun returns the editor's preview rows (Add, Modify, "
-            "Move, Delete, Link, Package, Surface) without changing anything. The result maps each create id to the actor made (created[].identity). "
-            "Prefer level_build for whole levels: it writes these documents with the wiki defaults.";
+            "version 3 deletes (allowDeletes and the exact map id; map \"*\" is refused for deletes). A texture or save may only write the map's own "
+            "<Map>_<name> package (or a texture into MyLevel): another is refused with reason not_map_owned (or package_name, interface_package), and any "
+            "before the map's first save with unsaved_map. dryRun returns the editor's preview rows (Add, Modify, Move, Delete, Link, Package, Surface) "
+            "without changing anything. The result maps each create id to the actor made (created[].identity). Prefer level_build for whole levels: it "
+            "writes these documents with the wiki defaults.";
         t.inputSchema = S::Mutating(S::Input({{"document", S::Free("The scct.map-changes document.")},
                                               {"baseDirectory", S::String("Folder that relative texture file paths in the document are relative to.")}},
                                              {"document"}));
@@ -323,7 +325,9 @@ void RegisterEscapeTools(Registry& registry)
         t.description =
             "Runs one RE+ workflow op by name, {op, args}, for what no other tool covers. scct://docs/ops lists every op with its policy and arguments. The "
             "bridge's op policies still apply: blocked ops (UI windows, light.set, blind undo) are refused, console commands go through editor_exec, edits "
-            "are one Undo step and honour approval and dryRun, and mcp.plan plans are checked for order first. Results come back unchanged.";
+            "are one Undo step and honour approval and dryRun, and mcp.plan plans are checked for order first. The editor's refusals apply too: "
+            "authoring.apply texture and save operations only write the map's own packages (not_map_owned, unsaved_map), optimise.release only writes "
+            "inside <Game>\\Releases, the work folder and [Mcp] WriteRoots (outside_write_roots). Results come back unchanged.";
         t.inputSchema = S::Mutating(S::Input({{"op", S::String("The op, such as security.actors or camera.order.")}, {"args", S::Free("The op's arguments.")}}, {"op"}));
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Request(a, c); }); };
@@ -337,9 +341,11 @@ void RegisterEscapeTools(Registry& registry)
         std::string denied;
         for (const auto* command : Safety::DeniedCommands()) denied += (denied.empty() ? "" : ", ") + std::string(command);
         t.description =
-            "Runs one editor console command and returns its output. Off unless the user sets [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini. Refused: " + denied +
-            " (use map_file, editor_undo and the other tools), FILE= outside the work folder and [Mcp] WriteRoots, and PACKAGE= other than the map's own. "
-            "Console commands bypass the staleness checks and may not be undoable: a last resort.";
+            "Runs one editor console command and returns its output. Off unless the user sets [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini. Refused "
+            "(code refused): commands that quit, run files of commands, replace, save, load, import or export the map, packages or files, or undo blindly: " + denied +
+            " (reason denied_command; use map_file, editor_undo, assets_import and the other tools); any FILE= outside the work folder and [Mcp] "
+            "WriteRoots (outside_write_roots); any PACKAGE= other than the map's own <Map>_<name>, <Map>-i, Amb_<Map> or MyLevel (not_map_owned); and "
+            "more than one command (| or a line break: code invalid). Console commands bypass the staleness checks and may not be undoable: a last resort.";
         t.inputSchema = S::Mutating(S::Input({{"command", S::String("The console command, one line.")}}, {"command"}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;

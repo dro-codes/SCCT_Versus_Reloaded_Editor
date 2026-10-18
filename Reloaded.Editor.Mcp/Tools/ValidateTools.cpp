@@ -456,7 +456,10 @@ namespace
         const std::string what = source == "live" ? "the open map" : source == "spec" ? "the level spec (offline)" : "the scene";
         std::string summary = (profile == "release" ? "Release" : "Draft") + std::string(" check of ") + what + ": " + Count(errors, "error") + ", " + Count(warnings, "warning") + ", " + Count(notes, "note") + ".";
         if (ordered.size() > shown.size()) summary += " Showing the first " + std::to_string(shown.size()) + " (errors first); raise limit or narrow include or rules for the rest.";
-        if (errors) summary += " Fix the errors first; each finding's fix names the tool and arguments, and wikiPage the scct://wiki page behind the rule.";
+        if (errors && offline)
+            summary += " Fix the errors in the spec first: each finding's fix.spec lists the edits, merged at their JSON pointer (scct://docs/tools), and wikiPage is the "
+                       "scct://wiki page behind the rule; then check the spec again.";
+        else if (errors) summary += " Fix the errors first; each finding's fix names the tool and arguments, and wikiPage the scct://wiki page behind the rule.";
         else if (!warnings) summary += " Nothing to fix.";
         Json result{{"summary", {{"errors", errors}, {"warnings", warnings}, {"info", notes}, {"profile", profile}, {"source", source}, {"total", ordered.size()}, {"shown", shown.size()},
                                  {"include", Json(include)}, {"actors", scene.actors.size()}, {"pieces", scene.pieces.size()}, {"ges", scene.ges.size()}}},

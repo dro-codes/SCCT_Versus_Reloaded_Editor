@@ -455,6 +455,12 @@ void OptimiseAndPackage()
     Check(h.Error({{"action","optimise"},{"packs",{"StockTex"}},{"folder",(h.game.At("Releases")/".."/"OtherInstall").string()}}).find("WriteRoots")!=std::string::npos,"\"..\" does not climb out");
     Check(h.Error({{"action","optimise"},{"packs",{"StockTex"}},{"folder","Releases/AquaD"}}).find("full path")!=std::string::npos,"a relative folder is refused");
     Check(h.Error({{"action","package"},{"packs",{"StockTex"}},{"folder",elsewhere.string()}}).find("WriteRoots")!=std::string::npos,"package's release copy too");
+    // Before Optimise Map Assets reads the map for its suggestions, which can take minutes.
+    const auto reports=h.fake.Count("optimise.report");
+    Check(h.Error({{"action","optimise"},{"suggested",true},{"folder",elsewhere.string()}}).find("WriteRoots")!=std::string::npos && h.fake.Count("optimise.report")==reports,
+          "the folder is checked before the report is asked for");
+    Check(h.Error({{"action","package"},{"suggested",true},{"folder",elsewhere.string()}}).find("WriteRoots")!=std::string::npos && h.fake.Count("optimise.report")==reports,
+          "by package too");
     h.game.Text("System/Reloaded_Editor.ini","[Mcp]\r\nWriteRoots=C:\\nowhere; \""+elsewhere.string()+"\"\r\n");
     h.Ok({{"action","optimise"},{"packs",{"StockTex"}},{"folder",(elsewhere/"AquaD").string()}});
     Check(h.fake.Count("optimise.release")==calls+1 && sent.at("folder")==(elsewhere/"AquaD").string(),"a WriteRoots folder is allowed");
@@ -513,7 +519,7 @@ void Schema()
     Check(registry.tools.size()==1,"one tool");
     const auto& t=registry.tools.front();
     Check(t.name=="release" && !t.readOnly && t.destructive,"annotations");
-    for(const char* text:{"scct://wiki/map-packaging","scct://docs/tool-reference#release","Amb_<Map>","<Map>-i.utc","Interface","5.0","base","folder"})
+    for(const char* text:{"scct://wiki/map-packaging","scct://docs/tool-reference#release","Amb_<Map>","<Map>-i.utc","Interface","5.0","base","folder","[Mcp] WriteRoots","outside_write_roots"})
         Check(t.description.find(text)!=std::string::npos,std::string("the description cites ")+text);
     // The details moved to the tool reference, so tools/list stays small.
     std::ifstream file(fs::path(__FILE__).parent_path().parent_path()/"Reloaded.Editor.Mcp"/"Resources"/"docs"/"tool-reference.md",std::ios::binary);

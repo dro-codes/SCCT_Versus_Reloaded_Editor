@@ -128,7 +128,12 @@ namespace
                 {
                     errors += d.severity == "error";
                     warnings += d.severity == "warning";
-                    if (diagnostics.size() < 60) diagnostics.push_back({{"severity", d.severity}, {"rule", d.rule}, {"pointer", d.pointer}, {"message", d.message}, {"wikiPage", d.wikiPage}});
+                    if (diagnostics.size() >= 60) continue;
+                    Json finding{{"severity", d.severity}, {"rule", d.rule}, {"pointer", d.pointer}, {"message", d.message}, {"wikiPage", d.wikiPage}};
+                    // The import is a document to edit, not the open map: its
+                    // fixes are edits of the spec, never intent-tool calls.
+                    if (!d.fix.is_null()) finding["fix"] = SpecFix(d.fix);
+                    diagnostics.push_back(finding);
                 }
                 summary = compiled.summary;
                 auto scene = compiled.render;
@@ -154,9 +159,18 @@ namespace
         std::string countText;
         for (auto it = counts.begin(); it != counts.end(); ++it)
             if (it.value().is_number()) countText += (countText.empty() ? "" : ", ") + it.value().dump() + " " + it.key();
-        Json next = Json::array({Next("plan_render", "Draw the spec (with any options, such as storey) and compare it with the source.", {{"spec", "<the spec>"}}),
-                                 Next("level_spec_validate", "Check it in the release profile before building.", {{"spec", "<the spec>"}}),
-                                 Next("level_build", "Preview the build (mode preview), then apply it.", {{"spec", "<the spec>"}, {"mode", "preview"}})});
+        const bool inlineSpec = text.size() <= kInlineSpec;
+        // The spec the next tools take: the one returned, or the saved file
+        // when it is too big to return.
+        auto with = [&](Json args)
+        {
+            if (inlineSpec) args["spec"] = "<the spec>";
+            else args["path"] = PathText(file);
+            return args;
+        };
+        Json next = Json::array({Next("plan_render", "Draw the spec (with any options, such as storey) and compare it with the source.", with(Json::object())),
+                                 Next("level_spec_validate", "Check it in the release profile before building.", with({{"profile", "release"}})),
+                                 Next("level_build", "Preview the build (mode preview), then apply it.", with({{"mode", "preview"}}))});
         if (report.contains("assets") && report.at("assets").is_array() && !report.at("assets").empty())
         {
             Json items = Json::array();
@@ -169,10 +183,11 @@ namespace
             }
             next = Json::array({Next("assets_import", "Import the mesh into the map's <Map>_STM package; then place it with geometry.meshes (options.mesh here does it for you).", {{"items", items}})});
         }
+        // An intent tool would change the open map, not this document.
+        next.erase(std::remove_if(next.begin(), next.end(), [](const Json& n) { return IntentTool(n.value("tool", std::string())); }), next.end());
         Json result{{"format", kind}, {"source", pathText.empty() ? Json("live") : Json(pathText)}, {"report", report}, {"specFile", PathText(file)}, {"specBytes", text.size()},
                     {"diagnostics", diagnostics}, {"compile", {{"errors", errors}, {"warnings", warnings}}}, {"next", next}};
         if (!summary.is_null()) result["summary"] = summary;
-        const bool inlineSpec = text.size() <= kInlineSpec;
         if (inlineSpec) result["spec"] = spec;
         std::string message = "Imported " + sourceText + " as " + kind + (countText.empty() ? std::string() : " (" + countText + ")") + " into the scct.level-spec \"" + SpecName(spec) + "\"";
         message += inlineSpec ? ", returned as spec and saved to " + PathText(file) + "." : ", saved to " + PathText(file) + " (" + std::to_string(text.size() / 1024) +
@@ -498,23 +513,19 @@ void RegisterImportTools(Registry& registry)
         t.name = "import_to_spec";
         t.title = "Import a file as a level spec";
         t.description =
-            "Turns a file (or the open map) into a scct.level-spec you can check, edit and build: floor plans, grids, other games' maps, tables and "
-            "exports become rooms, corridors, doorways, spawns, objectives, cameras, lights and props. Deterministic: the same file gives the same spec. "
-            "source is a full file path, or \"live\" for the map open in the editor (its map-authoring export: with options.mode \"refs\", the default, "
-            "every actor becomes an existing.refs entry so a spec can extend and wire up what is there; \"recreate\" rebuilds it as a spec to port it).\n"
-            "format is auto (by extension and contents) or one of:\n" +
+            "Turns a file, or the open map, into a scct.level-spec to check, edit and build: plans, grids, other games' maps, tables and exports become "
+            "rooms, corridors, doorways, spawns, objectives, cameras, lights and props, the same way every time. source: a full file path, or \"live\" for "
+            "the open map (options.mode refs, the default: its actors become existing.refs to extend and wire up; recreate: a spec that rebuilds it).\n"
+            "format: auto (by extension and contents) or one of:\n" +
             FormatHelp() +
-            "options go to the importer. Common: name (the map's name, CAPS; default from the file). grid: cell (128 uu per cell), storeyHeight (384), "
-            "roomHeight (320), corridorMax (256), autoDoorways (true), legend {char: meaning}, center/origin. image: pixelsPerCell, uuPerPixel, colors "
-            "{\"#rrggbb\": meaning} (media_read_image's palette shows a plan's colours), tolerance (60), storey, overlay (true). svg, tiled, geojson: scale "
-            "(uu per unit), plus the grid options. vmf, quake: scale (2.5; 3.2 for Quake), mirrorY (true), offset, center, textures {name: "
-            "\"Package.Group.Name\"}, material, entities (true). t3d: scale, offset. obj, ase: up (y or z), scale, mesh and at to place an imported mesh. "
-            "map-authoring: mode (refs | recreate), values.\n"
-            "Returns spec (also saved under the work folder: specFile), report {format, warnings, assumptions, counts, assets, ...}, and the compiler's "
-            "diagnostics; attaches a top-down plan of the compiled spec (maxEdge, default 1024; plan false skips it) and, for raster plans, an overlay of "
-            "how each cell was read. JPEG, GIF and TIFF plans are decoded with Windows' codecs first. An import is a starting point, not a finished "
-            "level: compare the plan with the source, read the assumptions, fix scale, then level_spec_validate, plan_render and level_build (preview "
-            "first). Meshes (obj, ase) come back as assets for assets_import.";
+            "options by format: name (CAPS; default from the file). grid: cell (128 uu), storeyHeight (384), roomHeight (320), corridorMax (256), "
+            "autoDoorways, legend {char: meaning}, center/origin. image: pixelsPerCell or uuPerPixel, colors {\"#rrggbb\": meaning} (media_read_image's "
+            "palette), tolerance (60), storey, overlay. svg, tiled, geojson: scale (uu per unit) and the grid options. vmf, quake: scale (2.5; Quake 3.2), "
+            "mirrorY, offset, center, textures {name: \"Package.Group.Name\"}, material, entities. t3d: scale, offset. obj, ase: up (y|z), scale, mesh "
+            "and at to place it. map-authoring: mode, values. autoDoorways, overlay, mirrorY and entities default true.\n"
+            "Returns spec (inline up to 1 MiB, always saved as specFile), report and the compiler's diagnostics, with a plan image (plan false skips it). "
+            "An import is a starting point: compare the plan with the source and read report.assumptions, then level_spec_validate, plan_render and "
+            "level_build preview (scct://docs/tools).";
         t.inputSchema = S::Input({{"source", S::String("Full path of the file to import, or \"live\" for the map open in the editor.")},
                                   {"format", {{"type", "string"}, {"enum", FormatNames()}, {"description", "The file's format. Default auto."}}},
                                   {"options", S::Free("Importer options (see the description): name, scale, cell, colors, mode, ...")},
@@ -530,22 +541,19 @@ void RegisterImportTools(Registry& registry)
         t.name = "assets_import";
         t.title = "Import textures and static meshes";
         t.description =
-            "Imports image files as textures and model files as static meshes into the open map's own packages, then saves the packages: the step "
-            "before a spec or map can use custom materials and props. The map must be saved under its file name first (map_file save), because its "
-            "packages are named after it: textures in <Map>_TXT (Packages\\Textures\\<Map>_TXT.utx) and meshes in <Map>_STM, as the wiki's Map Packaging "
-            "page asks; stock packages are never written.\n"
-            "items (1-64): {kind: texture | staticmesh, file (full path), package (default <Map>_TXT or <Map>_STM; must be <Map>_<anything>), group "
-            "(optional), name (default the file's name)}.\n"
+            "Imports image files as textures and model files as static meshes into the open map's own packages, then saves them: the step before a "
+            "spec or map can use custom materials and props. Save the map under its file name first (map_file save): textures go in <Map>_TXT "
+            "(Packages\\Textures\\<Map>_TXT.utx) and meshes in <Map>_STM, as the wiki's Map Packaging page asks (any <Map>_<name> package works); stock "
+            "packages are never written.\n"
             "- texture: .tga, .bmp, .pcx or .dds with power-of-two sides up to 8192 import as they are; PNG, JPEG, GIF and TIFF with power-of-two "
-            "sides are converted to TGA first (image_convert resizes others). format DXT1 (default), DXT3, DXT5 (default with alpha) or RGBA8; mips "
-            "(default true); alpha (the importer's ALPHATEXTURE: keep transparency); masked (1-bit cut-outs); lodSet 0-15.\n"
-            "- staticmesh: .ase imports as it is; .obj is converted here to ASE (one object, faces triangulated, UVs and usemtl materials kept, map_Kd "
-            "from the .mtl as each material's bitmap) with up y (default) or z and scale (OBJ files in metres need 100). Other formats: export to OBJ "
-            "first.\n"
-            "save (default true) saves each package that received an asset; replacing an existing package file needs overwrite: true (it is backed up "
-            "first). Files the editor cannot read by path (non-ASCII) are copied to the work folder. dryRun checks every item and converts nothing. "
-            "Imports cannot be undone with editor_undo (they live in packages, not the map). Returns created[] with each texture's "
-            "\"Package.Group.Name\" and each mesh's \"StaticMesh'Package.Name'\" for the spec (geometry.meshes, materials).";
+            "sides become TGA first (image_convert resizes others). format DXT1 (default), DXT3, DXT5 (default with alpha) or RGBA8; mips; alpha "
+            "(ALPHATEXTURE: keep transparency); masked (1-bit cut-outs); lodSet.\n"
+            "- staticmesh: .ase imports as it is; .obj becomes ASE here (one object, faces triangulated, UVs and usemtl materials kept, map_Kd from the "
+            ".mtl as each material's bitmap) with up y (default) or z and scale (100 for OBJ files in metres). Other formats: export to OBJ first.\n"
+            "save (default true) saves each package that received an asset; replacing an existing package file needs overwrite (it is backed up first). "
+            "Files the editor cannot read by path (non-ASCII) are copied to the work folder. dryRun checks every item and converts nothing. Imports are "
+            "not Undo steps (they live in packages). Returns created[] with each texture's \"Package.Group.Name\" and each mesh's "
+            "\"StaticMesh'Package.Name'\" for the spec (geometry.meshes, materials).";
         Json item = S::Object(
             {{"kind", S::Enum({"texture", "staticmesh"}, "What the file becomes.")},
              {"file", S::String("Full path of the image or model file.")},

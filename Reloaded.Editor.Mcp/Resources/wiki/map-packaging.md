@@ -60,7 +60,8 @@ A release archive contains:
 - Saves keep backups. The MapsEd file is never deleted.
 
 Package writes:
-- Every package the tools write must be **map-owned**: `<Map>_TXT`, `<Map>_STM`, `Amb_<Map>` and `<Map>-i`.
+- Every package the tools write is **map-owned**. Texture and mesh imports (`assets_import`), package saves and a map-changes document's `texture` and `save` ops go only into `<Map>_<name>` packages such as `<Map>_TXT` and `<Map>_STM`; the interface textures go into `<Map>-i`; `release` builds `Sounds\<Map>.uas`. Sounds for `Amb_<Map>` are imported by hand in the Sound Browser.
+- None of these is written before the map's first save, since they are named after its file.
 - Stock packages and maps are never written or renamed.
 - Duplicate base names across folders are refused.
 

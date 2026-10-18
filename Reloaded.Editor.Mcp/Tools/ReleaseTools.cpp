@@ -810,6 +810,9 @@ namespace
     {
         const auto stem = OpenMap(c, a, "the release copy");
         const auto s = Look(c, stem);
+        // A folder the release copy may not be written in is refused before
+        // Optimise Map Assets reads the map (which can take minutes).
+        ReleaseFolder(a, c, s.stem);
         Json report;
         const auto packs = Packs(a, c, s, report);
         Outcome o;
@@ -871,6 +874,7 @@ namespace
         {
             if (!editor.live || Lower(editor.stem) != Lower(stem))
                 return Fail("Making the release copy needs " + stem + " open in the editor (map_file action open); without packs, package only lists the files.");
+            ReleaseFolder(a, c, s.stem);
             packs = Packs(a, c, s, report);
             if (packs.empty()) o.warnings.push_back("Optimise Map Assets suggests no packs, so no release copy was made; the archive takes the game folder's files.");
             else
@@ -1001,8 +1005,9 @@ void RegisterReleaseTools(Registry& registry)
         ".uas with Interface and Amb_<Map>, the packages the map imports (base, a clean install, compares stock ones byte for byte) and Optimise Map Assets' "
         "suggestions. Returns findings, ready, the archive layout and a release block for map_validate.\n"
         "- sounds: builds Packages\\Sounds\\<Map>.uas from Interface, Amb_<Map> and packages (quality 5.0).\n"
-        "- optimise: Optimise Map Assets' report; with packs (or suggested) it saves the map and makes the release copy in <Game>\\Releases\\<Map> (or folder), "
-        "the assets the map uses from those packs moved inside it (destination map) or into assetPackage (destination package).\n"
+        "- optimise: Optimise Map Assets' report; with packs (or suggested) it saves the map and makes the release copy in <Game>\\Releases\\<Map>, "
+        "the assets the map uses from those packs moved inside it (destination map) or into assetPackage (destination package). A folder of your own "
+        "must be inside <Game>\\Releases, the work folder or [Mcp] WriteRoots: any other is refused (outside_write_roots) before anything is saved.\n"
         "- package: the same with packs, then the archive's file list.\n"
         "- interface: images {menu, briefing, loadingAtt, loadingDef} into <Map>-i.";
     Json quality = S::Number("sounds: Ogg Vorbis quality. Default 5.0, as Ubisoft shipped.");

@@ -282,6 +282,7 @@ namespace
         DWORD queuedAt = 0;
         Stage stage = Stage::Queued;   // under callLock
         bool cancelRequested = false;  // under callLock
+        std::string ticket;            // under callLock: its approval ticket, once in review
     };
     struct Outgoing { uint64_t client = 0; std::string frame; };
     std::mutex callLock;
@@ -709,7 +710,12 @@ namespace
                         for (const auto& line : McpBridge::LogSince(call->args.value("since", uint64_t{0}), max)) lines.push_back({{"seq", line.seq}, {"level", line.level}, {"text", line.text}});
                         answer = Bridge::ResultMessage(id, Json{{"lines", lines}, {"last", McpBridge::LogLast()}});
                     }
-                    else answer = Bridge::ErrorMessage(id, Bridge::ErrorBody(Bridge::Code::Busy, Guard::BusyHint(reason), reason), CachedState(reason));
+                    else
+                    {
+                        // The change in review: its ticket, for approval.status.
+                        const Json details = slot->stage == Stage::Approval && !slot->ticket.empty() ? Json{{"ticket", slot->ticket}} : Json();
+                        answer = Bridge::ErrorMessage(id, Bridge::ErrorBody(Bridge::Code::Busy, Guard::BusyHint(reason), reason, details), CachedState(reason));
+                    }
                 }
                 else
                 {
@@ -1023,25 +1029,42 @@ namespace
         else if (_wcsicmp(type, L"Button")) shape.other = true;
         return TRUE;
     }
-    struct ModalSearch { int loop = -1; HWND active = nullptr, found = nullptr; };
+    // found: the first modal window in Z order that looks like a prompt (a
+    // dialog, or a modal frame); other: the first of any other kind.
+    struct ModalSearch { int loop = -1; HWND active = nullptr, found = nullptr, other = nullptr; };
     BOOL CALLBACK FindModal(HWND window, LPARAM parameter)
     {
         auto& search = *reinterpret_cast<ModalSearch*>(parameter);
+        if (!IsWindowVisible(window) || !IsWindowEnabled(window) || (watch && watch->created.count(window))) return TRUE;
         wchar_t type[16] = L"";
         GetClassNameW(window, type, 16);
-        if (wcscmp(type, L"#32770") || !IsWindowVisible(window) || !IsWindowEnabled(window) || (watch && watch->created.count(window))) return TRUE;
-        // DialogBox disables the window it is opened over. Without one, only a
-        // message box, or the active dialog of the loop the call came
-        // through: the RE+ and engine panels are dialogs too, open for hours.
+        const bool dialog = !wcscmp(type, L"#32770");
+        // A window over one it disabled, of any class: DialogBox and
+        // MessageBox disable their owner, and so do RE+'s own prompts on
+        // their tool window (the Magic Event Workbench's class picker, Undo
+        // History's checkpoint name, the Workflow Tools forms), which leave
+        // the frame enabled. A modeless tool window's owner stays enabled.
         bool modal = false;
         if (const HWND owner = GetWindow(window, GW_OWNER)) modal = !IsWindowEnabled(owner);
-        else
+        else if (dialog && (search.loop == MSGF_DIALOGBOX || search.loop == MSGF_MESSAGEBOX))
         {
+            // Without an owner, only while the call came through a dialog's
+            // or a message box's loop (a message box's own loop reports
+            // MSGF_DIALOGBOX in wine): a dialog shaped as a message box, or
+            // the active one. The RE+ and engine panels are dialogs too, open
+            // for hours, and a call the editor's own loop runs is inside none.
             BoxShape shape;
             EnumChildWindows(window, BoxPart, reinterpret_cast<LPARAM>(&shape));
             modal = (shape.text && !shape.other) || (search.loop == MSGF_DIALOGBOX && window == search.active);
         }
         if (!modal) return TRUE;
+        if (!dialog && !(GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME))
+        {
+            // A tooltip or tool window of the disabled one: a prompt may
+            // still come later in Z order.
+            if (!search.other) search.other = window;
+            return TRUE;
+        }
         search.found = window;
         return FALSE;
     }
@@ -1053,9 +1076,9 @@ namespace
         search.loop = loop;
         search.active = GetActiveWindow();
         EnumThreadWindows(GetCurrentThreadId(), FindModal, reinterpret_cast<LPARAM>(&search));
-        if (search.found)
+        if (const HWND found = search.found ? search.found : search.other)
         {
-            const auto title = Narrow(WindowText(search.found));
+            const auto title = Narrow(WindowText(found));
             return title.empty() ? std::string("an untitled dialog") : title;
         }
         return loop == MSGF_MESSAGEBOX ? std::string("a message box") : std::string();
@@ -1068,8 +1091,8 @@ namespace
         const HWND owner = Frame();
         in.frameDisabled = owner && !IsWindowEnabled(owner);
         // A modal loop that leaves the frame enabled: an ownerless message box
-        // (LightmapFix's notice inside File > Open's MAP LOAD), or one owned by
-        // a tool window.
+        // (LightmapFix's notice inside File > Open's MAP LOAD), or a dialog or
+        // RE+ prompt over a tool window.
         if (!in.frameDisabled) in.frameDisabled = !(modal = ForeignModal(loop)).empty();
         in.minimised = owner && IsIconic(owner);
         GUITHREADINFO info{};
@@ -1266,6 +1289,7 @@ namespace
                 throw Bridge::Error(Bridge::Code::Cancelled, "The client went away before the change was shown for approval.", "client_gone", {{"ticket", ticket}});
             }
             call.stage = Stage::Approval;
+            call.ticket = ticket;
         }
         std::string map;
         try { map = Editor::AuthoringMap(); }

@@ -403,6 +403,16 @@ namespace Mcp::Spec
             {
                 findings.push_back({severity, rule, pointer, message, wiki, fix});
             }
+            // An SMagicEvent entry's Delay, which the engine takes from 0 to
+            // 86400 seconds (MagicEventModel.h): its text, or "" after an
+            // error at the item's delay, for an entry the caller leaves out.
+            std::string Delay(const Json& item, const std::string& pointer, const std::string& rule, const std::string& wiki)
+            {
+                const double seconds = item.value("delay", 0.0);
+                if (seconds >= 0 && seconds <= 86400) return Workflow::Magic::Seconds(seconds);
+                Diag("error", rule, Child(pointer, "delay"), "a delay is 0 to 86400 seconds (one day); " + Num(seconds) + " cannot be written, so this entry is left out.", wiki);
+                return {};
+            }
             double L(const Json& value) const { return value.get<double>() * scale; }
             const Json& Section(std::initializer_list<const char*> path) const
             {
@@ -1687,7 +1697,8 @@ namespace Mcp::Spec
                     const auto& action = actions[i];
                     const auto where = Child(pointer, i);
                     const auto kind = action.at("kind").get<std::string>();
-                    const auto delay = Workflow::Magic::Seconds(action.value("delay", 0.0));
+                    const auto delay = Delay(action, where, "story.action", "events");
+                    if (delay.empty()) continue;
                     const auto target = action.value("target", std::string());
                     if (kind == "open")
                     {
@@ -2959,7 +2970,8 @@ namespace Mcp::Spec
                     const auto from = item.at("from").get<std::string>(), to = item.at("to").get<std::string>();
                     const bool fromMagic = magicIds.count(Fold(from)) != 0, toMagic = magicIds.count(Fold(to)) != 0;
                     auto* source = FindActor(from);
-                    const auto delay = Workflow::Magic::Seconds(item.value("delay", 0.0));
+                    const auto delay = Delay(item, pointer, "events.delay", "events");
+                    if (delay.empty()) continue;
                     if (source && fromMagic)
                     {
                         auto& groups = source->properties["Groups"];
@@ -3105,8 +3117,10 @@ namespace Mcp::Spec
                 // seconds counted back from the end of the match when negative
                 // (the stock tests/maps/OffsE saves both at the LevelInfo's top
                 // level). Several level events go through one SMagicEvent sent at
-                // the earliest time, each delayed by how much later it is due.
-                struct LevelEvent { std::string tag; double at; };
+                // the earliest time, each delayed by how much later it is due, so
+                // they all hang off the earliest: an SMagicEvent delays by a day
+                // at most, and a match shorter than the earliest time fires none.
+                struct LevelEvent { std::string tag; double at; std::string pointer; };
                 std::vector<LevelEvent> events;
                 const Json levelEvents = level.is_object() ? List(level.value("events", Json::array())) : Json::array();
                 const std::pair<const Json*, const char*> sources[] = {{&levelEvents, "/level/events"}, {&List(Section({"events", "level"})), "/events/level"}};
@@ -3118,7 +3132,7 @@ namespace Mcp::Spec
                         const double given = item.at("sendAtTime").get<double>(), at = std::round(given);
                         if (at >= 0) Diag("warning", "level.send-at-time", Child(where, "sendAtTime"), "SendAtTime counts back from the end of the match: a time of 0 or more never fires. Use a negative time.", "level-properties");
                         if (at != given) Diag("warning", "level.send-at-time", Child(where, "sendAtTime"), "SendAtTime is a whole number of seconds; " + Num(given) + " is written as " + Num(at) + ".", "level-properties");
-                        events.push_back({TagOf(item.at("event").get<std::string>(), Child(where, "event"), false), at});
+                        events.push_back({TagOf(item.at("event").get<std::string>(), Child(where, "event"), false), at, Child(where, "sendAtTime")});
                     }
                 if (events.size() == 1) { changes["Event"] = events[0].tag; changes["SendAtTime"] = Num(events[0].at); }
                 else if (events.size() > 1)
@@ -3126,7 +3140,16 @@ namespace Mcp::Spec
                     double first = events[0].at;
                     for (const auto& e : events) first = std::min(first, e.at);
                     Json entries = Json::array();
-                    for (const auto& e : events) entries.push_back({{"Delay", Workflow::Magic::Seconds(e.at - first)}, {"Event", e.tag}, {"Type", "EVT_Trigger"}, {"ValidOn", "EVT_Trigger"}});
+                    for (const auto& e : events)
+                    {
+                        if (e.at - first > 86400)
+                        {
+                            Diag("error", "level.send-at-time", e.pointer, e.tag + " is due " + Num(e.at - first) + " seconds after the earliest level event (SendAtTime " + Num(first) +
+                                 "). Level events go out through one SMagicEvent the LevelInfo sends at the earliest time, which delays each by at most 86400 seconds, so this one is left out: keep the times within a day of each other.", "level-properties");
+                            continue;
+                        }
+                        entries.push_back({{"Delay", Workflow::Magic::Seconds(e.at - first)}, {"Event", e.tag}, {"Type", "EVT_Trigger"}, {"ValidOn", "EVT_Trigger"}});
+                    }
                     const auto fan = NewId("LevelEvents");
                     auto& event = Add(fan, "SBase.SMagicEvent", "other", levelEvents.empty() ? "/events/level" : "/level/events", Fallback(176), 0, false);
                     event.label = "level events";

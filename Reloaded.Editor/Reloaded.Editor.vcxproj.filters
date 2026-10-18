@@ -76,6 +76,7 @@
     <ClInclude Include="McpGuardModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpOps.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpPlanModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="McpSafetyModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterPreview.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterPreviewModel.h"><Filter>Header Files</Filter></ClInclude>

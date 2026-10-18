@@ -167,6 +167,6 @@ Deathmatch:
 - An `SMission` (`GM_DeathMatch`).
 - With `disableSecurity`, its `AtResetEvent` fires an SMagicEvent that untriggers the security.
 
-Before you rely on an enum value, check the live enum names with `map_query what:"schema" classes:["SMission"]`.
+Before you rely on an enum value, check the live enum names with `map_query what:"schema" classes:["SBase.SMission"]` (the schema takes full class names).
 
 - Rules: `story.no-mission`, `story.no-multi`, `story.no-objective`, `story.unresolved-reference`, `story.trigger-kind`, `story.objective-orphan`, `story.objective-no-trigger`, `story.mission-empty`, `story.minimum-objectives`, `story.sector-chain`, `story.visibility-zone`, `modes.missing`, `objectives.flag-dropzones`, `objectives.dropzone-unused`, `objectives.terminal-placement`, `objectives.terminal-capture-time`, `diskhunt.disk-count`, `diskhunt.disk-group`, `diskhunt.disk-clearance`, `diskhunt.disk-unlisted`, `deathmatch.security`, `objectiveplayers.problems`, `objectiveplayers.targets`

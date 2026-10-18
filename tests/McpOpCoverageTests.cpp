@@ -54,22 +54,22 @@ using Json=Workflow::Json;
 void Buttons()
 {
     namespace Id=Safety::Id;
-    using Buttons=std::vector<Safety::Button>;
-    auto pick=[](const Buttons& buttons){return Safety::CautiousButton(buttons);};
-    Check(pick(Buttons{{Id::Yes,L"&Ja"},{Id::No,L"&Nein"}})==1,"a German Yes/No box is answered No, not its first button");
-    Check(pick(Buttons{{Id::Ok,L"OK"},{Id::Cancel,L"Annuler"}})==1,"a French OK/Cancel box is answered Cancel, not by its OK label");
-    Check(pick(Buttons{{Id::Yes,L"&Ja"},{Id::No,L"&Nein"},{Id::Cancel,L"Abbrechen"}})==2,"Yes/No/Cancel: Cancel");
-    Check(pick(Buttons{{Id::Abort,L"&Abbrechen"},{Id::Retry,L"&Wiederholen"},{Id::Ignore,L"&Ignorieren"}})==0,"Abort/Retry/Ignore: Abort");
-    Check(pick(Buttons{{Id::Retry,L"&Wiederholen"},{Id::Cancel,L"Abbrechen"}})==1,"Retry/Cancel: Cancel");
-    Check(pick(Buttons{{Id::Close,L"Schlie\u00dfen"},{1001,L"Speichern"}})==0,"Close by its id");
-    Check(pick(Buttons{{Id::Ok,L"OK"}})==0,"a notice's only OK is pressed");
-    Check(pick(Buttons{{1001,L"&OK"}})==0,"an only button labelled OK is pressed");
-    Check(pick(Buttons{{1001,L"&Delete"},{1002,L"&No"}})==1,"a dialog with ids of its own: the English No");
-    Check(pick(Buttons{{1001,L"Replace"},{1002,L" &Cancel "}})==1,"a dialog with ids of its own: the English Cancel");
-    Check(pick(Buttons{{1001,L"L\u00f6schen"},{1002,L"Weiter"}})==-1,"nothing safe to press: none, not the first");
-    Check(pick(Buttons{{Id::Ok,L"OK"},{1001,L"Details"}})==-1,"OK is pressed only when it is the only button");
-    Check(pick(Buttons{{Id::Yes,L"&Ja"}})==-1,"an only Yes is not pressed");
-    Check(pick(Buttons{})==-1,"no buttons");
+    using List=std::vector<Safety::Button>;
+    auto pick=[](const List& buttons){return Safety::CautiousButton(buttons);};
+    Check(pick(List{{Id::Yes,L"&Ja"},{Id::No,L"&Nein"}})==1,"a German Yes/No box is answered No, not its first button");
+    Check(pick(List{{Id::Ok,L"OK"},{Id::Cancel,L"Annuler"}})==1,"a French OK/Cancel box is answered Cancel, not by its OK label");
+    Check(pick(List{{Id::Yes,L"&Ja"},{Id::No,L"&Nein"},{Id::Cancel,L"Abbrechen"}})==2,"Yes/No/Cancel: Cancel");
+    Check(pick(List{{Id::Abort,L"&Abbrechen"},{Id::Retry,L"&Wiederholen"},{Id::Ignore,L"&Ignorieren"}})==0,"Abort/Retry/Ignore: Abort");
+    Check(pick(List{{Id::Retry,L"&Wiederholen"},{Id::Cancel,L"Abbrechen"}})==1,"Retry/Cancel: Cancel");
+    Check(pick(List{{Id::Close,L"Schlie\u00dfen"},{1001,L"Speichern"}})==0,"Close by its id");
+    Check(pick(List{{Id::Ok,L"OK"}})==0,"a notice's only OK is pressed");
+    Check(pick(List{{1001,L"&OK"}})==0,"an only button labelled OK is pressed");
+    Check(pick(List{{1001,L"&Delete"},{1002,L"&No"}})==1,"a dialog with ids of its own: the English No");
+    Check(pick(List{{1001,L"Replace"},{1002,L" &Cancel "}})==1,"a dialog with ids of its own: the English Cancel");
+    Check(pick(List{{1001,L"L\u00f6schen"},{1002,L"Weiter"}})==-1,"nothing safe to press: none, not the first");
+    Check(pick(List{{Id::Ok,L"OK"},{1001,L"Details"}})==-1,"OK is pressed only when it is the only button");
+    Check(pick(List{{Id::Yes,L"&Ja"}})==-1,"an only Yes is not pressed");
+    Check(pick(List{})==-1,"no buttons");
     Check(Safety::PlainLabel(L" &Cancel ")==L"cancel","plain labels");
 }
 
@@ -134,6 +134,17 @@ void RawCommands()
         Check(reason(spaced)=="denied_command","denied with other spacing: "+denied);
     }
     Check(reason("MAPEXPORT")!="denied_command" && reason("STAT AUDIOX")!="denied_command","whole words only");
+    // The engine's ParseCommand ends a word at anything but a letter or
+    // digit: QUIT; quits, EXEC"x" runs x, SAVEMAPPROP;MAP=X saves X's -i.utc.
+    Check(reason("QUIT;")=="denied_command" && reason("EXEC\"x\"")=="denied_command" && reason("SAVEMAPPROP;MAP=X")=="denied_command","a word ends at punctuation");
+    Check(reason("SAVEMAPPROP;MAP=\"StockMap\"")=="denied_command" && reason("SAVEMAPPROP,MAP=StockMap")=="denied_command" && reason("Exec\"cmds.txt\"")=="denied_command" &&
+          reason("MAP NEW;")=="denied_command" && reason("LOADMAPPROP;MAP=Stock")=="denied_command" && reason("DUMPINT;Engine")=="denied_command" &&
+          reason("RELAUNCH\"\"")=="denied_command" && reason("AUDIO;")=="denied_command" && reason("map\tload\"x.sdc\"")=="denied_command","the review's punctuation cases");
+    for(const std::string denied:Safety::DeniedCommands())
+        for(const char* after:{";","\"x\"",",","(","=1",".","/","-","_","\xc3\xa9"})
+            Check(reason(denied+after)=="denied_command" && reason(" "+Safety::Fold(denied)+after+" X=1")=="denied_command","denied before "+std::string(after)+": "+denied);
+    Check(reason("QUIT2")!="denied_command" && reason("EXECUTE x")!="denied_command" && reason("MAP;NEW")!="denied_command" && reason("STAT;QUIT")!="denied_command",
+          "a word goes on through letters and digits, and the second word of a phrase is read after the first's blanks only");
     Check(!Safety::RawCommandRefusal("OBJ CLASSES FILE=/work/classes.txt",context) && !Safety::RawCommandRefusal("OBJ CLASSES FILE=\"/extra/out/a b.txt\"",context),"files in the write roots");
     Check(reason("OBJ CLASSES FILE=/etc/passwd")=="outside_write_roots","a file elsewhere");
     Check(reason("OBJ CLASSES FILE=/work/../etc/passwd")=="outside_write_roots","out of a root by ..");
@@ -178,12 +189,12 @@ std::string Code(const std::string& text)
             else if(c=='R' && next=='"' && (i==0 || !Identifier(text[i-1]) || text[i-1]=='8' || text[i-1]=='L' || text[i-1]=='u' || text[i-1]=='U'))
             {
                 // R"delimiter( ... )delimiter"
-                const auto open=text.find('(',i+2);
-                if(open==std::string::npos){out+=c;break;}
-                const auto end=text.find(")"+text.substr(i+2,open-i-2)+"\"",open);
+                const auto paren=text.find('(',i+2);
+                if(paren==std::string::npos){out+=c;break;}
+                const auto end=text.find(")"+text.substr(i+2,paren-i-2)+"\"",paren);
                 if(end==std::string::npos){out+=c;break;}
-                for(size_t k=i;k<=end+open-i-1 && k<text.size();++k)if(text[k]=='\n')out+='\n';
-                out+="\"\"";i=end+open-i-1;
+                for(size_t k=i;k<=end+paren-i-1 && k<text.size();++k)if(text[k]=='\n')out+='\n';
+                out+="\"\"";i=end+paren-i-1;
             }
             else if(c=='"' && !include){state=S::String;out+=c;}
             else if(c=='\'' && !include && !(i>0 && std::isalnum(static_cast<unsigned char>(text[i-1])))){state=S::Char;out+=c;} // not a digit separator
@@ -221,8 +232,8 @@ std::string Included(const std::string& line)
 {
     const auto at=line.find_first_not_of(" \t");
     if(at==std::string::npos || line[at]!='#' || line.find("include",at)==std::string::npos)return {};
-    const auto open=line.find('"',at),close=open==std::string::npos?open:line.find('"',open+1);
-    return close==std::string::npos?std::string():line.substr(open+1,close-open-1);
+    const auto left=line.find('"',at),right=left==std::string::npos?left:line.find('"',left+1);
+    return right==std::string::npos?std::string():line.substr(left+1,right-left-1);
 }
 // The first macro hazard in a local header and what it includes, as
 // "Header.h:line" or "Header.h -> Other.h:line"; "" for none.
@@ -291,6 +302,34 @@ void MinMaxMacros(const fs::path& root)
     Check(Code("x=R\"j(\"a\" std::min(\n)j\";y=1'000;c='\\'';z")=="x=\n\"\";y=1'000;c='';z","raw strings, digit separators and char literals");
 }
 
+// settings.edit writes a LevelInfo property the sheet does not offer only
+// when McpNative.inl's McpSettingsExtra lists it: every name the level spec
+// compiler's Settings() writes is there, and no sheet heading is.
+void SettingsNames(const fs::path& root)
+{
+    const auto native=ReadText(root/"Reloaded.Editor"/"McpNative.inl");
+    const auto at=native.find("bool McpSettingsExtra(");
+    Check(at!=std::string::npos,"McpNative.inl has McpSettingsExtra");
+    const auto left=native.find('{',native.find("extra:",at)),right=native.find('}',left);
+    Check(left!=std::string::npos && right!=std::string::npos,"McpSettingsExtra's list");
+    std::set<std::string> listed;
+    const std::regex quoted(R"re("([A-Za-z0-9_]+)")re");
+    const auto list=native.substr(left,right-left);
+    for(std::sregex_iterator it(list.begin(),list.end(),quoted),end;it!=end;++it)listed.insert(Safety::Fold((*it)[1].str()));
+    const auto compiler=ReadText(root/"Reloaded.Editor.Mcp"/"LevelSpecCompiler.h");
+    const auto from=compiler.find("void Settings()"),to=compiler.find("low.settings",from);
+    Check(from!=std::string::npos && to!=std::string::npos,"LevelSpecCompiler.h's Settings()");
+    const auto body=compiler.substr(from,to-from);
+    const std::regex written(R"re(changes\["([A-Za-z0-9_]+)"\])re");
+    std::set<std::string> names;
+    for(std::sregex_iterator it(body.begin(),body.end(),written),end;it!=end;++it)names.insert((*it)[1].str());
+    Check(names.size()>=7,"the compiler's level settings were found ("+std::to_string(names.size())+")");
+    for(const auto& name:names)Check(listed.count(Safety::Fold(name))>0,"settings.edit refuses "+name+", which the compiler writes: add it to McpSettingsExtra");
+    for(const char* heading:{"MapSnapshotInfo","MotionTrackingTweak","Events"})
+        Check(!listed.count(Safety::Fold(heading)),std::string(heading)+" is a heading of the Level Properties sheet, not a property");
+    Check(listed.count("snapshotcamera") && listed.count("mapfloors"),"the minimap's SnapshotCamera and MapFloors");
+}
+
 int main(int argc,char** argv)
 {
     try
@@ -303,6 +342,7 @@ int main(int argc,char** argv)
         fs::path root=argc>1?fs::path(argv[1]):fs::path(".");
         if(!fs::exists(root/"Reloaded.Editor"/"WorkflowTools.cpp") && fs::exists(root/".."/"Reloaded.Editor"/"WorkflowTools.cpp"))root=root/"..";
         MinMaxMacros(root);
+        SettingsNames(root);
         // The request chains and the registries. McpLifecycle.cpp (map files,
         // builds, views, packages) and McpBridge.cpp (approval.status, which
         // only the bridge can answer) may not exist yet in a partial tree:
@@ -336,7 +376,7 @@ int main(int argc,char** argv)
             std::cerr<<problems.size()<<" problem(s)\n";
             return 1;
         }
-        std::cout<<"McpOpCoverage passed ("<<answered.size()<<" ops, "<<rows.size()<<" policy rows, bridge refusals, min/max macros)\n";
+        std::cout<<"McpOpCoverage passed ("<<answered.size()<<" ops, "<<rows.size()<<" policy rows, bridge refusals, min/max macros, level settings)\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}

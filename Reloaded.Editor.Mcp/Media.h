@@ -186,6 +186,8 @@ namespace Mcp::Media
         std::filesystem::path outDir;  // created when missing
         std::filesystem::path ffmpeg;  // the ffmpeg executable or its folder; empty: PATH
         std::string backend = "auto";  // auto | mediafoundation | ffmpeg
+        // What it throws (a cancelled request) ends the extraction and is
+        // passed on as it is: no other decoder is tried.
         std::function<void(double done, double total, const std::string& message)> progress;
     };
     struct Extracted

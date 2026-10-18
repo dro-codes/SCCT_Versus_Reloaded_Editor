@@ -21,6 +21,26 @@ namespace
     // A build can take minutes on a big map; build.all far longer.
     constexpr unsigned kBuildTimeout = 900000, kBuildAllTimeout = 3600000;
     constexpr size_t kPreviewRows = 300;
+    // The specs LevelBuild saves for level_spec_validate that <work>/specs keeps.
+    constexpr size_t kSpecFiles = 20;
+
+    // Deletes all but the newest kSpecFiles .level.json files in folder.
+    void PruneSpecs(const std::filesystem::path& folder)
+    {
+        std::vector<std::pair<std::filesystem::file_time_type, std::filesystem::path>> files;
+        std::error_code error;
+        for (std::filesystem::directory_iterator it(folder, error), end; !error && it != end; it.increment(error))
+        {
+            std::error_code entry;
+            const auto name = PathText(it->path().filename());
+            if (name.size() <= 11 || name.compare(name.size() - 11, 11, ".level.json") != 0 || !it->is_regular_file(entry)) continue;
+            const auto written = it->last_write_time(entry);
+            if (!entry) files.emplace_back(written, it->path());
+        }
+        if (files.size() <= kSpecFiles) return;
+        std::sort(files.begin(), files.end()); // oldest first
+        for (size_t i = 0; i + kSpecFiles < files.size(); ++i) std::filesystem::remove(files[i].second, error);
+    }
 
     // A text field that may be missing, null or another type.
     std::string Text(const Json& object, const char* key)
@@ -751,22 +771,30 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
                                                                     {"deletes", summary.value("deletes", 0)}, {"newPieces", summary.value("newPieces", 0)}, {"replacedPieces", summary.value("replacedPieces", 0)}}},
                 {"plan", PlanOutline(compiled.plan)}};
     Json next = Json::array();
-    // The spec as built here (an intent tool's is the stored spec with its
-    // change), saved so level_spec_validate can show every finding in it.
+    // The spec as built here, saved so level_spec_validate can show every
+    // finding in it: an intent tool's is the stored spec with its change, and
+    // a merge is laid over the stored spec as the compiler lays it, so the
+    // file holds the candidate these findings are about. <work>/specs keeps
+    // the newest kSpecFiles.
     std::string specFile;
     auto checkSpec = [&](const std::string& why)
     {
         if (specFile.empty() && !c.workDir.empty())
             try
             {
+                const bool merged = options.sync == "merge" && haveSidecar && Text(before, "format") == "scct.level-sidecar" && before.contains("spec") && before.at("spec").is_object();
+                const auto candidate = merged ? Spec::Merge(before.at("spec"), input) : input;
                 static std::atomic<unsigned> serial{0};
                 const auto stamp = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(++serial);
                 const auto folder = c.workDir / "specs";
                 std::filesystem::create_directories(folder);
                 const auto file = folder / (tool + "-" + stamp + ".level.json");
-                std::ofstream out(file, std::ios::binary);
-                out << input.dump(1);
-                if (out) specFile = PathText(file);
+                {
+                    std::ofstream out(file, std::ios::binary);
+                    out << candidate.dump(1);
+                    if (out) specFile = PathText(file);
+                }
+                PruneSpecs(folder);
             }
             catch (const std::exception&) {}
         if (!specFile.empty()) report["specFile"] = specFile;
@@ -962,8 +990,9 @@ void RegisterSpecTools(Registry& registry)
         t.title = "Build a level from a spec";
         t.description =
             "Builds a whole scct.level-spec in the open map as ONE Undo step (blockout pieces, every actor through one Map JSON document, player counts, GEs, Level "
-            "Properties and the stored spec), then the geometry build, Map Check and a top-view screenshot. If a step fails, every map change is rolled back. Check "
-            "the spec with level_spec_validate first.\n"
+            "Properties and the stored spec), then the geometry build, Map Check and a top-view screenshot. If one of those map changes fails, they are all "
+            "rolled back; a failure after them (the build, the save) keeps them, and the error's details.rolledBack says which. Check the spec with "
+            "level_spec_validate first.\n"
             "- spec or path, as level_spec_validate. mode preview (default; dryRun too): the editor's preview rows and the plan PNG, nothing changes; apply builds "
             "it, and errors block it unless force.\n"
             "- sync incremental (default when the map has a stored spec, map_query what:\"spec\"): only the difference by id is built, dropped ids are deleted; "

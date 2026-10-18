@@ -141,6 +141,7 @@ namespace
             auto& memory = Memory();
             std::lock_guard<std::mutex> guard(memory.lock);
             memory.Reset();
+            memory.Editor(pid);
         }
         Json out{{"pid", pid}, {"launcher", launcher}, {"hello", hello}, {"seconds", std::round(Elapsed(started) * 10) / 10}};
         try { out["state"] = State(c); } catch (const std::exception& e) { out["stateError"] = e.what(); }
@@ -166,6 +167,7 @@ namespace
         try
         {
             const auto hello = c.bridge.Hello();
+            NoteEditor(c, hello);
             const auto state = State(c);
             result["connected"] = true;
             result["bridge"] = {{"dll", hello.value("dll", std::string())}, {"pid", hello.value("pid", 0ul)}, {"protocol", hello.value("protocol", Json())},
@@ -288,6 +290,10 @@ namespace
         const auto steps = Integer(a, "steps", 1, 1, 100);
         if (redo && Has(a, "call")) return Fail("redo takes steps, not call: it redoes the newest undone Undo steps.");
         unsigned call = Has(a, "call") ? static_cast<unsigned>(Integer(a, "call", 0, 1, 0xffffffffLL)) : 0;
+        // The editor answers first, so the calls of an editor that has gone
+        // since are forgotten before one is picked.
+        const auto before = State(c);
+        NoteEditor(c, before);
         // No arguments: this server's newest call that still has Undo steps,
         // never a blind undo, which could take back something the user did.
         if (!call && !redo && !hasSteps)
@@ -307,7 +313,6 @@ namespace
         std::string what = "undo " + Count(static_cast<size_t>(steps), "step");
         if (call && !redo) { op = "undo.call"; args = {{"call", call}}; what = "undo MCP call " + std::to_string(call); }
         else if (redo) { op = "redo.steps"; what = "redo " + Count(static_cast<size_t>(steps), "step"); }
-        const auto before = State(c);
         if (DryRun(a))
         {
             Outcome o;
@@ -319,16 +324,35 @@ namespace
         try { result = Call(c, op, args, label); }
         catch (const Bridge::Error& e)
         {
-            // Undone already, or out of the buffer: nothing left to take back.
-            if (op == "undo.call" && (e.reason == "gone" || e.reason == "already_undone"))
+            if (op != "undo.call") throw;
+            // Calls the editor has no record of (another editor, or one it
+            // dropped), has undone already or no longer has steps of: there
+            // is nothing to take back by number.
+            const bool gone = e.reason == "gone" || e.reason == "already_undone" || e.reason == "unknown_call" || (e.code == Bridge::Code::Invalid && e.reason.empty());
+            // Calls it can no longer undo whole: partly undone, mixed with
+            // other changes, or partly out of a full buffer.
+            const bool broken = e.reason == "partly_undone" || e.reason == "interleaved" || e.reason == "trimmed";
+            if (!gone && !broken) throw; // not_newest: undoable once the newer steps are
+            bool known = false;
             {
                 auto& memory = Memory();
                 std::lock_guard<std::mutex> guard(memory.lock);
+                for (const auto* list : {&memory.calls, &memory.undone})
+                    known = known || std::any_of(list->begin(), list->end(), [&](const Session::Made& m) { return m.call == call; });
                 memory.Forget(call);
             }
-            throw;
+            if (!known) throw;
+            const auto name = "MCP call " + std::to_string(call);
+            throw Bridge::Error(e.code, std::string(e.what()) + " editor_undo has forgotten " + name +
+                                        (broken ? ", which can no longer be undone as a whole: to take back its edits, look at Undo History and undo by steps (they may take the user's own changes with them)."
+                                                : "; called with no arguments it now takes this server's call before it."),
+                                e.reason, e.details);
         }
         const auto after = State(c);
+        // How many steps to redo to put it back: undo.call says how many it
+        // undid ({call, done, steps}), the others {done}.
+        auto whole = [&](const char* key) { return result.is_object() && result.contains(key) && result.at(key).is_number_integer() ? result.at(key).get<long long>() : 0LL; };
+        long long undid = result.is_object() && result.contains("done") ? whole("done") : steps;
         {
             auto& memory = Memory();
             std::lock_guard<std::mutex> guard(memory.lock);
@@ -336,14 +360,16 @@ namespace
             {
                 Session::Made made{call, 1, "MCP call"};
                 for (const auto& m : memory.calls) if (m.call == call) made = m;
-                if (result.is_object() && result.contains("steps") && result.at("steps").is_number_integer()) made.steps = result.at("steps").get<int>();
+                if (whole("done") > 0) made.steps = static_cast<int>(std::min(whole("done"), 100000LL));
+                else if (whole("steps") > 0) made.steps = static_cast<int>(std::min(whole("steps"), 100000LL));
+                undid = made.steps;
                 memory.Forget(call);
                 memory.undone.push_back(made);
             }
             else if (op == "redo.steps")
             {
                 // Redone steps bring back the calls they undid, newest undone first.
-                int left = result.is_object() && result.contains("done") && result.at("done").is_number_integer() ? result.at("done").get<int>() : static_cast<int>(steps);
+                auto left = undid;
                 while (!memory.undone.empty() && memory.undone.back().steps <= left)
                 {
                     left -= memory.undone.back().steps;
@@ -355,7 +381,7 @@ namespace
         Outcome o;
         o.summary = "Did " + what + ". Revision " + std::to_string(before.value("revision", 0)) + " -> " + std::to_string(after.value("revision", 0)) + "; " + MapText(after) + ".";
         o.extra = {{"op", op}, {"result", result}, {"state", after}};
-        if (!redo) o.next.push_back(Next("editor_undo", "Put it back with redo.", {{"redo", true}, {"steps", op == "undo.call" ? result.value("steps", 1) : steps}}));
+        if (!redo && undid > 0) o.next.push_back(Next("editor_undo", "Put it back with redo.", {{"redo", true}, {"steps", std::min(undid, 100LL)}}));
         return Done(c, o, false);
     }
 
@@ -394,6 +420,7 @@ namespace
                 if (undo.is_object() && undo.value("steps", 0) > 0)
                 {
                     const auto call = undo.value("call", 0u);
+                    NoteEditor(c);
                     {
                         auto& memory = Memory();
                         std::lock_guard<std::mutex> guard(memory.lock);
@@ -647,8 +674,9 @@ void RegisterSessionTools(Registry& registry)
         t.description =
             "Undoes changes. Every MCP change is one Undo step labelled \"MCP <n>: <label>\" in Undo History. With no arguments it undoes this server's newest "
             "call that is still undoable (called again, the one before it), by call number, so it is refused rather than undo something newer the user did, "
-            "and does nothing when this server has made no change; call undoes a given MCP call (undo.call in each mutating tool's result) while its steps "
-            "are the newest; steps undoes that many Undo steps whatever made them; redo with steps redoes. Returns the editor state before and after.";
+            "and does nothing when this server has made no change (in this editor process); a call the editor can no longer undo whole is forgotten, so the "
+            "next one goes on to the call before it. call undoes a given MCP call (undo.call in each mutating tool's result) while its steps are the newest; "
+            "steps undoes that many Undo steps whatever made them; redo with steps redoes. Returns the editor state before and after.";
         t.inputSchema = S::Mutating(S::Input({{"call", S::Integer("An MCP call (undo.call in a tool result) to undo as a whole.", 1, 0xffffffffLL)},
                                               {"steps", S::Integer("Undo (with redo: redo) this many steps.", 1, 100)},
                                               {"redo", S::Boolean("Redo instead of undo.")}}));

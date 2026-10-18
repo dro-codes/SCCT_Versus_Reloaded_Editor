@@ -3,16 +3,17 @@
 // the way McpOps.cpp does: every plan checked with Plan::Check, binds resolved
 // against stand-in results, optional steps allowed to fail, and the sidecar
 // kept, so a build and the intent tools after it see what an editor would
-// show them. Run from the repository root:
+// show them. map_validate (ValidateTools.cpp) shares the compiler for its
+// offline path, so its output schema and offline fixes are checked here too.
+// Run from the repository root:
 //   g++ -std=c++20 -Wall -Wextra -Wshadow -Werror -O1 tests/McpSpecToolsTests.cpp Reloaded.Editor.Mcp/Tools/SpecTools.cpp
-//       Reloaded.Editor.Mcp/Tools/IntentTools.cpp Reloaded.Editor/WorkflowModel.cpp Reloaded.Editor/RecoveredPolygonImport.cpp
+//       Reloaded.Editor.Mcp/Tools/IntentTools.cpp Reloaded.Editor.Mcp/Tools/ValidateTools.cpp Reloaded.Editor/WorkflowModel.cpp
+//       Reloaded.Editor/RecoveredPolygonImport.cpp -pthread
 #include "../Reloaded.Editor.Mcp/FakeBridge.h"
 #include "../Reloaded.Editor.Mcp/McpProtocolModel.h"
 #include "../Reloaded.Editor.Mcp/Tools/Common.h"
-// map_validate's offline path shares the compiler with these tools, so its
-// output schema and offline fixes are checked here too; the suite's link
-// line (tools/test_mcp.sh) does not carry ValidateTools.cpp.
-#include "../Reloaded.Editor.Mcp/Tools/ValidateTools.cpp"
+#include "../Reloaded.Editor.Mcp/LevelSpecModel.h"
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -257,6 +258,14 @@ void Registration()
     const auto& mechanisms=h.registry.FindTool("mechanisms")->description;
     Check(mechanisms.find("doorMesh")!=std::string::npos && mechanisms.find("SLiftDoor")!=std::string::npos && mechanisms.find("carSwitch")!=std::string::npos &&
           mechanisms.find("Lift doors are not made")==std::string::npos,"mechanisms describes the lift doors it makes");
+    // The descriptions name what the compiler takes: the engine's softbody
+    // class names with a mesh for ESBChainActor only, shared flag drop zones,
+    // and a spot light's cone.
+    const auto& environment=h.registry.FindTool("environment")->description;
+    Check(environment.find("ESBPatchActor, ESBStripDoorActor")!=std::string::npos && environment.find("ESBRopeActor or ESBChainActor, mesh only for ESBChainActor")!=std::string::npos,
+          "environment names the softbody classes and where a mesh goes");
+    Check(environment.find("cone (spot preset")!=std::string::npos,"environment lights take a cone for the spot preset");
+    Check(h.registry.FindTool("gameplay")->description.find("dropZones (1-5) [{id, at} | {ref: id}]")!=std::string::npos,"gameplay's flag drop zones can be shared");
     // tools/list stays small: the shared paragraphs live in scct://docs/tools.
     size_t total=0;
     for(const auto& t:h.registry.tools)
@@ -583,6 +592,8 @@ void OfflineFixes()
     for(const auto& n:checked.structured.at("next"))Check(!intents.count(n.value("tool",std::string())),"level_spec_validate suggests no intent tool");
     const auto validated=h.Ok("map_validate",{{"spec",bare}});
     offline(validated.structured.at("findings"),"map_validate spec");
+    const auto& said=validated.content.front().text;
+    Check(said.find("fix.spec lists the edits")!=std::string::npos && said.find("names the tool and arguments")==std::string::npos,"the offline summary says the fixes edit the spec: "+said.substr(0,400));
     for(const auto& n:validated.structured.at("next"))Check(!intents.count(n.value("tool",std::string())),"map_validate offline suggests no intent tool");
     // From a file, the next check is of that file.
     const auto file=h.dir/"bare.level.json";
@@ -622,6 +633,30 @@ void PreviewSpecFile()
     // An apply blocked by errors points at the file too.
     auto blocked=h.Call("gameplay",{{"spawns",{{"spy",{{"in","Nowhere"}}}}}});
     Check(blocked.isError && blocked.structured.at("next").at(0).at("args").contains("path"),"a blocked apply points level_spec_validate at the saved spec");
+    // level_build sync merge saves the merged candidate the findings are
+    // about, not the fragment it was given.
+    auto merged=h.Ok("level_build",{{"spec",{{"spawns",{{"spy",{{"in","Nowhere"}}}}}}},{"sync","merge"}});
+    const auto mergedFile=merged.structured.at("specFile").get<std::string>();
+    Json candidate;
+    {std::ifstream in{std::filesystem::path(mergedFile)};candidate=Json::parse(in);}
+    Check(candidate.contains("geometry") && candidate.at("map").at("name")=="VERSUS STARTER" && candidate.at("spawns").at("spy").at("in")=="Nowhere","the merge's file is the stored spec with the fragment laid over it");
+    const auto again=h.Ok("level_spec_validate",{{"path",mergedFile},{"render",false}});
+    bool nowhere=false;
+    for(const auto& d:again.structured.at("diagnostics"))nowhere=nowhere || (d.at("severity")=="error" && d.value("pointer",std::string()).rfind("/spawns",0)==0);
+    Check(nowhere,"and checking it finds the error the preview reported");
+    // <work>/specs keeps the newest 20.
+    const auto specs=h.dir/"specs";
+    for(int i=0;i<25;++i)
+    {
+        const auto old=specs/("old-"+std::to_string(i)+".level.json");
+        {std::ofstream(old)<<"{}";}
+        std::filesystem::last_write_time(old,std::filesystem::file_time_type::clock::now()-std::chrono::hours(1+i));
+    }
+    const auto latest=h.Ok("gameplay",{{"spawns",{{"spy",{{"in","Nowhere"}}}}},{"mode","preview"}}).structured.at("specFile").get<std::string>();
+    size_t kept=0;
+    for(const auto& e:std::filesystem::directory_iterator(specs))kept+=e.path().extension()==".json";
+    Check(kept==20 && std::filesystem::exists(std::filesystem::path(latest)) && !std::filesystem::exists(specs/"old-24.level.json") && std::filesystem::exists(specs/"old-0.level.json"),
+          "the oldest saved specs are deleted: "+std::to_string(kept)+" kept");
 }
 
 int main()

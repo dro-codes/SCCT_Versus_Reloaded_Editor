@@ -75,8 +75,8 @@ WriteRoots=
 | `AllowPlay` | 0 | The `play.level` op may start Play Level. Only the INI sets it. |
 | `HistoryMaxMB` | 200 | The most the call history may take, 1 to 100,000 MB; the oldest files go first. |
 | `Ffmpeg` | empty | The `ffmpeg.exe` that `media_extract_frames` may run when Media Foundation cannot read a video. Empty: the one on `PATH`, if any. |
-| `WriteRoots` | empty | Extra folders, separated by `;`, that the media and import tools may write into besides the work folder. |
-| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder: extracted frames, converted images, imported specs. Not written by default: add `WorkDir=<folder>` to move it. |
+| `WriteRoots` | empty | Extra folders, separated by `;`, that may be written besides the work folder: by the media and import tools, by a release copy (besides `<Game>\Releases`), and by an `editor_exec` command's `FILE=`. |
+| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder: extracted frames, converted images, imported specs, saved specs. The editor allows a release copy and an `editor_exec` `FILE=` there too. Not written by default: add `WorkDir=<folder>` to move it. |
 
 The editor writes the missing keys (all but `WorkDir`) the first time it starts
 with this version. It reads them when it starts, so edit the INI with the editor
@@ -151,7 +151,7 @@ error carries) and `another_client`.
 
 | Reason | What is going on |
 | --- | --- |
-| `modal` | A dialog is open in the editor. |
+| `modal` | A dialog or message box is open in the editor, whoever opened it; the reply names it when it can. |
 | `menu` | A menu is open. |
 | `drag` | You are dragging in a viewport. |
 | `transaction` | An editor operation is still open. |
@@ -176,8 +176,10 @@ Map JSON updates do, so an actor you changed is never overwritten blind.
 
 **One Undo step per call.** Every change a tool makes is one Undo step, named
 `MCP <n>: <label>` in **Edit > Undo History** (`label` defaults to the tool's
-name). A whole level from `level_build` is one step, and if any part of it
-fails, every map change of the call is rolled back and no Undo step is left.
+name). A whole level from `level_build` is one step. If a part of that step
+fails, every map change of the call is rolled back and no Undo step is left; a
+failure after it (the build, Map Check, a save, or a dialog after a file was
+written) keeps the map changes and says so with `rolledBack: false`.
 Saves, builds, package and texture imports, and screenshots are not Undo steps.
 To take a call back:
 
@@ -197,17 +199,38 @@ tools also `mode: "preview"`): the editor works out the same change, returns its
 preview rows (the Map JSON preview's **Add**, **Modify**, **Move**, **Delete**,
 **Link**, **Package** and **Surface** rows) and changes nothing.
 
-**Dialogs.** While a call runs, a dialog it opens is answered: known ones with
-their known answer, any other with its most cautious button, chosen by its
-control id (Cancel, No, Close, then Abort) so that a translated message box is
-answered the same way, OK only when it is the only button; a dialog with no
-safe button is closed. The call then stops as `dialog_blocked` with the
-dialog's title and text, and its map changes are undone, unless a step had
-already written a file (a save, an interface texture or a package), in which
-case the reply says what was written and nothing is undone, so the map and
-the file stay alike. Progress windows are left alone. A call that arrives
-while another program's or RE+'s own dialog is open waits (`busy` /
-`modal`) instead of running inside it.
+**Dialogs.** While a call runs, a dialog it opens is answered: a known one with
+its known answer, any other with its most cautious button. That button is
+chosen by its control id, in the order Cancel, No, Close, Abort, so that a
+translated message box (`&Nein`) is answered the same way; then by the English
+labels of a dialog with ids of its own; OK only when it is the only button. A
+dialog with no safe button is closed, as Escape closes it; no other button is
+ever pressed. The call then stops as `dialog_blocked`: a plan stops at the step
+that raised the dialog and runs nothing after it, optional steps included. A
+dialog inside the plan's one Undo step (`steps`) rolls that step back, as any
+failure there does. Otherwise the call's map changes are undone afterwards,
+unless a step had already written a file (a save, an interface texture, a
+package import or save, a release copy) or opened a map: then they are kept,
+so the map in the editor and the file stay alike, and the reply lists what was
+written in `wrote` and says how to take the map changes back (`undo.call`).
+Files and packages written stay either way, and geometry a build made stays
+until the next build. The reply's message says what happened in words, and
+its details in fields:
+
+| Detail | What it says |
+| --- | --- |
+| `dialogs` | Each dialog: its title, text and the button pressed (`button`, `buttonId`), or `(closed)`. |
+| `stoppedAt` | The plan step that raised it: `{step, op, section}` (`pre`, `steps` or `post`). |
+| `ran` | The steps that finished, in order; the one that raised the dialog is among them if it finished. |
+| `wrote` | The finished steps that wrote a file or package or opened a map: `{step, op, section, file}`. Undo does not reach these. |
+| `built` | The build steps that ran. |
+| `rolledBack` | `true` when the call's map changes were undone, `false` when they were kept. |
+| `undoneSteps`, `undoSteps` | How many Undo steps were undone, and how many of the call's are still in the buffer. |
+| `cause` | When the call failed as well: its own error, `{code, message}`. |
+
+Progress windows are left alone. A call that arrives while another program's
+or RE+'s own dialog is open waits (`busy` / `modal`) instead of running inside
+it.
 
 **History.** Every change, applied or failed, is written to
 `System\ReloadedEditor\Mcp\history\<date>-<time>-<call>-<op>.json`
@@ -268,9 +291,12 @@ agent reads as resources: `scct://docs/tools` (the conventions every tool
 shares: units, ids, positions, how the intent tools merge, the two forms of a
 finding's fix), `scct://docs/tool-reference` (every field of every tool and
 the wiki defaults the compiler applies) and `scct://docs/ops` (the bridge
-ops). The intent tools' input schemas are outlines (each argument's type, and
-`id` where a list matches by id); the merged spec is checked in full, with the
-JSON pointer of any problem.
+ops). A description that names one tool's section writes it as a fragment,
+`scct://docs/tool-reference#<tool>` (such as `#level_build` or `#mechanisms`,
+each a heading of that document); the server reads a URI with a `#fragment` as
+the whole document. The intent tools' input schemas are outlines (each
+argument's type, and `id` where a list matches by id); the merged spec is
+checked in full, with the JSON pointer of any problem.
 
 ### Session
 
@@ -336,9 +362,9 @@ are listed as standing and do not. Each description lists the fields;
 | Tool | Purpose and main arguments |
 | --- | --- |
 | `actors_edit` | Direct edits in one Undo step: `edits` of `{action, actor, ...}` with `action` `set` (`properties` in Map JSON form), `move` (`delta`), `turn` (`rotation`), `drop`, `copy` (`offsets`), `delete` (needs `allowDeletes: true`), `copy_properties` (`from`, `only`) or `rename_tag` (`tag`, renaming the Events that use it too). |
-| `map_changes_apply` | A `scct.map-changes` `document` as written by hand ([MapAuthoring.md](MapAuthoring.md)), with `baseDirectory` for relative texture paths. |
+| `map_changes_apply` | A `scct.map-changes` `document` as written by hand ([MapAuthoring.md](MapAuthoring.md)), with `baseDirectory` for relative texture paths. Its `texture` and `save` operations write only the map's own packages, `<Map>_<name>` (or a texture into `MyLevel`): another package is refused as `refused` / `not_map_owned` (or `package_name`, `interface_package`), and any before the map's first save as `unsaved_map`. A `load` alone is allowed. |
 | `workflow_request` | One bridge op by name: `op` and `args`. `scct://docs/ops` lists every op with its policy and arguments; see [Bridge ops](#bridge-ops). |
-| `editor_exec` | One console `command`. Off unless `AllowRawExec=1`. Always refused: commands that quit or crash the editor, run a file of commands (`EXEC`), load, save, import or export maps, packages, textures, meshes or brushes (`MAP`, `OBJ`, `SAVEMAPPROP`, `LOADMAPPROP`, `TEXTURE`, `STATICMESH`, `MESH`, `BRUSH` imports and exports), `TRANSACTION` and `AUDIO`; `FILE=` outside the work folder and `WriteRoots`; `PACKAGE=` other than the map's own. The description lists the editor's deny list. Console commands skip the stale checks and may not be undoable. |
+| `editor_exec` | One console `command`. Off unless `AllowRawExec=1` (else `refused` / `raw_exec_off`). Even then it is refused (see [Limits and safety](#limits-and-safety) for the whole list) for commands that quit, crash or relaunch the editor, run a file of commands, replace, save, load, import or export the map, packages or files, undo blindly or reach the sound driver (`denied_command`); a `FILE=` outside the work folder and `WriteRoots` (`outside_write_roots`); a `PACKAGE=` other than the map's own (`not_map_owned`); and more than one command (`invalid`). The description lists the editor's deny list. Console commands skip the stale checks and may not be undoable. |
 
 ### Import and media
 
@@ -392,9 +418,15 @@ Arguments of the ops made for the MCP server (the others take the shapes
   `blob.free {blob}`.
 - `authoring.preview` / `authoring.apply {document, baseDirectory}`: the Map
   JSON import; the result adds `identities` (create id to `{path, class}`).
-  Over the bridge, a document's `texture` and `save` operations are refused
-  unless their package is one of the map's own (`<Map>_<name>`, as for
-  `package.save`); a `load` alone is allowed.
+  Over the bridge, a document's `texture` and `save` operations write only
+  the map's own packages, `<Map>_<name>` as for `package.save` (a `texture`
+  into `MyLevel` is saved with the map and allowed). Any other is refused
+  before anything runs: `refused` / `not_map_owned` for a package that is not
+  the map's, `package_name` for `<Map>` or `Amb_<Map>` or a name another kind
+  of package already has, `interface_package` for `<Map>-i` (written by
+  `interface.texture`), and `unsaved_map` before the map's first save, since
+  its packages are named after its file. A `load` alone is allowed: it only
+  reads.
 - `settings.inspect {}`, `settings.edit {snapshot, changes}`: Level Properties
   against the snapshot just read.
 - `design.block` / `design.blockbatch` take `spec.material`;
@@ -449,6 +481,10 @@ Arguments of the ops made for the MCP server (the others take the shapes
 | `scct://map/spec` | Live: the level spec last applied to the map (its sidecar), or null. |
 | `scct://map/screenshot/latest` | Live: a PNG of the perspective viewport. |
 | `scct://map/actor/{path}` | Live: one actor's editable values, such as `scct://map/actor/MyLevel.Light12`. |
+
+A URI may end in a `#fragment` naming a section, as the tool descriptions'
+`scct://docs/tool-reference#level_build` does: it is read, and subscribed to,
+as the resource without it.
 
 Clients can subscribe to the live resources; the server announces a change
 after each call that changed something in the editor (a bridge call that
@@ -767,7 +803,14 @@ What the server and the editor never do, whatever the agent asks:
   `AllowRawExec` and `AllowPlay` are set only in the INI.
 - **Write stock packages.** Package writes are limited to the map's own names:
   `<Map>`, `<Map>-i`, `Amb_<Map>` and `<Map>_<anything>` (`<Map>_TXT`,
-  `<Map>_STM`).
+  `<Map>_STM`). Texture and mesh imports, package saves and a Map JSON
+  document's `texture` and `save` operations go only into `<Map>_<anything>`
+  (`not_map_owned`, `package_name`), and the interface textures only into
+  `<Map>-i`. Since those are named after the map's file, none of them, nor a
+  `.uas` or a release copy, is written before the map's first save
+  (`unsaved_map`). A Map JSON texture may also go into `MyLevel`, which is
+  saved with the map. A name that another kind of package already has is
+  refused too: packages of one base name are one package to the engine.
 - **Delete without asking for it.** A call deletes actors only when it says
   `allowDeletes: true` (`actors_edit`, Map JSON version 3), or when an
   incremental build removes actors its own earlier build made.
@@ -778,14 +821,38 @@ What the server and the editor never do, whatever the agent asks:
   backed up first.
 - **Write elsewhere.** Maps are saved in `Packages\MapsEd` under ASCII names
   without spaces. The editor writes packages in `Packages\Textures`,
-  `Packages\StaticMeshes` and `Packages\Sounds` under the map's names, release
-  copies in `Releases\<Map>` (as Optimise Map Assets does; over the bridge a
-  release copy elsewhere must be inside the work folder or `WriteRoots`), and
-  its own files in `System\ReloadedEditor\Mcp`. The media and import tools write only in the work
-  folder and `WriteRoots`, and run only the ffmpeg you configured.
-- **Run console commands.** `editor_exec` is off unless `AllowRawExec=1`, and
-  quitting, map loads and saves, package saves, transactions and audio
-  commands are refused even then.
+  `Packages\StaticMeshes` and `Packages\Sounds` under the map's names, its
+  own files in `System\ReloadedEditor\Mcp`, and release copies in
+  `<Game>\Releases\<Map>`, as Optimise Map Assets does. Over the bridge a
+  release copy's `folder` must be a full path inside `<Game>\Releases`, the
+  work folder or `WriteRoots`, compared after `..` and links are resolved
+  (else `refused` / `outside_write_roots`), so its `overwrite` only ever
+  replaces files there; the Optimise Map Assets window still takes any folder.
+  The media and import tools write only in the work folder and `WriteRoots`,
+  and run only the ffmpeg you configured.
+- **Run console commands.** `editor_exec` is off unless `AllowRawExec=1`. Even
+  then the editor refuses a command that starts with any of these, read word
+  by word as its console reads them (any case, blanks skipped, a word ending
+  at anything but a letter or digit, so `QUIT;` and `EXEC"cmds.txt"` count),
+  as `refused` / `denied_command`:
+  - `QUIT`, `EXIT`, `RELAUNCH` and `DEBUG`, which end or crash the editor, and
+    `EXEC`, which runs a file of commands;
+  - `MAP NEW`, `MAP LOAD`, `MAP SAVE`, `MAP IMPORT` and `MAP EXPORT`;
+  - `OBJ SAVEPACKAGE`, `OBJ EXPORT`, `OBJ IMPORT`, `OBJ LOAD`, `SAVEMAPPROP`
+    and `LOADMAPPROP`;
+  - `TEXTURE IMPORT`, `TEXTURE EXPORT`, `STATICMESH IMPORT`,
+    `STATICMESH EXPORT`, `MESH IMPORT`, `BRUSH IMPORT`, `BRUSH EXPORT` and
+    `DUMPINT`;
+  - `TRANSACTION` (blind undo and redo) and `AUDIO` (the sound driver).
+
+  It also refuses any command with a `FILE=` (found anywhere, as the engine
+  finds it, so `PROFILE=` counts) outside the work folder and `WriteRoots`, a
+  relative path being read from `System` (`outside_write_roots`); a `PACKAGE=`
+  other than `MyLevel` or the map's own `<Map>_<name>`, `<Map>-i` or
+  `Amb_<Map>`, and any but `MyLevel` before the map's first save
+  (`not_map_owned`); and anything but one command of up to 4,096 characters on
+  one line, without `|` (`invalid`). The map, package, import and undo tools
+  do these things with their checks.
 - **Open windows or skip checks.** Ops that open windows, undo blindly or
   write without a stale check are blocked over the pipe.
 
@@ -854,15 +921,18 @@ what follows as the current state, not a promise:
 | `busy` with a reason | See [How calls run](#how-calls-run): close the dialog or menu, finish the drag, answer a startup window, restore a minimised editor. |
 | `busy` / `another_client` | Another client holds the editor. Close it, or use **Disconnect client**. |
 | `busy` / `approval_pending` | A change waits in the review window. Answer it; the agent continues with `approval_wait`. |
-| `refused` / `outside_write_roots` | A release copy's folder is outside `<Game>\Releases`, the work folder and `WriteRoots`. Leave the folder out, or add it to `[Mcp] WriteRoots`. |
+| `refused` / `outside_write_roots` | A release copy's folder, or an `editor_exec` `FILE=`, is outside `<Game>\Releases` (release copies only), the work folder and `WriteRoots`. Leave the folder out, or add it to `[Mcp] WriteRoots`. |
 | `invalid` / `several_editors` | Several editors are running; `editor_status` lists them and takes `pid`. |
 | `stale` | The map changed since the agent read it. It should read again and retry. |
 | `timeout` / `awaiting_approval` | The change is waiting in the review window. Answer it; the agent continues with `approval_wait`. |
 | `denied` | You cancelled the review. |
-| `dialog_blocked` | A dialog opened during the change; it was answered and the change undone. The details name it. |
+| `dialog_blocked` | A dialog opened during the change. It was answered with its most cautious button (or closed) and the call stopped there; the message says what happened. `details.dialogs` has its title, text and answer; `stoppedAt` is the step it stopped at (no later step ran), `ran` the steps that finished and `wrote` the files and packages they had already written, which stay. `rolledBack` says whether the map changes were undone: a plan that had already saved or written files keeps them (see [Dialogs](#how-calls-run)), so the map and its file stay alike, and then `editor_undo` with the `call` the message names takes them back. Answer the dialog's question yourself in the editor if it needs one, then retry. |
 | `refused` / `raw_exec_off` or `play_off` | Set `AllowRawExec=1` or `AllowPlay=1` in the INI with the editor closed, only if you want to allow that. |
 | `refused` / `unsaved_changes` | Save the map, or tell the agent it may discard the changes. |
-| `refused` / `not_map_owned` | The package is not the map's own; use `<Map>_TXT`, `<Map>_STM` or another `<Map>_` name. |
+| `refused` / `not_map_owned` | The package is not the map's own (an import, a package save, a Map JSON `texture` or `save`, an `editor_exec` `PACKAGE=`); use `<Map>_TXT`, `<Map>_STM` or another `<Map>_` name. |
+| `refused` / `package_name` or `interface_package` | `<Map>` and `Amb_<Map>` are not for imports, and a name another kind of package has would merge with it; `<Map>-i` is written only by the interface textures. Use `<Map>_TXT` or `<Map>_STM`. |
+| `refused` / `unsaved_map` | The map has no file yet, and its packages, `.uas` and release copy are named after it. Save it first (`map_file action:"save_as"`). |
+| `refused` / `denied_command` | `editor_exec` never runs that command (see [Limits and safety](#limits-and-safety)); use the tool that does it with its checks. |
 | A build or `.uas` times out in the client | Raise the client's tool timeout; the editor finishes the build regardless, and `editor_status` shows the result. |
 | `editor_launch` waits and fails | A startup window (an update offer, crash recovery, a missing package) is waiting for you; answer it, then `editor_status`. `System\Reloaded_Editor.exe.log` says why the launcher failed. |
 | Video frames fail | Install ffmpeg and set `[Mcp] Ffmpeg` to its `ffmpeg.exe`, or put it on `PATH`. |

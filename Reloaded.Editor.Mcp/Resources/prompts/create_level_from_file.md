@@ -36,11 +36,11 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 
      | Format | What the importer does |
      |---|---|
-     | ASCII/CSV grids | The legend `# . S M O F K D V C L A H` marks walls, floor, spy and merc starts, objectives, flags, disks, doors, vents, cameras, ladders, ammo and health. Storeys are separated. Spaces become rooms and corridors by rectangle decomposition. |
+     | ASCII/CSV grids | The legend `# . S M O F Z B K D V C L A H N X` marks solid, floor, spy and merc starts, terminals, flags, flag drop zones, bomb targets, disks, doors, vents, cameras, lights, ammo, infirmaries, CamNet cameras and lasers (`options.legend` changes it). `--- storey N ---` starts another floor. Floor cells become rooms and corridors by rectangle decomposition. |
      | Raster floor plans | A colour legend leads into the grid pipeline. |
-     | SVG, Tiled `.tmj`, GeoJSON | Shapes and layers become pieces and actors. |
+     | SVG, Tiled `.tmj` / `.tmx`, GeoJSON | Shapes and layers become pieces and actors. |
      | CSV actor tables | One actor per row. |
-     | T3D, Hammer `.vmf`, Quake `.map` | Convex brushes become polygon brushes. Additive brushes are inverted for SCCT's solid world. |
+     | T3D, Hammer `.vmf`, Quake `.map` | Brushes become polygon brushes. SCCT's world is solid, so for Hammer and Quake maps a hull is carved and the brushes are added back. |
      | OBJ | Becomes a static mesh asset list. |
      | Map-authoring export | Becomes spec sections plus `existing` refs. |
 
@@ -71,7 +71,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
    - Call `map_validate` with `profile:"draft"`. Fix the findings by editing the spec and running `level_build` with `sync:"incremental"`, or through each finding's `fix`.
 
 8. **Assets.** Any textures, meshes or sounds the file references must exist.
-   - Import them with `assets_import` into map-owned packages: `<Map>_TXT`, `<Map>_STM`, `Amb_<Map>`.
+   - Import textures and static meshes with `assets_import` into map-owned packages: `<Map>_TXT`, `<Map>_STM`. Sounds are imported by hand in the Sound Browser, into `Amb_<Map>`; ask the user.
    - Or swap them for loaded stock assets (`map_query` with `what:"assets"`).
 
 9. **Save and finish.**

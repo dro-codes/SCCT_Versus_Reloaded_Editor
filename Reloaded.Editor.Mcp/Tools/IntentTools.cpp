@@ -412,8 +412,8 @@ namespace
                 "at, enabledBy}]}\n"
                 "- modes [story|diskhunt|deathmatch] are added; removeModes drops modes with their sections\n"
                 "- story {mission {id, name, description (Spy), descriptionDef (Merc), minimumObjectives, chained, atResetEvent}, objectives [{id, name, description, "
-                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime, dropZones [{id, at} | {ref}] (1-5), resetTime, "
-                "captureTime, triggerName}]}], sectors [{id, name, brief, briefDefend, objectives, required, actions [{kind: open|light|sound|announce|trigger, target, "
+                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime, dropZones (1-5) [{id, at} | {ref: id}] "
+                "(flags share a zone: one makes it with an id, the others name it by ref), resetTime, captureTime, triggerName}]}], sectors [{id, name, brief, briefDefend, objectives, required, actions [{kind: open|light|sound|announce|trigger, target, "
                 "hold, ...}]}]}\n"
                 "- diskhunt {disks: {in: [roomIds], count} | [{id, at, group}], resetTime, mission}; deathmatch {disableSecurity, mission}\n"
                 "- playerCounts [{objective, min, max, open}] (by objective); targets {mission, sizes: [8 counts, 1v1 to 8v8]}";
@@ -502,14 +502,15 @@ namespace
             t.description =
                 "Lights, sound, zones, volumes and what dresses a level (scct://wiki/lighting, sound-actors, zones-and-volumes, level-ingredients, gameplay-objects, "
                 "vision-mode-properties, softbody-actors and the others). Zones and volumes change brushes, so the geometry is rebuilt.\n"
-                "- lights [{id, preset: ceiling|spot|sun|echelon-spot, in | at, radius, brightness, hue, saturation, cone, corona, switchable, yaw, pitch}]\n"
+                "- lights [{id, preset: ceiling|spot|sun|echelon-spot, in | at, radius, brightness, hue, saturation, cone (spot preset: LightCone 0-255), corona, "
+                "switchable, yaw, pitch}]\n"
                 "- sounds [{id, class, sound, at, radius, volume}]; zones [{id, locationName, spaces: [pieceIds], portals}]\n"
                 "- volumes [{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box: {min, max} | {in, height}, locationName, priority}]\n"
                 "- ingredients [{id, kind: ammo|infirmary|glass|extinguisher|projector|sprinkler|puddle|balltrap, in | at, yaw}]; objects [{id, mesh, at, yaw, "
                 "damageable, hitPoints}]; meshes [{id, mesh, at, yaw, scale, fit}]\n"
                 "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, properties}] (by target)\n"
-                "- props, fish, softbody (class ESBPatchActor, ESBStripDoorActor, ESBRopeActor or ESBChainActor; never copied), animated, tutorials: [{id, class, mesh, "
-                "at, yaw, scale, properties}]";
+                "- props, fish, animated, tutorials: [{id, class, mesh, at, yaw, scale, properties}]; softbody the same, class ESBPatchActor, ESBStripDoorActor "
+                "(the wiki's ESBStripeDoorActor), ESBRopeActor or ESBChainActor, mesh only for ESBChainActor (its links); never copied";
             t.fields = {{"lights", {"environment", "lights"}, ""},
                         {"sounds", {"environment", "sounds"}, ""},
                         {"zones", {"zones"}, ""},

@@ -23,7 +23,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 
 1. **Read the map.**
    - Call `editor_status`, then `map_query` with `what:"summary"`, and with `what:"missions"`. Note the existing `SMission`s and their `GameMode`, the `SObjective`s, the triggers and the spawns.
-   - Call `map_query` with `what:"schema"` and `classes:["SMission"]`, and use its `GameMode` choices (`GM_Multi`, `GM_Undefined`, `GM_DiskHunt`, `GM_DeathMatch`) exactly as listed.
+   - Call `map_query` with `what:"schema"` and `classes:["SBase.SMission"]` (the schema needs full class names), and use its `GameMode` choices (`GM_Multi`, `GM_Undefined`, `GM_DiskHunt`, `GM_DeathMatch`) exactly as listed.
 2. **Plan the mode.** Use what it needs:
    - **story:**
      - One `SMission` with `GameMode GM_Multi`, `Description` (Spy text), `DescriptionDEF` (Merc text), and `MinimumObjectives` no larger than its objectives.
@@ -46,7 +46,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
      - Optional separate spawns (`STriggerPlayerStart`).
 3. **Apply.** Call `gameplay` with the matching part of the spec's `gameplay` section, at the top level of the arguments:
    - `story` (`mission`, `objectives[triggers]`, `sectors`), for story and sectors;
-   - `diskhunt` (`disks`, `resetTime`, `mission`);
+   - `diskhunt` (`disks`, `resetTime`, `mission`, and `disableSecurity` for the reset that turns security off);
    - `deathmatch` (`disableSecurity`, `mission`);
    - and `modes` with the mode (`story`, `diskhunt` or `deathmatch`; sectors are `story`) for "{{mode}}". It is added to the modes the map already has.
 

@@ -596,6 +596,29 @@ void Environment()
     Check(due.size()==3 && due[0].at("Event")=="FinalMinute" && due[0].at("Delay")=="240" && due[1].at("Event")=="RoofLight" && due[1].at("Delay")=="0" && due[2].at("Event")=="UplinkMessage" && due[2].at("Delay")=="180","each delayed by how much later it is due");
     const auto rounded=Diagnostic(sv.diagnostics,"level.send-at-time");
     Check(rounded && rounded->pointer=="/level/events/0/sendAtTime" && rounded->message.find("-60")!=std::string::npos,"SendAtTime is a whole number of seconds");
+    // More than a day after the earliest, the SMagicEvent cannot delay a level
+    // event: an error at its sendAtTime, and the rest still go out.
+    auto apart=Example("elevator-3floors");apart["level"]["events"]=Json::parse(R"([{"event":"FinalMinute","sendAtTime":-100000},{"event":"RoofLight","sendAtTime":-1}])");
+    const auto ap=Spec::Compile(apart);
+    std::vector<std::string> tooLate;
+    for(const auto& d:ap.diagnostics)if(d.rule=="level.send-at-time" && d.severity=="error")tooLate.push_back(d.pointer);
+    Check(tooLate==std::vector<std::string>{"/level/events/1/sendAtTime","/events/level/0/sendAtTime"},"each level event more than 86400 s after the earliest is an error at its sendAtTime");
+    const auto& kept=Props(ap,"LevelEvents").at("Groups")[0].at("EventGroup");
+    Check(Step(ap.plan,"settings_edit").at("args").at("changes").at("SendAtTime")=="-100000" && kept.size()==1 && kept[0].at("Event")=="FinalMinute" && kept[0].at("Delay")=="0","the earliest still goes out, the ones it cannot delay are left out");
+    auto exactly=Example("elevator-3floors");exactly["level"]["events"]=Json::parse(R"([{"event":"FinalMinute","sendAtTime":-86520}])");
+    const auto ex=Spec::Compile(exactly);
+    Check(Count(ex.diagnostics,"error","level.send-at-time")==0 && Props(ex,"LevelEvents").at("Groups")[0].at("EventGroup")[1].at("Delay")=="86400","a delay of exactly a day is written");
+    // Delays out of the SMagicEvent's 0-86400 s are errors at the delay, not a failed compile.
+    auto delays=Example("elevator-3floors");delays["events"]["links"][1]["delay"]=-0.5;delays["events"]["links"][0]["delay"]=90000;
+    const auto dl=Spec::Compile(delays);
+    std::vector<std::string> badDelays;
+    for(const auto& d:dl.diagnostics)if(d.rule=="events.delay" && d.severity=="error")badDelays.push_back(d.pointer);
+    Check(badDelays==std::vector<std::string>{"/events/links/0/delay","/events/links/1/delay"},"a link delay outside 0-86400 is an error at it");
+    auto sectorDelay=Example("three-modes-sectors");sectorDelay["gameplay"]["story"]["sectors"][0]["actions"][2]["delay"]=100000;
+    const auto sd=Spec::Compile(sectorDelay);
+    std::vector<std::string> sectorErrors;
+    for(const auto& d:sd.diagnostics)if(d.severity=="error")sectorErrors.push_back(d.rule+" "+d.pointer);
+    Check(sectorErrors==std::vector<std::string>{"story.action /gameplay/story/sectors/0/actions/2/delay"} && Props(sd,"Zone1_Complete").at("Groups")[0].at("EventGroup").size()==2,"so is a sector action's, which is left out");
     Check(Step(e.plan,"settings_edit").at("args").at("snapshot")==Json({{"$bind",{{"step","settings"}}}}) && Step(e.plan,"settings").at("op")=="settings.inspect","settings.edit takes settings.inspect's snapshot");
 }
 void GesAndSettings()

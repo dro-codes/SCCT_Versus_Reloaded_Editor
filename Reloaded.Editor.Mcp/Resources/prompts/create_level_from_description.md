@@ -31,7 +31,7 @@ You are building a playable **SCCT Versus** map (Spies vs Mercenaries) in the RE
 {{/mapName}}**Modes:** {{modes}}.
 **Finish at profile:** {{profile}}.
 
-The SCCT Versus wiki digests and the rule catalogue are embedded below. They are the source of truth. Use class and property names exactly as written there.
+The SCCT Versus wiki digests are embedded below. They are the source of truth. Use class and property names exactly as written there.
 
 The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 

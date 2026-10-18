@@ -18,7 +18,7 @@ The full rule list, with severities, is `scct://rules`.
 | `spawn-points` | `PlayerStart` (`TeamNumber` 0 Spy / 1 Merc, ≥3 per team), `STriggerPlayerStart` |
 | `game-modes` | Story (`SMission` `GM_Multi`, `SObjective`, `SComputerObjectiveTrigger` at ~78, `SFlag` + 1-5 `SFlagDropZone`, `SBombTargetObjectiveTrigger`), sector maps (`GM_Undefined`, `bChained`), Disk Hunt (`SDisk`, `Group` 1/2/3), Deathmatch (`GM_DeathMatch`) |
 | `map-settings` | `SMapSettings`: `MapName` CAPS, briefs, `Modes`/`ModesStrings` index-aligned, ranges, `<Map>-i` textures, save/exit/reopen |
-| `level-properties` | LevelInfo (`F6`): `Song`, `fDeathPawnHeight`, `Event`/`SendAtTime`, `MapSnapshotInfo`, `MotionTrackingTweak` 52/85 or 8/8 |
+| `level-properties` | LevelInfo (`F6`): `Song`, `fDeathPawnHeight`, `Event`/`SendAtTime`, `SnapshotCamera`/`MapFloors` (the Strategic Map), `MTVOffset`/`MTVSlope` 52/85 or 8/8; the page's headings (`Events`, `MapSnapshotInfo`, `MotionTrackingTweak`, ...) are property-sheet categories |
 | `vision-mode-properties` | `bSeeThroughInMotionVision`, `bHideInNormalVision`, EchelonHeat, EchelonEMF |
 | `geometric-events` | GE Mode, ledge 208/320/448/512, obstacle 115, pull-up 64, length 32, fence 88-128 (96), hand-over-hand 216, ladder bars even ≥8, zipline 384/198/161, `SGETrigger`, `GEActivationMask` |
 | `events` | `Event`/`Tag`, `TriggerMethode` (`TriggerToggle`, `TriggerControl`, `UntriggerOnly`), `SMagicEvent`, `SMessageTrigger`, `SShaker`, `SNotifyNoise` |
@@ -34,7 +34,7 @@ The full rule list, with severities, is `scct://rules`.
 | `buttons-and-hacking-panels` | `SInterrupteur`: 120/60 interaction, `UseRelativeLocation` 55,0,0 or 39.5,3,0, `UseRelativeRotation` 32768, `UsableBy` |
 | `level-ingredients` | `SAmmoStock` (60/120), `SInfirmary` (collision, 120/60), **`SCamNetwork` (required; loop; one `bFirstCam`)**, `SVitre`, `SExtincteur`, `SProjoFixe`, `SSprinkler`, `SFlaque`, `SBallTrap` |
 | `zones-and-volumes` | `ZoneInfo` `LocationName`, `Volume`, `SDamageVolume`, `ERainVolume`, `SAlarmZoneInfo` (avoid) |
-| `softbody-actors` | `ESoftBodyActor` (never duplicate), `ESBPatchActor`, `ESBStripeDoorActor`, `ESBRopeActor`, `ESBChainActor` |
+| `softbody-actors` | `ESoftBodyActor` (never duplicate), `ESBPatchActor`, `ESBStripeDoorActor` (the engine's `ESBStripDoorActor`), `ESBRopeActor`, `ESBChainActor`, all in the `SoftBody` package |
 | `animated-meshes` | `SAnimatedMesh` (reuse existing animations only) |
 | `fish` | `SFish`, `SFish_Big`, `SFish_Follow` (needs a `bPilote=True` `Pilot`) |
 | `map-tutorials` | `SHelpPath`, `SZoneTips`, `SEndZoneTip` (Visit a Map) |
@@ -124,10 +124,10 @@ A map that loads and plays in all three modes without softlocks. Each item names
 | Vision mode tweaks | `vision-mode-properties` | `environment` (`environment.vision`) |
 | SoftBody cloth, `SAnimatedMesh`, fish, tutorials | `softbody-actors`, `animated-meshes`, `fish`, `map-tutorials` | `environment` (`softbody`, `animated`, `fish`, `tutorials`) |
 | Ledge, hand-over-hand, pipe, ladder, zipline, fence, pole; `SGETrigger` | `geometric-events` | `geometric_events` (`ges`, `geTriggers`) |
-| Level Properties (`fDeathPawnHeight`, `SendAtTime`, `MotionTrackingTweak`, `GEActivationMask`, `MapSnapshotInfo`) | `level-properties` | `map_settings` (`level`) |
+| Level Properties (`Song`, `fDeathPawnHeight`, `Event`/`SendAtTime`, `MTVOffset`/`MTVSlope`, `GEActivationMask`; `SnapshotCamera`/`MapFloors` through `minimap`) | `level-properties` | `map_settings` (`level`, `minimap`) |
 | `SMapSettings`, interface textures, minimap | `map-settings` | `map_settings` (`settings`, `interface`) |
 | `.uas`, package checks, release archive | `sound-browser`, `map-packaging` | `release` (`release`) |
-| Textures, meshes, sounds from files | `material-classes`, `static-meshes`, `sound-browser` | `assets_import` |
+| Textures and static meshes from files (sounds are imported by hand in the Sound Browser) | `material-classes`, `static-meshes`, `sound-browser` | `assets_import` |
 | Anything else / direct property edits | (any) | `actors_edit`, `map_changes_apply` |
 
 ## How the MCP tools apply this

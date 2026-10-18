@@ -25,7 +25,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 1. **State.** Call `editor_status`, then `map_query` with `what:"summary"`: file, unsaved changes, actor counts, spawns per team, missions, objectives, security, cameras.
 2. **Automatic checks.** Call `map_validate` with `profile:"{{profile}}"` and a high `limit`, so you see every finding.
    - Each finding has `severity`, `rule`, `wikiPage`, `message`, `actors` and usually `fix`.
-   - Rules and their severities are in the embedded catalogue.
+   - Rules and their severities in each profile are in `scct://rules`.
 3. **Walk the checklist.** Go through the **Minimum viable Versus map checklist** in the embedded index, item by item, and confirm each with data. For each item, write ✅, ⚠️ or ❌ with the evidence.
    - Spawns: `map_query` with `what:"spawns"` (per team, ≥3) and `view_screenshot` with `preset` `spawn:spy` and `spawn:merc`.
    - Modes: `map_query` with `what:"missions"`: a `GM_Multi` mission with objectives and triggers, `GM_DiskHunt` with `SDisk`s, `GM_DeathMatch` with a security reset.

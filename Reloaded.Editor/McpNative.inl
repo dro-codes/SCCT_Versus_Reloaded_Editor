@@ -276,10 +276,12 @@ namespace
 {
     // LevelInfo settings the property sheet does not offer that settings.edit
     // may write all the same, through the ImportText the minimap uses for
-    // SnapshotCamera.
+    // SnapshotCamera. Property names, as the level spec compiler's Settings()
+    // writes them; the sheet's headings (MapSnapshotInfo, MotionTrackingTweak,
+    // Events) are only categories.
     bool McpSettingsExtra(const std::string& name)
     {
-        for(const char* extra:{"MapSnapshotInfo","MotionTrackingTweak","GEActivationMask","Events","SendAtTime","fDeathPawnHeight","Song"})
+        for(const char* extra:{"SnapshotCamera","MapFloors","MTVOffset","MTVSlope","GEActivationMask","Event","SendAtTime","fDeathPawnHeight","Song"})
             if(Fold(name)==Fold(extra))return true;
         return false;
     }

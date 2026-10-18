@@ -152,6 +152,10 @@ void Errors()
     auto extra=h.Request("prompts/get",{{"name","versus_starter"},{"arguments",{{"theme","harbour"},{"colour","red"}}}});
     Check(extra.at("error").at("code")==-32602 && extra.at("error").at("message").get<std::string>().find("no argument \"colour\"")!=std::string::npos,"an unknown prompt argument is invalid params");
     Check(h.Request("prompts/get",{{"name","versus_starter"},{"arguments",{{"theme",5}}}}).at("error").at("code")==-32602,"prompt arguments are strings");
+    // A required argument given blank is missing, and the error names it.
+    const auto blank=h.Request("prompts/get",{{"name","versus_starter"},{"arguments",{{"theme","   "}}}});
+    Check(blank.at("error").at("code")==-32602 && blank.at("error").at("message").get<std::string>().find("\"theme\"")!=std::string::npos,
+          ("a blank required argument is invalid params naming it: "+blank.dump()).c_str());
     // A missing actor is a missing resource.
     h.fake.On("actors.query",Json{{"actors",Json::array()},{"total",0}});
     Check(h.Request("resources/read",{{"uri","scct://map/actor/MyLevel.Nothing7"}}).at("error").at("code")==-32002,"a missing actor resource is not found");
@@ -417,6 +421,20 @@ void Resources()
     auto offline=h.Request("resources/read",{{"uri","scct://map/summary"}});
     Check(offline.at("error").at("code")==-32603 && offline.at("error").at("message").get<std::string>().find("editor_launch")!=std::string::npos,"live reads explain a missing editor");
     Check(h.Request("resources/read",{{"uri","scct://wiki/no-such-page"}}).at("error").at("code")==-32002,"template miss is not found");
+    // A #fragment names a section of a document (the tool descriptions point
+    // at scct://docs/tool-reference#<tool>): the whole resource is read.
+    h.fake.connected=true;
+    const auto whole=h.Result("resources/read",{{"uri","scct://docs/tool-reference"}});
+    const auto section=h.Result("resources/read",{{"uri","scct://docs/tool-reference#mechanisms"}});
+    Check(section.at("contents")[0].at("text")==whole.at("contents")[0].at("text") && section.at("contents")[0].at("uri")=="scct://docs/tool-reference","a #fragment reads the whole document");
+    Check(Json::parse(h.Result("resources/read",{{"uri","scct://editor/state#revision"}}).at("contents")[0].at("text").get<std::string>()).at("revision")==11,"live resources take a fragment too");
+    const auto missing=h.Request("resources/read",{{"uri","scct://docs/no-such#x"}});
+    Check(missing.at("error").at("code")==-32002 && missing.at("error").at("data").at("uri")=="scct://docs/no-such#x","a missing resource is not found, under the URI asked for");
+    h.Result("resources/subscribe",{{"uri","scct://editor/state#anything"}});
+    h.Clear();
+    h.server->OnBridgeEvent({{"t","event"},{"kind","map_changed"}});
+    const auto notes=h.Notes("notifications/resources/updated");
+    Check(notes.size()==1 && notes[0].at("params").at("uri")=="scct://editor/state","a subscription with a fragment is to the whole resource");
 }
 void Approval()
 {
@@ -503,8 +521,19 @@ void Launch()
     h.fake.editors=Json::array();
     auto status=h.Call("editor_status");
     Check(status.at("structuredContent").at("settings").at("enabled")==true && status.at("structuredContent").at("settings").at("requireApproval")==true,"INI [Mcp] read");
+    // Subscribers of the editor's state hear that a new one connected.
+    h.Result("resources/subscribe",{{"uri","scct://editor/state"}});
+    const auto oldHello=h.fake.hello;
+    h.fake.hello=Bridge::HelloReply("test",5151,true,true,Bridge::OpList());
+    h.Clear();
     auto started=h.Call("editor_launch",{{"waitSeconds",10}});
     Check(started.at("isError")==false && launched.size()==1 && launched[0]=="Reloaded_Editor.exe -reMcp in "+h.dir.filename().string(),"started with -reMcp in System");
+    const auto announced=h.Notes("notifications/resources/updated");
+    Check(announced.size()==1 && announced[0].at("params").at("uri")=="scct://editor/state","a newly connected editor is announced");
+    h.Clear();
+    h.Call("editor_status");
+    Check(h.Notes("notifications/resources/updated").empty(),"the same editor again is not");
+    h.fake.hello=oldHello;
     Check(h.fake.selected==5151 && started.at("structuredContent").at("pid")==5151 && started.at("structuredContent").at("launcher")==9100,"selects the editor the launcher started, not the launcher");
     // With an editor already running (force), the new pipe is the new editor.
     h.fake.editors=Json::array({{{"pid",4242}}});
@@ -655,6 +684,55 @@ void UndoStack()
           "a call the editor no longer has is forgotten, not replaced by a blind undo");
     h.fake.On("undo.steps",Json{{"done",2}});
     Check(h.Call("editor_undo",{{"steps",2}}).at("isError")==false && h.fake.Last("undo.steps")->args.at("count")==2,"steps still undoes whatever made them");
+
+    // A call this editor has no record of (unknown_call; an older DLL says
+    // invalid with no reason) is forgotten, so the next editor_undo goes on
+    // to the call before it instead of failing the same way for ever.
+    auto apply=[&]{return h.Call("map_changes_apply",{{"document",document}}).at("structuredContent").at("undo").at("call").get<unsigned>();};
+    {std::lock_guard<std::mutex> g(memory.lock);memory.Reset();}
+    const auto older=apply(),stale=apply();
+    h.fake.Clear("undo.call");
+    h.fake.Fail("undo.call",Bridge::Code::Invalid,"This editor has no record of bridge call.","unknown_call");
+    auto unknown=h.Call("editor_undo");
+    Check(unknown.at("isError")==true && h.fake.Last("undo.call")->args.at("call")==stale && Text(unknown).find("forgotten")!=std::string::npos,"an unknown call is forgotten, and says so");
+    h.fake.Clear("undo.call");
+    h.fake.On("undo.call",[&](const Json& a,const CallOptions&){return Json{{"call",a.at("call")},{"done",2},{"steps",2}};});
+    auto previous=h.Call("editor_undo");
+    Check(previous.at("isError")==false && h.fake.Last("undo.call")->args.at("call")==older,"then the call before it is undone");
+    Check(previous.at("structuredContent").at("next")[0].at("args").at("steps")==2,"redo puts back the steps undo.call says it undid ({call, done, steps})");
+    apply();
+    h.fake.Clear("undo.call");
+    h.fake.Fail("undo.call",Bridge::Code::Invalid,"Bridge call 9 changed nothing that can be undone.");
+    Check(h.Call("editor_undo").at("isError")==true && Text(h.Call("editor_undo")).find("no change it can still undo")!=std::string::npos,"invalid with no reason is forgotten too");
+    // One that can no longer be undone whole is dropped, with what to do instead.
+    const auto calls=h.fake.Count("undo.call");
+    for(const char* reason:{"trimmed","partly_undone","interleaved"})
+    {
+        apply();
+        h.fake.Clear("undo.call");
+        h.fake.Fail("undo.call",Bridge::Code::Refused,"Call N cannot be undone as a whole; undo by steps instead.",reason);
+        const auto broken=h.Call("editor_undo");
+        Check(broken.at("isError")==true && broken.at("structuredContent").at("reason")==reason && Text(broken).find("can no longer be undone as a whole")!=std::string::npos &&
+              Text(broken).find("undo by steps")!=std::string::npos,(std::string(reason)+" is explained").c_str());
+        Check(Text(h.Call("editor_undo")).find("no change it can still undo")!=std::string::npos,(std::string(reason)+" is popped").c_str());
+    }
+    Check(h.fake.Count("undo.call")==calls+3 && h.fake.Count("undo.steps")==1,"nothing was undone in their place");
+    // A call with newer steps after it stays: it is undoable once they are.
+    const auto behind=apply();
+    h.fake.Clear("undo.call");
+    h.fake.Fail("undo.call",Bridge::Code::Refused,"Call N is not the latest change.","not_newest");
+    h.Call("editor_undo");
+    h.fake.Clear("undo.call");
+    h.fake.On("undo.call",Json{{"call",behind},{"done",1},{"steps",1}});
+    Check(h.Call("editor_undo").at("isError")==false && h.fake.Last("undo.call")->args.at("call")==behind,"a call behind newer steps is kept");
+    // Another editor numbers its calls afresh: the stack is forgotten.
+    apply();
+    const auto saved=h.fake.hello;
+    h.fake.hello=Bridge::HelloReply("test",5353,true,false,Bridge::OpList());
+    const auto before=h.fake.Count("undo.call");
+    auto other=h.Call("editor_undo");
+    Check(other.at("isError")==true && Text(other).find("no change it can still undo")!=std::string::npos && h.fake.Count("undo.call")==before,"another editor's calls are not undone by number");
+    h.fake.hello=saved;
 }
 // A cancelled editor_launch stops waiting at once instead of holding the
 // worker for waitSeconds.
@@ -712,6 +790,13 @@ void ChangeNotices()
 // Hints: a review window holding the editor is not worth waiting for.
 void Hints()
 {
+    // A dialog stopped the change: the editor says what was undone and what
+    // was written, so the hint must not claim a rollback.
+    const auto blocked=Tools::ErrorResult(Bridge::Error(Bridge::Code::DialogBlocked,"The plan stopped at step \"save\" (map.save, in post). Nothing was undone: map.save had already run.","",
+                                                        Json{{"stoppedAt","save"},{"rolledBack",false},{"wrote",Json::array({{{"op","map.save"},{"file","C:/Game/Packages/MapsEd/NEWD.sdc"}}})}}));
+    const auto& said=blocked.content[0].text;
+    Check(said.find("rolled back")==std::string::npos && said.find("details.rolledBack")!=std::string::npos && said.find("details.wrote")!=std::string::npos &&
+          said.find("details.stoppedAt")!=std::string::npos,("the dialog_blocked hint points at the details: "+said).c_str());
     const auto pending=Tools::ErrorResult(Bridge::Error(Bridge::Code::Busy,"A change is waiting for approval in the editor.","approval_pending",Json{{"ticket","t9"}}));
     Check(pending.isError && pending.content[0].text.find("approval_wait")!=std::string::npos && pending.structured.at("details").at("ticket")=="t9","approval_pending names approval_wait and the ticket");
     Check(Tools::ErrorResult(Bridge::Error(Bridge::Code::Busy,"x","modal")).content[0].text.find("Wait a moment")!=std::string::npos,"other busy reasons are waited out");

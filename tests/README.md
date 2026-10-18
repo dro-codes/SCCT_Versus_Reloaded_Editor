@@ -807,12 +807,12 @@ and the embed check.
 | --- | --- |
 | `McpBridgeModelTests` | The pipe's framing and limits, the hello handshake and protocol versions, op policies and error codes. |
 | `McpPlanModelTests` | `mcp.plan` checks: section order, `$bind` pointers, single ops wrapped as plans, refused ops. |
-| `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). |
+| `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). The bridge's refusals in `Reloaded.Editor/McpSafetyModel.h`: map-owned packages for imports and Map JSON `texture`/`save`, release folders inside `Releases`, the work folder and `WriteRoots`, and `exec`'s deny list read word by word as the console reads it, with its `FILE=`, `PACKAGE=` and one-command rules. The dialog watchdog's button (by control id, translated labels, OK only alone, closed when none is safe). No DLL source calls `std::min`/`std::max` while `windows.h`'s macros are live, and every Level Properties name the level spec compiler writes is one `settings.edit` accepts. |
 | `MapCheckJsonModelTests` | Map Check rows and summary as JSON (`mapcheck.run`). |
 | `McpProtocolModelTests` | JSON-RPC messages, protocol version negotiation, capabilities, tool and resource JSON, argument checking against schemas. |
 | `McpServerTests` | The server over strings against a FakeBridge: handshake, lists, the session, query and escape tools, resources, prompts, progress, approval, busy and stale replies, cancellation, launch and restart. |
 | `LevelSpecModelTests` | Spec shape checks with JSON pointers, and `Resources/schemas/level-spec.schema.json` equal to the schema the code checks (`--write-schema` rewrites it). |
-| `LevelSpecCompilerTests` | The Versus starter's pieces equal to Map Design's, every section's wiki defaults, plan order, the Map JSON documents, `$bind` shapes, incremental builds, and the golden plan and render in `tests/mcp/golden` (`--write-golden` rewrites them). |
+| `LevelSpecCompilerTests` | The Versus starter's pieces equal to Map Design's, every section's wiki defaults, plan order, the Map JSON documents, `$bind` shapes, incremental builds, diagnostics at JSON pointers for values the editor cannot take (such as an SMagicEvent delay beyond a day), and the golden plan and render in `tests/mcp/golden` (`--write-golden` rewrites them). |
 | `LevelRulesModelTests` | Every rule in the catalogue has a failing fixture (and all but the summary a passing one), cites a wiki page with a digest, and has the right draft and release severities. |
 | `GeometricEventModelTests` | GE kinds, point order and the wiki's measurements. |
 | `ImageCodecTests` | PNG (every colour type), BMP and TGA decoding against `tests/mcp/fixtures/*.rgba`, inflate and gzip, PNG encoding round trips. |
