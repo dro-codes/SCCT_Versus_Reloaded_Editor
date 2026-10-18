@@ -6,6 +6,7 @@
 #include "McpBridgeModel.h"
 #include "McpEditor.h"
 #include "WorkflowEditor.h"
+#include "WorkflowTools.h"
 #include "EditorExtras.h"
 #include "RebuildAllMaps.h"
 #include "LevelSnapshot.h"
@@ -24,14 +25,16 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 // The ops of McpOps.h that open, save and build maps, take pictures of the
 // viewports, run the checks and write the map's packages: what the File and
-// Build menus, Level Snapshot, Map Check, Lighting Budget, Generate Minimap
-// and the Sound Browser's Build UAS do, without their dialogs. Every handler
+// Build menus, Level Snapshot, Map Check, Lighting Budget, Generate Minimap,
+// the Static Mesh Browser's import and the Sound Browser's Build UAS do,
+// without their dialogs, and what Map Design keeps of the map. Every handler
 // runs on the editor's UI thread with the whole request, {"op", ...args}.
 namespace McpOps
 {
@@ -237,32 +240,57 @@ namespace
             Invalid(name + " is one of the editor's own files (Auto0-9 autosaves, Autoplay for Play Level); choose another name.");
     }
 
-    // A texture package the bridge may write: the map's own, named
-    // <Map>_<anything> as the wiki's Map Packaging page has it (<Map>_TXT).
-    // <Map> itself would clash with the map's package, <Map>-i is written by
-    // interface.texture, and Amb_<Map> holds the map's sounds.
-    void CheckTexturePackage(const std::string& package, const std::string& stem)
+    // A package, group or asset name as the editor's console reads it.
+    void Token(const std::string& value, const std::string& what)
+    {
+        if (value.empty() || value.size() > 63 || value.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos)
+            Invalid(what + " is 1-63 ASCII letters, digits and underscores: \"" + value + "\".");
+    }
+    // The two kinds of package the bridge imports into, the file each saves
+    // to and the name the wiki's Map Packaging page gives it.
+    struct PackageKind { const char* assets; const char* folder; const char* extension; const char* suffix; const char* what; };
+    constexpr PackageKind kTextures{"material", "Textures", ".utx", "_TXT", "Textures"};
+    constexpr PackageKind kMeshes{"staticmesh", "StaticMeshes", ".usx", "_STM", "Static meshes"};
+
+    // A package the bridge may write: the map's own, named <Map>_<anything>
+    // as the wiki's Map Packaging page has it (<Map>_TXT, <Map>_STM). <Map>
+    // itself would clash with the map's package, <Map>-i is written by
+    // interface.texture, and Amb_<Map> holds the map's sounds. No file of
+    // another kind may have its base name.
+    void CheckPackage(const std::string& package, const std::string& stem, const PackageKind& kind)
     {
         if (Same(package, stem + "-i")) Refuse("The interface package is written by interface.texture, through the map save.", "interface_package");
-        Workflow::Authoring::AssetName(package, "Package");
+        Token(package, "A package name");
         if (!Bridge::MapOwnedPackage(package, stem))
-            Refuse("Only the map's own packages are written over the bridge, never a stock one: name it " + stem + "_TXT (or " + stem + "_<anything>).", "not_map_owned");
+            Refuse("Only the map's own packages are written over the bridge, never a stock one: name it " + stem + kind.suffix + " (or " + stem + "_<anything>).", "not_map_owned");
         if (Lower(package).rfind(Lower(stem) + "_", 0) != 0)
-            Refuse("Textures go in " + stem + "_TXT (or " + stem + "_<anything>): a package named " + package + " would clash with the map's own or its sounds, as packages of one base name are one package to the engine.", "package_name");
+            Refuse(std::string(kind.what) + " go in " + stem + kind.suffix + " (or " + stem + "_<anything>): a package named " + package +
+                   " would clash with the map's own or its sounds, as packages of one base name are one package to the engine.", "package_name");
         for (const auto& [folder, extension] : std::initializer_list<std::pair<const char*, const char*>>{
-                 {"StaticMeshes", ".usx"}, {"Sounds", ".uax"}, {"Animations", ".ukx"}, {"Maps", ".sdc"}, {"MapsEd", ".sdc"}})
+                 {"Textures", ".utx"}, {"Textures", ".utc"}, {"StaticMeshes", ".usx"}, {"Sounds", ".uax"}, {"Animations", ".ukx"}, {"Maps", ".sdc"}, {"MapsEd", ".sdc"}})
         {
+            if (Same(folder, kind.folder) && Same(extension, kind.extension)) continue;
             std::error_code error;
             const auto other = Root() / "Packages" / folder / (package + extension);
             if (fs::exists(other, error))
                 Refuse(Text(other) + " already has the base name " + package + "; packages of one base name are one package to the engine. Choose another name.", "package_name");
         }
     }
-    // Whether anything of the package is in memory (its file was loaded or
-    // something was imported into it).
-    bool PackageLoaded(const std::string& package)
+    // The loaded asset of a kind at exactly this path, or null.
+    Json AssetAt(const std::string& path, const char* kind)
     {
-        auto found = Editor::SearchAssets("material", package + ".", 50);
+        const auto found = Editor::SearchAssets(kind, path, 50);
+        const auto& assets = found.is_object() && found.contains("assets") ? found.at("assets") : found;
+        if (assets.is_array())
+            for (const auto& asset : assets)
+                if (asset.is_object() && Same(asset.value("path", std::string()), path)) return asset;
+        return Json();
+    }
+    // Whether the package holds assets of a kind in memory (its file was
+    // loaded or something was imported into it).
+    bool PackageLoaded(const std::string& package, const char* kind = "material")
+    {
+        auto found = Editor::SearchAssets(kind, package + ".", 50);
         const auto& assets = found.is_object() && found.contains("assets") ? found.at("assets") : found;
         const auto prefix = Lower(package + ".");
         if (assets.is_array())
@@ -272,6 +300,15 @@ namespace
                 if (Lower(path).rfind(prefix, 0) == 0) return true;
             }
         return false;
+    }
+    // Which file package.save writes: the one the package already has, else
+    // .usx for a package of static meshes and .utx for one of textures.
+    const PackageKind& SaveKind(const std::string& package)
+    {
+        std::error_code error;
+        if (fs::exists(Root() / "Packages" / kTextures.folder / (package + kTextures.extension), error)) return kTextures;
+        if (fs::exists(Root() / "Packages" / kMeshes.folder / (package + kMeshes.extension), error)) return kMeshes;
+        return PackageLoaded(package, kMeshes.assets) ? kMeshes : kTextures;
     }
 
     // Damage warnings a map load raises go into the reply, not a message box.
@@ -416,7 +453,7 @@ namespace
     {
         const auto stem = NamedMap("a texture package");
         const auto package = q.at("package").get<std::string>();
-        CheckTexturePackage(package, stem);
+        CheckPackage(package, stem, kTextures);
         const auto fileText = q.at("file").get<std::string>();
         const auto file = Workflow::Authoring::Utf8Path(fileText);
         if (file.is_relative()) Invalid("Give the image's full path: " + fileText);
@@ -440,21 +477,24 @@ namespace
 
     Json SavePackage(const Json& q)
     {
-        const auto stem = NamedMap("a texture package");
+        const auto stem = NamedMap("a package");
         const auto package = q.at("package").get<std::string>();
-        CheckTexturePackage(package, stem);
-        const auto folder = Root() / "Packages" / "Textures";
-        const auto file = folder / (package + ".utx");
+        Token(package, "A package name");
+        const auto& kind = SaveKind(package);
+        CheckPackage(package, stem, kind);
+        const auto folder = Root() / "Packages" / kind.folder;
+        const auto file = folder / (package + kind.extension);
         std::error_code error;
         fs::create_directories(folder, error);
-        Json result{{"package", package}, {"file", Text(file)}};
-        if (!PackageLoaded(package)) Refuse(package + " is not in memory, so there is nothing to save. Import a texture into it with asset.texture first.", "not_loaded");
+        Json result{{"package", package}, {"file", Text(file)}, {"kind", &kind == &kMeshes ? "staticmesh" : "texture"}};
+        if (!PackageLoaded(package, kind.assets))
+            Refuse(package + " is not in memory, so there is nothing to save. Import into it with asset.texture or asset.mesh first.", "not_loaded");
         if (fs::exists(file, error))
         {
             if (!q.value("overwrite", false)) Refuse(Text(file) + " exists. Pass \"overwrite\": true to replace it (the old file is backed up first).", "exists");
             const auto backups = Editor::Directory() / "map-json-backups";
             fs::create_directories(backups, error);
-            const auto backup = backups / (package + "." + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".utx");
+            const auto backup = backups / (package + "." + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + kind.extension);
             if (!fs::copy_file(file, backup, fs::copy_options::overwrite_existing, error)) throw std::runtime_error("Cannot back up " + Text(file) + "; it was not replaced.");
             result["backup"] = Text(backup);
         }
@@ -462,6 +502,137 @@ namespace
         if (!Editor::Exec("OBJ SAVEPACKAGE PACKAGE=\"" + package + "\" FILE=\"" + EnginePath(file) + "\"") || !fs::exists(file, error) || fs::last_write_time(file, error) < started)
             throw std::runtime_error("The editor did not save " + package + " to " + Text(file) + ".");
         result["size"] = fs::file_size(file, error);
+        return result;
+    }
+
+    // What an ASCII Scene Export holds: the objects drawn, and the MCD ones
+    // (MCDCX_ convex hulls and the like) the importer makes the mesh's
+    // collision of instead. Without any, every triangle collides.
+    struct AseObjects { size_t visible = 0, collision = 0; };
+    AseObjects ReadAse(const fs::path& file)
+    {
+        std::error_code error;
+        const auto size = fs::file_size(file, error);
+        if (error) Invalid("Cannot read " + Text(file) + ".");
+        if (size > 256u * 1024 * 1024) Invalid(Text(file.filename()) + " is over 256 MiB; split the model before importing it.");
+        std::ifstream in(file, std::ios::binary);
+        if (!in) Invalid("Cannot read " + Text(file) + ".");
+        AseObjects objects;
+        bool header = false, pending = false;
+        size_t lines = 0;
+        for (std::string line; std::getline(in, line); ++lines)
+        {
+            if (!header)
+            {
+                if (line.find("*3DSMAX_ASCIIEXPORT") != std::string::npos) header = true;
+                else if (lines > 8) break;
+                continue;
+            }
+            if (line.find("*GEOMOBJECT") != std::string::npos) { pending = true; continue; }
+            if (!pending) continue;
+            const auto at = line.find("*NODE_NAME");
+            if (at == std::string::npos) continue;
+            const auto open = line.find('"', at), close = open == std::string::npos ? open : line.find('"', open + 1);
+            const auto name = close == std::string::npos ? std::string() : line.substr(open + 1, close - open - 1);
+            ++(Lower(name).rfind("mcd", 0) == 0 ? objects.collision : objects.visible);
+            pending = false;
+        }
+        if (!header) Invalid(Text(file.filename()) + " is not an ASCII Scene Export (no *3DSMAX_ASCIIEXPORT header). Export the model as ASE, or give assets_import an .obj to convert.");
+        return objects;
+    }
+
+    // The Static Mesh Browser's Import, through the console command the
+    // browser and RE+'s conveyor belts use. A mesh is never replaced: actors
+    // that use it would change shape with no Undo.
+    Json ImportMesh(const Json& q)
+    {
+        for (const char* key : {"file", "package", "name"})
+            if (!q.contains(key) || !q.at(key).is_string())
+                Invalid(std::string("asset.mesh takes file (the .ase's full path), package (<Map>_STM) and name; ") + key + " is missing or not text.");
+        if (q.contains("group") && !q.at("group").is_null() && !q.at("group").is_string()) Invalid("asset.mesh: group is text.");
+        const auto stem = NamedMap("a static mesh package");
+        const auto package = q.at("package").get<std::string>();
+        const auto name = q.at("name").get<std::string>();
+        const auto group = q.contains("group") && !q.at("group").is_null() ? q.at("group").get<std::string>() : std::string();
+        Token(package, "A package name");
+        Token(name, "A static mesh name");
+        if (!group.empty()) Token(group, "A group name");
+        CheckPackage(package, stem, kMeshes);
+        const auto fileText = q.at("file").get<std::string>();
+        const auto file = Workflow::Authoring::Utf8Path(fileText);
+        if (file.is_relative()) Invalid("Give the .ase file's full path: " + fileText);
+        if (!Bridge::EngineSafePath(fileText)) Invalid("The editor's importer reads plain ASCII paths without quotes: copy the file to such a path first (" + fileText + ").");
+        if (Lower(Workflow::Authoring::Utf8Text(file.extension())) != ".ase")
+            Invalid("The editor imports static meshes from ASCII Scene Export (.ase) files, not " + Text(file.filename()) + "; assets_import converts .obj models.");
+        std::error_code error;
+        if (!fs::is_regular_file(file, error)) Invalid("There is no file at " + fileText + ".");
+        const auto objects = ReadAse(file);
+        if (!objects.visible)
+            Invalid(Text(file.filename()) + " has no geometry to draw" + (objects.collision ? " (only MCD collision objects)." : "."));
+
+        // collision: true (or "hulls") needs the file's own collision
+        // objects; false (or "triangles") accepts per-triangle collision.
+        std::string collision = "auto";
+        if (q.contains("collision") && !q.at("collision").is_null())
+        {
+            const auto& c = q.at("collision");
+            if (c.is_boolean()) collision = c.get<bool>() ? "hulls" : "triangles";
+            else if (c.is_string() && (c == "auto" || c == "hulls" || c == "triangles")) collision = c.get<std::string>();
+            else Invalid("collision is \"auto\", \"hulls\" (the file must carry MCDCX_ collision objects) or \"triangles\" (every triangle collides).");
+        }
+        Json warnings = Json::array();
+        if (!objects.collision)
+        {
+            const std::string why = Text(file.filename()) + " has no MCDCX_ collision objects, so every triangle of " + name +
+                                    " collides, which the wiki (static-meshes) says is worse for performance. Add convex hulls named MCDCX_" + name + "_1, MCDCX_" + name +
+                                    "_2 ... in the modelling tool";
+            if (collision == "hulls") Invalid(why + ", then import again.");
+            if (collision == "auto") warnings.push_back(why + ", or pass collision \"triangles\" to accept it.");
+        }
+
+        // A package with a file that nothing of is in memory is read first,
+        // so the mesh joins what the file holds and package.save keeps it.
+        const auto existing = Root() / "Packages" / kMeshes.folder / (package + kMeshes.extension);
+        bool load = false;
+        if (fs::exists(existing, error) && !PackageLoaded(package, kMeshes.assets) && !PackageLoaded(package, kTextures.assets))
+        {
+            std::string output;
+            Editor::Exec("OBJ LOAD FILE=\"" + EnginePath(existing) + "\"", output);
+            if (!PackageLoaded(package, kMeshes.assets) && !PackageLoaded(package, kTextures.assets))
+                throw std::runtime_error("The editor did not load " + Text(existing) + ", so a mesh imported into " + package + " would replace what the file holds. Open the package in the Static Mesh Browser first.");
+            load = true;
+        }
+        const auto path = package + (group.empty() ? std::string() : "." + group) + "." + name;
+        for (const char* kind : {kMeshes.assets, kTextures.assets, "sound"})
+            if (!AssetAt(path, kind).is_null())
+                Refuse(path + " already exists. Import under a new name: asset.mesh never replaces an asset, as the actors using it would change with no Undo.", "exists", {{"path", path}});
+
+        std::string command = "STATICMESH IMPORT FILE=\"" + fileText + "\" NAME=\"" + name + "\" PACKAGE=\"" + package + "\"";
+        if (!group.empty()) command += " GROUP=\"" + group + "\"";
+        std::string output;
+        const bool accepted = Editor::Exec(command, output);
+        const auto mesh = AssetAt(path, kMeshes.assets);
+        if (mesh.is_null())
+        {
+            auto said = output.substr(0, std::min<size_t>(output.size(), 600));
+            while (!said.empty() && (said.back() == '\r' || said.back() == '\n' || said.back() == ' ')) said.pop_back();
+            throw std::runtime_error("The editor's static mesh importer did not create " + path + " from " + fileText + (accepted ? "" : " (it refused the command)") +
+                                     (said.empty() ? std::string(".") : ": " + said));
+        }
+        return {{"mesh", path}, {"package", package}, {"bounds", mesh.value("bounds", Json())}, {"loaded", load},
+                {"collision", {{"objects", objects.collision}, {"mode", objects.collision ? "hulls" : "triangles"}}}, {"objects", objects.visible}, {"warnings", warnings},
+                {"note", "Imported in memory: save the package with package.save to keep it (Packages\\StaticMeshes\\" + package + ".usx)."}};
+    }
+
+    // What Map Design keeps of the open map in the workflow library: its
+    // pieces (design.block / design.blockbatch records) and elements.
+    Json DesignPieces(const Json&)
+    {
+        const auto entry = WorkflowTools::LibraryEntry();
+        const auto design = entry.is_object() && entry.contains("design") && entry.at("design").is_object() ? entry.at("design") : Json::object();
+        auto list = [&](const char* key) { return design.contains(key) && design.at(key).is_array() ? design.at(key) : Json::array(); };
+        Json result{{"pieces", list("pieces")}, {"elements", list("elements")}, {"map", Editor::AuthoringMap()}};
+        result["count"] = result["pieces"].size();
         return result;
     }
 
@@ -528,8 +699,11 @@ void RegisterLifecycle()
     Read("mapcheck.run", [](const Json&) -> Json { return MapCheck::ToJson(MapCheck::Measure()); });
     Read("lighting.budget", [](const Json&) -> Json { return LightingBudget::Measure(); });
 
+    Read("design.pieces", DesignPieces);
+
     // Packages and assets: the map's own only.
     Write("asset.texture", ImportTexture);
+    Write("asset.mesh", ImportMesh);
     Write("package.save", SavePackage);
     Write("interface.texture", InterfaceTexture);
     Write("minimap.apply", [](const Json& q) -> Json { return MinimapWindow::Apply(q); });
