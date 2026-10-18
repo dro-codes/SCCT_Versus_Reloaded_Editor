@@ -16,7 +16,7 @@ arguments:
     default: release
 wiki: [index, spawn-points, game-modes, level-ingredients, alarms, zones-and-volumes, map-settings]
 docs: [tools]
-rules: true
+rules: false
 ---
 # Create an SCCT Versus level from a description
 
@@ -32,6 +32,8 @@ You are building a playable **SCCT Versus** map (Spies vs Mercenaries) in the RE
 **Finish at profile:** {{profile}}.
 
 The SCCT Versus wiki digests and the rule catalogue are embedded below. They are the source of truth. Use class and property names exactly as written there.
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

@@ -9,6 +9,10 @@
 #include "../Reloaded.Editor.Mcp/FakeBridge.h"
 #include "../Reloaded.Editor.Mcp/McpProtocolModel.h"
 #include "../Reloaded.Editor.Mcp/Tools/Common.h"
+// map_validate's offline path shares the compiler with these tools, so its
+// output schema and offline fixes are checked here too; the suite's link
+// line (tools/test_mcp.sh) does not carry ValidateTools.cpp.
+#include "../Reloaded.Editor.Mcp/Tools/ValidateTools.cpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -245,7 +249,34 @@ void Registration()
     // A fragment may name an item by id alone: required fields are loosened to the id.
     const auto& device=h.registry.FindTool("security")->inputSchema.at("properties").at("devices").at("items");
     Check(device.at("required")==Json::array({"id"}),"devices need only their id in a fragment");
-    Check(Protocol::CheckArguments(h.registry.FindTool("security")->inputSchema,{{"devices",Json::array({{{"id","X"},{"bogus",1}}})}})!="","unknown fields are still refused");
+    // The outline leaves the item's fields to the spec check, which names the pointer.
+    auto bogus=h.Call("security",{{"devices",Json::array({{{"id","X"},{"kind","laser"},{"bogus",1}}})}});
+    Check(bogus.isError && bogus.structured.at("details").at("pointer").get<std::string>().find("/security/devices")==0 &&
+          bogus.content.front().text.find("bogus")!=std::string::npos,"unknown fields are still refused, at their pointer");
+    // Lifts make their own doors; the description says so (and never to model them as doors).
+    const auto& mechanisms=h.registry.FindTool("mechanisms")->description;
+    Check(mechanisms.find("doorMesh")!=std::string::npos && mechanisms.find("SLiftDoor")!=std::string::npos && mechanisms.find("carSwitch")!=std::string::npos &&
+          mechanisms.find("Lift doors are not made")==std::string::npos,"mechanisms describes the lift doors it makes");
+    // tools/list stays small: the shared paragraphs live in scct://docs/tools.
+    size_t total=0;
+    for(const auto& t:h.registry.tools)
+    {
+        const auto size=Protocol::ToolJson(t,"2025-06-18").dump().size();
+        total+=size;
+        Check(size<4500,t.name+" is "+std::to_string(size)+" bytes in tools/list");
+        Check(t.description.find("scct://docs/tool")!=std::string::npos,t.name+" points at the shared docs");
+        Check(t.description.find("How it works: the arguments are laid over")==std::string::npos,t.name+" does not repeat the shared paragraph");
+    }
+    Check(total<32000,"the spec and intent tools take "+std::to_string(total)+" bytes");
+    // Every intent argument has its place in the spec (Tools::SpecPointer, which offline fixes use).
+    const std::set<std::string> common{"mode","dryRun","label","remove","existing","build","screenshot","save","force","mapName","brushMode","removeModes","minimap"};
+    for(const auto& name:names)
+    {
+        if(name=="level_spec_validate" || name=="level_build")continue;
+        for(const auto& [property,schema]:h.registry.FindTool(name)->inputSchema.at("properties").items())
+            if(!common.count(property) || (name=="map_settings" && property=="mapName"))
+                Check(!Tools::SpecPointer(name,property).empty(),name+"."+property+" has a spec pointer");
+    }
 }
 
 void ValidateExamples()
@@ -480,6 +511,119 @@ void GeometricEvents()
     Check(h.editor.sidecar.at("spec").at("ges").size()==2 && FindStep(h.editor.LastPlan(),"ge1") && !FindStep(h.editor.LastPlan(),"ge2"),"GEs add up and only the new one is made");
 }
 
+// Every result keeps to its tool's outputSchema; an error carries
+// structuredContent only when it fits (clients validate it even with isError).
+void OutputSchemas()
+{
+    Harness h;
+    RegisterValidateTools(h.registry);
+    h.Ok("level_build",{{"spec",Example("versus-starter")},{"mode","apply"}});
+    auto sent=[&](const Tool& tool,const Json& args,const std::string& what,int expectError)
+    {
+        const auto r=tool.run(args,h.context);
+        if(expectError>=0)Check(r.isError==(expectError==1),tool.name+" "+what+(r.isError?" failed":" worked")+": "+(r.content.empty()?std::string():r.content.front().text.substr(0,600)));
+        const auto reply=Protocol::ToolResultJson(r,"2025-06-18",tool.outputSchema);
+        if(!r.isError)Check(reply.contains("structuredContent"),tool.name+" "+what+": a result has structured content");
+        if(reply.contains("structuredContent"))
+        {
+            const auto problem=Protocol::CheckStructured(tool.outputSchema,reply.at("structuredContent"));
+            Check(problem.empty(),tool.name+" "+what+": "+problem);
+        }
+        return reply;
+    };
+    for(const auto& tool:h.registry.tools)
+    {
+        if(!tool.outputSchema.is_object())continue;
+        Json working=Json{{"remove",Json::array()},{"mode","preview"}},broken=Json::object();
+        if(tool.name=="level_spec_validate")working={{"path","scct://examples/versus-starter"},{"render",false}};
+        if(tool.name=="level_build")working={{"spec",Example("versus-starter")}};
+        if(tool.name=="map_validate")working={{"spec",Example("versus-starter")}};
+        if(tool.name=="geometric_events")broken={{"remove",Json::array({"NoSuchGe"})}};
+        sent(tool,working,"working",0);
+        sent(tool,broken,"with nothing to do",tool.name=="map_validate"?-1:1);
+        sent(tool,{{"path","C:/no/such/spec.level.json"}},"with a missing file",tool.name=="level_spec_validate" || tool.name=="level_build" || tool.name=="map_validate"?1:-1);
+        h.editor.fake.connected=false;
+        sent(tool,working,"without an editor",-1);
+        h.editor.fake.connected=true;
+    }
+    // The two with required fields leave structuredContent out of their errors.
+    const auto* validate=h.registry.FindTool("map_validate");
+    h.editor.state["open"]=false;
+    const auto closed=sent(*validate,Json::object(),"with no map open",1);
+    Check(!closed.contains("structuredContent") && closed.at("content")[0].at("text").get<std::string>().find("No map is open")!=std::string::npos,"map_validate's error is text only");
+    h.editor.state["open"]=true;
+    const auto missing=sent(*h.registry.FindTool("level_spec_validate"),{{"path","scct://map/spec"}},"with the live spec's uri",1);
+    Check(!missing.contains("structuredContent") && missing.at("content")[0].at("text").get<std::string>().find("map_query")!=std::string::npos,"level_spec_validate's error is text only, and points at map_query");
+}
+// A spec checked offline is fixed by editing it, not by the intent tools,
+// which would change the open map instead.
+void OfflineFixes()
+{
+    Harness h;
+    RegisterValidateTools(h.registry);
+    const auto bare=Level(R"({"map":{"name":"SMALL"},"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[1024,1024,256],"at":[0,0]}]},
+        "gameplay":{"modes":["deathmatch"],"deathmatch":{"mission":{"id":"Match"}}}})");
+    const std::set<std::string> intents{"blockout","gameplay","security","mechanisms","events","environment","geometric_events","map_settings"};
+    auto offline=[&](const Json& list,const std::string& what)
+    {
+        size_t edits=0;
+        std::set<std::string> pointers;
+        for(const auto& d:list)
+        {
+            if(!d.contains("fix"))continue;
+            const auto& fix=d.at("fix");
+            Check(!intents.count(fix.value("tool",std::string())),what+": "+d.value("rule",std::string())+" is fixed in the spec, not with "+fix.value("tool",std::string()));
+            if(fix.contains("spec"))for(const auto& e:fix.at("spec")){++edits;pointers.insert(e.at("pointer").get<std::string>());Check(e.contains("merge") || e.contains("change"),what+": an edit says what to write");}
+        }
+        Check(edits>0 && pointers.count("/spawns") && pointers.count("/security/camnet"),what+": the spawn and CamNet fixes are spec edits");
+    };
+    const auto checked=h.Ok("level_spec_validate",{{"spec",bare},{"render",false}});
+    Check(checked.structured.at("valid")==false,"the bare spec has errors");
+    offline(checked.structured.at("diagnostics"),"level_spec_validate");
+    for(const auto& n:checked.structured.at("next"))Check(!intents.count(n.value("tool",std::string())),"level_spec_validate suggests no intent tool");
+    const auto validated=h.Ok("map_validate",{{"spec",bare}});
+    offline(validated.structured.at("findings"),"map_validate spec");
+    for(const auto& n:validated.structured.at("next"))Check(!intents.count(n.value("tool",std::string())),"map_validate offline suggests no intent tool");
+    // From a file, the next check is of that file.
+    const auto file=h.dir/"bare.level.json";
+    {std::ofstream(file)<<bare.dump();}
+    const auto byPath=h.Ok("map_validate",{{"path",file.string()}});
+    Check(byPath.structured.at("summary").at("source")=="spec" && byPath.structured.at("next").at(0).at("args").at("path")==file.string(),"map_validate takes a path and checks it again");
+    for(const auto& op:h.editor.fake.Ops())Check(op=="authoring.schema","offline, the editor is only asked for its schema, not "+op);
+    // The edit means what it says: merged at its pointer, the error goes.
+    auto fixed=bare;
+    for(const auto& d:checked.structured.at("diagnostics"))
+        if(d.value("rule",std::string()).rfind("spawns.team",0)==0)
+            for(const auto& e:d.at("fix").at("spec"))
+                if(e.contains("merge"))fixed[Json::json_pointer(e.at("pointer").get<std::string>())]=Spec::Merge(fixed.value(Json::json_pointer(e.at("pointer").get<std::string>()),Json::object()),e.at("merge"));
+    fixed["spawns"]["spy"]["in"]="Hall";fixed["spawns"]["merc"]["in"]="Hall";
+    const auto again=h.Ok("level_spec_validate",{{"spec",fixed},{"render",false}});
+    for(const auto& d:again.structured.at("diagnostics"))Check(d.value("rule",std::string()).rfind("spawns.team-missing",0)!=0,"the spawn fix took");
+}
+// A preview with errors saves the spec it built and points
+// level_spec_validate at that file (scct://map/spec is no file).
+void PreviewSpecFile()
+{
+    Harness h;
+    h.Ok("level_build",{{"spec",Example("versus-starter")},{"mode","apply"}});
+    auto preview=h.Ok("gameplay",{{"spawns",{{"spy",{{"in","Nowhere"}}}}},{"mode","preview"}});
+    const auto& next=preview.structured.at("next");
+    size_t checks=0;
+    for(const auto& n:next)
+    {
+        Check(n.dump().find("scct://map/spec")==std::string::npos,"no next step names scct://map/spec");
+        checks+=n.value("tool",std::string())=="level_spec_validate";
+    }
+    Check(checks==1 && next.at(0).at("tool")=="level_spec_validate","one level_spec_validate step, first: "+next.dump());
+    const auto file=next.at(0).at("args").at("path").get<std::string>();
+    Check(preview.structured.at("specFile")==file && std::filesystem::exists(std::filesystem::path(file)),"the built spec is saved in the work folder");
+    const auto checked=h.Ok("level_spec_validate",{{"path",file},{"render",false}});
+    Check(checked.structured.at("valid")==false && checked.structured.at("summary").at("errors").get<int>()>0,"and level_spec_validate reads it and shows the errors");
+    // An apply blocked by errors points at the file too.
+    auto blocked=h.Call("gameplay",{{"spawns",{{"spy",{{"in","Nowhere"}}}}}});
+    Check(blocked.isError && blocked.structured.at("next").at(0).at("args").contains("path"),"a blocked apply points level_spec_validate at the saved spec");
+}
+
 int main()
 {
     try
@@ -493,6 +637,9 @@ int main()
         FreshMap();
         MapSettingsTool();
         GeometricEvents();
+        OutputSchemas();
+        OfflineFixes();
+        PreviewSpecFile();
     }
     catch(const std::exception& e){std::cerr<<"McpSpecToolsTests failed: "<<e.what()<<"\n";return 1;}
     std::cout<<"McpSpecToolsTests passed\n";

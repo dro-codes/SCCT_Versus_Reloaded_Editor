@@ -7,6 +7,7 @@
 #include "Common.h"
 #include "../ImageCodec.h"
 #include "../../Reloaded.Editor/LevelSnapshotModel.h"
+#include "../../Reloaded.Editor/McpSafetyModel.h"
 #include <set>
 
 namespace Mcp
@@ -735,6 +736,40 @@ namespace
         }
         return packs;
     }
+    // The release copy's folder as given, checked the way the editor checks
+    // it (McpLifecycle.cpp, which refuses it too): a full path inside
+    // <Game>\Releases, the work folder or [Mcp] WriteRoots, since with
+    // overwrite the copy replaces the map's files there. Checked here first,
+    // so the agent hears why before the map is saved. "" when none is given.
+    std::string ReleaseFolder(const Json& a, ToolContext& c, const std::string& stem)
+    {
+        if (!Has(a, "folder")) return {};
+        const auto text = RequireString(a, "folder");
+        const auto folder = Utf8Path(text);
+        const auto standard = GameRoot(c) / "Releases" / Utf8Path(stem);
+        if (folder.is_relative()) throw std::runtime_error("folder is the release folder's full path, such as " + PathText(standard) + ": " + text);
+        std::vector<fs::path> roots;
+        std::error_code error;
+        auto add = [&](const fs::path& root)
+        {
+            if (root.empty() || root.is_relative()) return;
+            const auto canonical = fs::weakly_canonical(root, error);
+            roots.push_back(error ? root.lexically_normal() : canonical);
+        };
+        add(GameRoot(c) / "Releases");
+        add(c.workDir);
+        const auto mcp = IniSection(c.systemDir / "Reloaded_Editor.ini", "Mcp");
+        if (const auto found = mcp.find("writeroots"); found != mcp.end())
+            for (const auto& root : Safety::SplitRoots(found->second)) add(fs::path(root)); // the INI is ANSI, as path's narrow form
+        auto resolved = fs::weakly_canonical(folder, error);
+        if (error) resolved = folder.lexically_normal();
+        if (!Safety::InsideAny(resolved, roots))
+            throw Bridge::Error(Bridge::Code::Refused, "The release copy is written only in the game's Releases folder, the work folder and [Mcp] WriteRoots (" + Safety::RootList(roots) +
+                                                           "), not " + PathText(resolved) + ". Leave folder out for " + PathText(standard) +
+                                                           ", or ask the user to add the folder to WriteRoots in System\\Reloaded_Editor.ini.",
+                                "outside_write_roots");
+        return text;
+    }
     // optimise.release: the release copy, with the assets the map uses from
     // the packs moved into it. Null when there is nothing to move.
     Json ReleaseCopy(const Json& a, ToolContext& c, const Survey& s, const std::vector<std::string>& packs, const std::string& label, bool dry, Outcome& o, std::string& assetPackage)
@@ -756,7 +791,7 @@ namespace
                 if (Lower(p) == Lower(assetPackage)) throw std::runtime_error("assetPackage cannot be one of the packs.");
             args["assetPackage"] = assetPackage;
         }
-        if (Has(a, "folder")) args["folder"] = RequireString(a, "folder");
+        if (const auto folder = ReleaseFolder(a, c, s.stem); !folder.empty()) args["folder"] = folder;
         c.progress(0, 1, "Making the release copy (Optimise Map Assets): " + Join(packs));
         const auto result = Call(c, "optimise.release", args, label, dry, 1800000);
         if (dry) return result;
@@ -959,52 +994,40 @@ void RegisterReleaseTools(Registry& registry)
     t.name = "release";
     t.title = "Check and package the map for release";
     t.description =
-        "Takes a finished map to a shareable release by the wiki's rules (scct://wiki/map-packaging, scct://wiki/sound-browser, scct://wiki/map-settings). "
-        "action check (changes nothing) reads the game folder beside this server and, when the map is open, the editor: "
-        "the file name (ASCII without spaces; the wiki's convention is the first 4 letters of the map name plus a suffix letter, D for the default version: Aquarius -> AquaD); "
-        "Packages\\MapsEd\\<Map>.sdc (needed to edit the map ever again) and the playable Packages\\Maps\\<Map>.sdc every save writes, not older than it; "
-        "unique package base names (the engine ignores extensions, so Textures\\X.utx and StaticMeshes\\X.usx are one package; name them <Map>_TXT.utx, <Map>_STM.usx, Amb_<Map>.uax, "
-        "never <Map> alone); Packages\\Textures\\<Map>-i.utc with SMapSettings and the four interface textures (Menu and Briefing 256x256 DXT5, LoadingATT0 and LoadingDEF0 512x512 DXT1), "
-        "and no stray <Map>-i.utx (the game ignores it: delete it); Packages\\Sounds\\<Map>.uas, which the wiki says to always build, with Interface (objective sounds, win/lose music) "
-        "and Amb_<Map> (read from the build log RE+ writes beside it; a .uas built elsewhere cannot be verified); the packages the map imports (its own must be saved and shipped; "
-        "the rest must be stock packages players have, never modified: pass base, a clean install, to compare them byte for byte); and Optimise Map Assets' suggestions. "
-        "It returns findings {severity, rule, wikiPage, message, fix}, ready, the archive layout and a release block for map_validate. "
-        "action sounds builds Packages\\Sounds\\<Map>.uas (replacing the old one) from Interface, Amb_<Map> and packages, at Ogg Vorbis quality 5.0 (Ubisoft's; lower is not recommended); "
-        "streamed sounds must be flagged Stream in the Sound Browser first. "
-        "action optimise shows Optimise Map Assets' report, or with packs (or suggested: true) saves the map and makes its release copy in <Game>\\Releases\\<Map> (or folder) "
-        "with only the assets it uses from those packs, moved inside the map (destination map, the default) or into a new package of its own (destination package, assetPackage <Map>_<name>); "
-        "the working map and the packs end as they were. "
-        "action package does the same when packs are given, then lists the archive: Packages\\Maps\\<Map>.sdc, Packages\\MapsEd\\<Map>.sdc (keep it: a Maps file cannot be turned back), "
-        "Packages\\Textures\\<Map>-i.utc, Packages\\Sounds\\<Map>.uas and the map's own packages, with each file's source, size and whether it is there. "
-        "action interface imports images (menu, briefing, loadingAtt, loadingDef: full paths; PNG, JPEG and BMP are fitted to the slot, TGA and DDS must already be its size) "
-        "into <Map>-i; give Menu the SCCT fade mask (map-settings). "
-        "The map must be saved under its release name first (map_file save_as). Stock packages are never written: every package this tool writes is the map's own. Files are not undoable.";
-    Json quality = S::Number("sounds: Ogg Vorbis quality, 0-10. Default 5.0, as Ubisoft shipped; lower is not recommended.");
+        "Takes a finished map to a shareable release by the wiki's rules (scct://wiki/map-packaging, sound-browser, map-settings). The map must be saved under "
+        "its release name first (map_file save_as). Every package it writes is the map's own; files are not undoable. Details: "
+        "scct://docs/tool-reference#release.\n"
+        "- check (read-only): the file name, the MapsEd and Maps copies, package base names, <Map>-i.utc with SMapSettings and the four interface textures, the "
+        ".uas with Interface and Amb_<Map>, the packages the map imports (base, a clean install, compares stock ones byte for byte) and Optimise Map Assets' "
+        "suggestions. Returns findings, ready, the archive layout and a release block for map_validate.\n"
+        "- sounds: builds Packages\\Sounds\\<Map>.uas from Interface, Amb_<Map> and packages (quality 5.0).\n"
+        "- optimise: Optimise Map Assets' report; with packs (or suggested) it saves the map and makes the release copy in <Game>\\Releases\\<Map> (or folder), "
+        "the assets the map uses from those packs moved inside it (destination map) or into assetPackage (destination package).\n"
+        "- package: the same with packs, then the archive's file list.\n"
+        "- interface: images {menu, briefing, loadingAtt, loadingDef} into <Map>-i.";
+    Json quality = S::Number("sounds: Ogg Vorbis quality. Default 5.0, as Ubisoft shipped.");
     quality["minimum"] = 0;
     quality["maximum"] = 10;
     t.inputSchema = S::Mutating(S::Input(
-        {{"action", S::Enum({"check", "sounds", "optimise", "package", "interface"}, "What to do: check (read only), sounds (.uas), optimise (report or release copy), package (archive list), interface (textures).")},
-         {"check", S::Boolean("Same as action \"check\" (the form map_validate's fixes use).")},
-         {"sounds", S::Boolean("Same as action \"sounds\".")},
-         {"optimise", S::Boolean("Same as action \"optimise\".")},
-         {"package", S::Boolean("Same as action \"package\".")},
-         {"interface", S::Boolean("Same as action \"interface\".")},
-         {"map", S::String("check, package: the map's file name (\"AquaD\" or \"AquaD.sdc\"). Default: the map open in the editor. The other actions work on the open map and refuse another name.")},
-         {"mapName", S::String("check: the map's display name (Map Settings MapName), for the file name convention. Default: the level spec's map.name, when the map was built from one.")},
-         {"base", S::String("check, optimise: the folder of a clean game install. Stock packages the map uses are compared with its copies byte for byte, and Optimise Map Assets skips what players already have.")},
-         {"packages", S::Array(S::String("A sound package name, such as Amb_Aqua."), "sounds: more packages for the .uas; Interface and Amb_<Map> are always included.", 32)},
+        {{"action", S::Enum({"check", "sounds", "optimise", "package", "interface"}, "What to do.")},
+         {"check", S::Boolean("Same as that action (the form map_validate's fixes use); so are sounds, optimise, package and interface.")},
+         {"sounds", {{"type", "boolean"}}},
+         {"optimise", {{"type", "boolean"}}},
+         {"package", {{"type", "boolean"}}},
+         {"interface", {{"type", "boolean"}}},
+         {"map", S::String("check, package: the map's file name (\"AquaD\"). Default: the open map, which the other actions need.")},
+         {"mapName", S::String("check: the map's display name, for the file name convention. Default: the level spec's.")},
+         {"base", S::String("check, optimise: the folder of a clean game install, to compare stock packages with.")},
+         {"packages", S::Array({{"type", "string"}}, "sounds: more sound packages; Interface and Amb_<Map> are always in.", 32)},
          {"quality", quality},
-         {"packs", S::Array(S::String("A package name without its extension."), "optimise, package: the packages whose assets the map uses that go into the release copy.", 64)},
-         {"suggested", S::Boolean("optimise, package: take the packs Optimise Map Assets suggests (the map uses less than half of the file) when packs is not given.")},
-         {"destination", S::Enum({"map", "package"}, "optimise, package: where the moved assets go: inside the map (default) or a new package of its own (assetPackage).")},
-         {"assetPackage", S::String("destination package: its name, <Map>_<name>. Default <Map>_STM when that file does not exist.")},
-         {"folder", S::String("optimise, package: the release folder. Default <Game>\\Releases\\<Map>; never the game folder.")},
-         {"overwrite", S::Boolean("optimise, package: replace an earlier release copy's files. Default false.")},
-         {"images", S::Object({{"menu", S::String("Menu (map selection): 256x256, DXT5 with alpha and the SCCT fade mask.")},
-                               {"briefing", S::String("Briefing: 256x256, DXT5 with alpha.")},
-                               {"loadingAtt", S::String("LoadingATT0 (spy loading screen): 512x512 DXT1.")},
-                               {"loadingDef", S::String("LoadingDEF0 (mercenary loading screen): 512x512 DXT1.")}},
-                              {}, "interface: image files (full paths) for the interface textures; any of the four.")}}));
+         {"packs", S::Array({{"type", "string"}}, "optimise, package: packages (no extension) whose assets the map uses that go into the release copy.", 64)},
+         {"suggested", S::Boolean("optimise, package: take the packs Optimise Map Assets suggests.")},
+         {"destination", S::Enum({"map", "package"}, "optimise, package: the moved assets go inside the map (default) or into assetPackage.")},
+         {"assetPackage", S::String("destination package: <Map>_<name>. Default <Map>_STM.")},
+         {"folder", S::String("optimise, package: the release folder, a full path inside <Game>\\Releases, the work folder or [Mcp] WriteRoots. Default <Game>\\Releases\\<Map>.")},
+         {"overwrite", S::Boolean("optimise, package: replace an earlier release copy's files.")},
+         {"images", S::Object({{"menu", {{"type", "string"}}}, {"briefing", {{"type", "string"}}}, {"loadingAtt", {{"type", "string"}}}, {"loadingDef", {{"type", "string"}}}},
+                              {}, "interface: image files (full paths): menu and briefing 256x256 DXT5, loadingAtt and loadingDef 512x512 DXT1.")}}));
     t.outputSchema = S::MutationOutput();
     t.destructive = true;
     t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Release(a, c); }); };

@@ -324,6 +324,24 @@ void Schema()
     const auto d=Diagnostic(b.diagnostics,"schema.enum");
     Check(d && d->severity=="error" && d->pointer=="/mechanisms/doors/0" && d->message.find("TriggerToggle")!=std::string::npos,"an enum value the loaded class lacks is an error naming the choices");
     Check(c.scene.contains("schema"),"the rules see the schema");
+    // authoring.schema lists what Import Map from JSON writes, and the editor
+    // refuses any other property, so one the loaded class lacks is an error.
+    const auto property=Diagnostic(c.diagnostics,"schema.property");
+    bool lacking=false;
+    for(const auto& f:c.diagnostics)lacking=lacking || (f.rule=="schema.property" && f.severity=="error" && f.pointer=="/mechanisms/doors/0/trigger" && f.message.find("fInteractionHeight")!=std::string::npos);
+    Check(property && property->severity=="error" && lacking,"a property a loaded class lacks is an error at the item that wrote it: "+(property?property->pointer+" "+property->message:std::string()));
+    Spec::CompileOptions starts;
+    starts.schema=Json::parse(R"({"classes":{"Engine.PlayerStart":{"class":"Engine.PlayerStart","schema":{}},"Engine.StaticMeshActor":{"error":"No loaded class Engine.StaticMeshActor."}}})");
+    auto teams=Level(R"({"defaults":{"lights":"none"},"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"spawns":{"spy":{"in":"Hall","count":3}},
+        "environment":{"props":[{"id":"Crate","mesh":"Pkg.Crates.Crate","at":{"in":"Hall"}}]}})");
+    const auto t=Spec::Compile(teams,starts);
+    Check(!Diagnostic(t.diagnostics,"schema.property") && Props(t,"SpyStart1").at("TeamNumber")=="0","a new start's TeamNumber is pasted, so it need not be listed");
+    Check(Diagnostic(t.diagnostics,"schema.class") && Diagnostic(t.diagnostics,"schema.class")->severity=="warning","a class the bridge could not load stays a warning: its package may load first");
+    // An entry the bridge could not load does not name the class; the loaded one found by its short name does.
+    Spec::CompileOptions guessed;
+    guessed.schema=Json::parse(R"({"classes":{"Echelon.SoftBodyThing":{"error":"No loaded class Echelon.SoftBodyThing."},"Cloth.SoftBodyThing":{"class":"Cloth.SoftBodyThing","schema":{}}}})");
+    auto thing=Level(R"({"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"environment":{"props":[{"id":"Thing","class":"Echelon.SoftBodyThing","at":{"in":"Hall"}}]}})");
+    Check(Create(Spec::Compile(thing,guessed),"Thing").at("class")=="Cloth.SoftBodyThing","an error entry does not stop the search for the loaded class");
 }
 void CamNet()
 {
@@ -355,7 +373,22 @@ void Sectors()
     const auto& entries=group.at("EventGroup");
     Check(entries.size()==3 && entries[0].at("Event")=="DocksShutter" && entries[1].at("Event")=="Zone1_Announce" && entries[2].at("Event")=="SpyForward" && entries[2].at("Delay")=="1" && entries[0].at("Type")=="EVT_Trigger" && entries[0].at("ValidOn")=="EVT_Trigger","the sector's actions in order, complete entries");
     Check(Props(c,"Zone1_Announce").at("AlarmName")=="\"Warehouse open\"" && Props(c,"Zone1_Announce").at("Duration")=="6" && Props(c,"Zone1_Announce").at("Events")==Json::array(),"Zone<N>_Announce SAlarm");
-    Check(Props(c,"DocksShutter").at("InitialState")=="TriggerToggle","a door a sector opens and holds becomes TriggerToggle");
+    Check(Props(c,"DocksShutter").at("InitialState")=="TriggerToggle" && !Find(Operations(c),"DocksShutter_Sensor"),"a door a sector opens and holds becomes TriggerToggle");
+    Check(Props(c,"DocksHatch_Door").at("InitialState")=="TriggerOpenTimed" && Props(c,"DocksHatch_Door_Sensor").at("Event")=="DocksHatch_Door","the mercs' hatch beside the event-only shutter opens timed");
+    // A held door that anything else also triggers would be toggled shut by it.
+    auto sensed=Example("three-modes-sectors");sensed["mechanisms"]["doors"][0]["trigger"]={{"kind","presence"},{"usableBy","merc"}};
+    const auto se=Spec::Compile(sensed);
+    const auto clash=Diagnostic(se.diagnostics,"story.action-door-trigger");
+    Check(clash && clash->severity=="error" && clash->pointer=="/gameplay/story/sectors/0/actions/0" && clash->wikiPage=="movers" && Props(se,"DocksShutter").at("InitialState")=="TriggerOpenTimed",
+          "a held door with its own presence trigger is an error, and stays timed");
+    auto timed=sensed;timed["gameplay"]["story"]["sectors"][0]["actions"][0]["hold"]=false;
+    Check(!Diagnostic(Spec::Compile(timed).diagnostics,"story.action-door-trigger"),"hold false opens it for its stayOpen time");
+    auto pressed=Example("three-modes-sectors");pressed["mechanisms"]["buttons"]=Json::parse(R"([{"id":"ShutterButton","at":{"in":"Docks"},"targets":["DocksShutter"]}])");
+    const auto pr=Diagnostic(Spec::Compile(pressed).diagnostics,"story.action-door-trigger");
+    Check(pr && pr->message.find("ShutterButton")!=std::string::npos,"so is a held door a button opens");
+    auto heldTwice=Example("three-modes-sectors");heldTwice["gameplay"]["story"]["sectors"][1]["actions"][0]["target"]="DocksShutter";
+    const auto ht=Diagnostic(Spec::Compile(heldTwice).diagnostics,"story.action-door-trigger");
+    Check(ht && ht->pointer=="/gameplay/story/sectors/1/actions/0","and one two sectors hold open");
     for(int i=1;i<=3;++i)
     {
         const auto& p=Props(c,"SpyForward"+std::to_string(i));
@@ -412,6 +445,21 @@ void Story()
     auto bomb=spec;bomb["security"]["alarms"][0]["lockObjectives"]=Json::array({"Bomb"});
     const auto d=Diagnostic(Spec::Compile(bomb).diagnostics,"alarm.lock-bomb");
     Check(d && d->severity=="error" && d->pointer=="/security/alarms/0/lockObjectives/0" && d->wikiPage=="alarms","locking a bomb target is an error");
+    // Flags may share drop zones: {ref} names one another flag's entry made, even later.
+    auto share=spec;
+    auto& listed=share["gameplay"]["story"]["objectives"][0]["triggers"];
+    listed.insert(listed.begin(),Json::parse(R"({"id":"Disk0","kind":"flag","at":{"in":"Hall","u":-0.2},"dropZones":[{"ref":"drop2"}]})"));
+    const auto sh=Spec::Compile(share);
+    Check(Props(sh,"Disk0").at("DropZone")[0]==Json({{"$ref","Drop2"}}) && Props(sh,"Disk0").at("DropZone")[1]=="None" && Props(sh,"Disk").at("DropZone")[1]==Json({{"$ref","Drop2"}}) &&
+          !Diagnostic(sh.diagnostics,"story.flag-dropzones"),"two flags share a drop zone, named by its own spelling");
+    size_t made=0;
+    for(const auto& op:Operations(sh))made+=op.value("id",std::string())=="Drop2";
+    Check(made==1,"the shared drop zone is made once");
+    auto wrong=share;wrong["gameplay"]["story"]["objectives"][0]["triggers"][0]["dropZones"][0]["ref"]="Pc";
+    const auto wr=Diagnostic(Spec::Compile(wrong).diagnostics,"story.flag-dropzones");
+    Check(wr && wr->severity=="error" && wr->pointer=="/gameplay/story/objectives/0/triggers/0/dropZones/0/ref","a ref names a drop zone");
+    auto doubled=share;doubled["gameplay"]["story"]["objectives"][0]["triggers"][0]["dropZones"].push_back({{"ref","Drop2"}});
+    Check(Diagnostic(Spec::Compile(doubled).diagnostics,"story.flag-dropzones").has_value(),"a flag lists a drop zone once");
     auto none=spec;none["gameplay"]["story"]["objectives"][0]["triggers"][0].erase("dropZones");
     Check(Diagnostic(Spec::Compile(none).diagnostics,"story.flag-dropzones").has_value(),"a flag needs a drop zone");
     auto dangling=spec;dangling["security"]["devices"][0]["alarm"]="Nothing";
@@ -515,8 +563,11 @@ void Environment()
     for(const auto& piece:c.render.at("pieces"))
         if(piece.at("kind")=="volume" && (piece.at("id")=="VaultName" || piece.at("id")=="VaultMotion_Volume"))outlined+=piece.at("outline").size()==4 && piece.at("box").at("max")[0].get<double>()>piece.at("box").at("min")[0].get<double>();
     Check(outlined==2,"plan_render draws sized volumes as outlines");
-    auto odd=Level(R"({"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"environment":{"lights":[{"id":"Disco","in":"Hall","props":{"LightEffect":"LE_Disco"}},{"id":"Sun","preset":"sun","at":{"in":"Hall"}}]}})");
+    auto odd=Level(R"({"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"environment":{"lights":[{"id":"Disco","in":"Hall","props":{"LightEffect":"LE_Disco"}},{"id":"Sun","preset":"sun","at":{"in":"Hall"}},
+        {"id":"Beam","preset":"spot","in":"Hall","cone":64},{"id":"Plain","in":"Hall","cone":64}]}})");
     const auto o=Spec::Compile(odd);
+    Check(Props(o,"Beam").at("LightCone")=="64" && !Props(o,"Plain").contains("LightCone") && !Props(c,"LobbyLight").contains("LightCone") && Diagnostic(o.diagnostics,"light.cone")->pointer=="/environment/lights/3/cone",
+          "cone is the spot preset's LightCone, the class default without it");
     bool effect=false;
     for(const auto& d:o.diagnostics)effect=effect || (d.wikiPage=="lighting" && d.message.find("LE_Disco")!=std::string::npos);
     Check(effect && Props(o,"Sun").at("LightEffect")=="LE_Sunlight","static lights are LE_None, LE_Spotlight or LE_Sunlight");
@@ -531,7 +582,20 @@ void Environment()
     Check(Props(e,"OfficeGE").at("GEMask")=="2" && Props(e,"OfficeGE").at("bToggle")=="True","SGETrigger");
     Check(Props(e,"LobbyHum").at("AmbientSound")=="Sound'ToweD_Snd.Ambient.Hum'" && Props(e,"LobbyHum").at("SoundRadius")=="600","an AmbientSound");
     const auto& changes=Step(e.plan,"settings_edit").at("args").at("changes");
-    Check(changes.at("Events")==Json::array({"UplinkMessage"}) && changes.at("SendAtTime")==Json::array({"-120"}) && changes.at("fDeathPawnHeight")=="-512" && changes.at("GEActivationMask")=="1","level events and properties");
+    // The Level Properties headings are categories: a LevelInfo has one Event
+    // (Actor's) and an int SendAtTime, and MTVOffset/MTVSlope of its own
+    // (tests/maps/OffsE's LevelInfo has Event=storm, SendAtTime=1 at top level).
+    Check(changes.at("Event")=="UplinkMessage" && changes.at("SendAtTime")=="-120" && changes.at("fDeathPawnHeight")=="-512" && changes.at("GEActivationMask")=="1","level events and properties");
+    Check(changes.at("MTVOffset")=="52" && changes.at("MTVSlope")=="85" && !changes.contains("Events") && !changes.contains("MotionTrackingTweak"),"no category names among the properties");
+    // Several level events: one SMagicEvent sent at the earliest, each delayed by how much later it is due.
+    auto several=Example("elevator-3floors");several["level"]["events"]=Json::parse(R"([{"event":"FinalMinute","sendAtTime":-60.4},{"event":"RoofLight","sendAtTime":-300}])");
+    const auto sv=Spec::Compile(several);
+    const auto& late=Step(sv.plan,"settings_edit").at("args").at("changes");
+    Check(late.at("Event")=="LevelEvents" && late.at("SendAtTime")=="-300" && Create(sv,"LevelEvents").at("class")=="SBase.SMagicEvent","several level events go through one SMagicEvent sent at the earliest time");
+    const auto& due=Props(sv,"LevelEvents").at("Groups")[0].at("EventGroup");
+    Check(due.size()==3 && due[0].at("Event")=="FinalMinute" && due[0].at("Delay")=="240" && due[1].at("Event")=="RoofLight" && due[1].at("Delay")=="0" && due[2].at("Event")=="UplinkMessage" && due[2].at("Delay")=="180","each delayed by how much later it is due");
+    const auto rounded=Diagnostic(sv.diagnostics,"level.send-at-time");
+    Check(rounded && rounded->pointer=="/level/events/0/sendAtTime" && rounded->message.find("-60")!=std::string::npos,"SendAtTime is a whole number of seconds");
     Check(Step(e.plan,"settings_edit").at("args").at("snapshot")==Json({{"$bind",{{"step","settings"}}}}) && Step(e.plan,"settings").at("op")=="settings.inspect","settings.edit takes settings.inspect's snapshot");
 }
 void GesAndSettings()
@@ -540,8 +604,8 @@ void GesAndSettings()
     const auto& ladder=Step(c.plan,"ge3").at("args");
     Check(ladder.at("command")=="LADDER" && ladder.at("points")[0][2]==0 && ladder.at("points")[1][2]==256 && ladder.at("points")[2][2]==0,"a ladder starts at its low end, its side point at that height");
     Check(Step(c.plan,"ge1").at("args").at("command")=="LG" && Step(c.plan,"ge1").at("op")=="ge.add","ledges are GE ADD LG");
-    const auto& tweak=Step(c.plan,"settings_edit").at("args").at("changes").at("MotionTrackingTweak");
-    Check(tweak==Json({{"MTVOffset","8"},{"MTVSlope","8"}}),"enhanced Motion Tracking Vision is 8/8");
+    const auto& tweak=Step(c.plan,"settings_edit").at("args").at("changes");
+    Check(tweak.at("MTVOffset")=="8" && tweak.at("MTVSlope")=="8" && !tweak.contains("MotionTrackingTweak"),"enhanced Motion Tracking Vision is MTVOffset/MTVSlope 8/8");
     const auto& map=Step(c.plan,"mapsettings").at("args").at("changes");
     Check(Step(c.plan,"mapsettings").value("optional",false) && map.at("MapName")=="\"DISK ARENA\"" && map.at("Modes").size()==3 && map.at("ModesStrings").size()==3,"SMapSettings in post, optional");
     Check(map.at("Modes")[0].at("GameModeId")=="GM_DiskHunt" && map.at("Modes")[0].at("ScoreLimit")=="8" && map.at("Modes")[0].at("NumDisksMax")=="12" && map.at("ModesStrings")[0].at("LegendModeInBriefSpy").get<std::string>().find("collect")!=std::string::npos,"Modes and ModesStrings index-aligned");
@@ -605,6 +669,42 @@ void Geometry()
         if(polygon.value("texture",std::string())=="Pkg.Floors.Tile"){++tiled;for(const auto& v:polygon.at("vertices"))Check(v[2]==0,"the floor face is textured");}
     Check(tiled==1,"one floor face");
     Check(Props(p,"WestCorridor_Portal_Brush1").at("PolyFlags")==std::to_string(Design::kPortalPolyFlags),"portal sheets keep the portal flags");
+    // A face is named the way its surface faces, as surface.texture names the
+    // BSP after a build: a carved room's east wall faces west (-X), so both
+    // brush modes paint the same wall.
+    auto walls=Level(R"({"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[1024,512,256]}],"surfaces":[{"brush":"Hall","faces":["-X"],"texture":"Pkg.Grp.Red"},{"brush":"Hall","faces":["+Y"],"texture":"Pkg.Grp.Blue"}]}})");
+    walls["geometry"]["brushes"]=Json::array({{{"id","Block"},{"csg","CSG_Add"},{"at",{2000,0,0}},{"polygons",Spec::Detail::BoxPolygons({64,64,64})}}});
+    walls["geometry"]["surfaces"].push_back({{"brush","Block"},{"faces",{"+X","ceiling"}},{"texture","Pkg.Grp.Green"}});
+    const auto wp=Spec::Compile(walls,polygons);
+    auto painted_at=[&](const Json& brush,const std::string& texture,int axis)
+    {
+        std::set<double> at;
+        for(const auto& polygon:brush.at("polygons"))
+            if(polygon.value("texture",std::string())==texture)for(const auto& v:polygon.at("vertices"))at.insert(v[axis].get<double>());
+        return at;
+    };
+    Check(painted_at(Create(wp,"Hall_Brush0"),"Pkg.Grp.Red",0)==std::set<double>{512},"-X on a carved room is its east wall, at +X");
+    Check(painted_at(Create(wp,"Hall_Brush0"),"Pkg.Grp.Blue",1)==std::set<double>{-256},"+Y on a carved room is its south wall");
+    // An additive brush's faces are its outside: +X faces east, and its
+    // underside faces down, the ceiling of whatever is below it.
+    std::vector<std::set<double>> green;
+    for(const auto& polygon:Create(wp,"Block").at("polygons"))
+        if(polygon.value("texture",std::string())=="Pkg.Grp.Green")
+        {
+            std::set<double> xs,zs;
+            for(const auto& v:polygon.at("vertices")){xs.insert(v[0].get<double>());zs.insert(v[2].get<double>());}
+            green.push_back(xs.size()==1?xs:zs);
+        }
+    Check(green.size()==2 && std::count(green.begin(),green.end(),std::set<double>{64})==1 && std::count(green.begin(),green.end(),std::set<double>{-64})==1,"an additive brush's +X side and its underside");
+    const auto wm=Spec::Compile(walls);
+    Check(Step(wm.plan,"surface1").at("args").at("faces")==Json::array({"-X"}),"pieces mode hands surface.texture the same face name");
+    for(const auto& polygon:Spec::Detail::BoxPolygons({64,64,64}))
+    {
+        std::set<double> xs,zs;
+        for(const auto& v:polygon.at("vertices")){xs.insert(v[0].get<double>());zs.insert(v[2].get<double>());}
+        if(xs==std::set<double>{64})Check(Spec::Detail::FaceName(polygon.at("vertices"),false)=="+X" && Spec::Detail::FaceName(polygon.at("vertices"),true)=="-X","the +X polygon: +X added, -X carved");
+        if(zs==std::set<double>{64})Check(Spec::Detail::FaceName(polygon.at("vertices"),false)=="floor" && Spec::Detail::FaceName(polygon.at("vertices"),true)=="ceiling","the top polygon: a floor added, the ceiling carved");
+    }
     ValidDocuments(p.plan);
     Plan::Check(p.plan);
     // In pieces mode the faces are textured after the build, on the piece's brushes.
@@ -650,11 +750,26 @@ void Rest()
     Check(Create(c,"Fish1").at("class")=="SBase.SFish" && Create(c,"Tip1").at("class")=="SBase.SZoneTips" && Create(c,"Flag1").at("class")=="SBase.SAnimatedMesh","generic environment actors");
     Check(Props(c,"Tip1").at("bHidden")=="True" && Props(c,"Tip1").at("DrawType")=="DT_Sprite" && Props(c,"Tip1").at("bShowOnlyWithIngameHelp")=="True" && Props(c,"Tip1").at("bStayPermanently")=="False","tutorial tips as the wiki sets them");
     Check(Diagnostic(c.diagnostics,"softbody.duplicate").has_value() && Diagnostic(c.diagnostics,"softbody.duplicate")->pointer=="/environment/softbody/1","a SoftBody repeated exactly is a warning");
-    Check(Create(c,"Curtain").at("class")=="Echelon.ESBPatchActor" && Create(c,"Chain1").at("class")=="Echelon.ESBChainActor","SoftBody: ESBPatchActor by default, short classes completed");
+    Check(Create(c,"Curtain").at("class")=="SoftBody.ESBPatchActor" && Create(c,"Chain1").at("class")=="SoftBody.ESBChainActor","SoftBody: ESBPatchActor by default, short classes in the SoftBody package");
+    Check(!Props(c,"Curtain").contains("LinkMesh"),"a cloth has no LinkMesh");
     Check(Props(c,"Chain1").at("LinkMesh")=="StaticMesh'Ropes.Link'" && !Props(c,"Chain1").contains("DrawType"),"a SoftBody's mesh is a chain's links; it keeps DT_SoftBody");
     auto base=spec;base["environment"]["softbody"]=Json::parse(R"([{"id":"Cloth","class":"Echelon.ESoftBodyActor","at":{"in":"Hall"}}])");
     const auto b=Spec::Compile(base);
     Check(Diagnostic(b.diagnostics,"softbody.class") && Diagnostic(b.diagnostics,"softbody.class")->severity=="error" && !Find(Operations(b),"Cloth"),"the SoftBody base class cannot be placed");
+    // The engine's classes are SoftBody.ESBPatchActor and SoftBody.ESBStripDoorActor
+    // (MapRecovery); the wiki's ESBStripeDoorActor and an Echelon. guess are corrected.
+    auto named=spec;named["environment"]["softbody"]=Json::parse(R"([{"id":"Strips","class":"ESBStripeDoorActor","at":{"in":"Hall"}},{"id":"Rope","class":"Echelon.ESBRopeActor","at":{"in":"Hall","u":0.3}},
+        {"id":"Cloth","at":{"in":"Hall","u":-0.3},"mesh":"Ropes.Link"}])");
+    const auto nm=Spec::Compile(named);
+    Check(Create(nm,"Strips").at("class")=="SoftBody.ESBStripDoorActor" && Create(nm,"Rope").at("class")=="SoftBody.ESBRopeActor","SoftBody classes in their package, by the engine's names");
+    const auto linkless=Diagnostic(nm.diagnostics,"softbody.mesh");
+    Check(linkless && linkless->severity=="error" && linkless->pointer=="/environment/softbody/2/mesh" && !Props(nm,"Cloth").contains("LinkMesh"),"only a chain takes a mesh (LinkMesh)");
+    // The bridge's {error} entry for a guessed name does not hide the loaded class.
+    Spec::CompileOptions loaded;
+    loaded.schema=Json::parse(R"({"classes":{"Echelon.ESBPatchActor":{"error":"No loaded class Echelon.ESBPatchActor."},"SoftBody.ESBPatchActor":{"class":"SoftBody.ESBPatchActor","schema":{"Texture":{"kind":"ObjectProperty"}}}}})");
+    auto curtain=Level(R"({"defaults":{"lights":"none"},"geometry":{"pieces":[{"id":"Hall","kind":"Room","size":[512,512,256]}]},"environment":{"softbody":[{"id":"Curtain","class":"Echelon.ESBPatchActor","at":{"in":"Hall"}}]}})");
+    const auto cu=Spec::Compile(curtain,loaded);
+    Check(Create(cu,"Curtain").at("class")=="SoftBody.ESBPatchActor" && Count(cu.diagnostics,"warning","schema.class")==0,"a cloth is the loaded SoftBody.ESBPatchActor");
     auto animated=spec;animated["environment"]["animated"][0]["mesh"]="Anims.Flag";animated["environment"]["fish"][0]["mesh"]="SkeletalMesh'Fish.Shark'";
     const auto an=Spec::Compile(animated);
     Check(Props(an,"Flag1").at("Mesh")=="Mesh'Anims.Flag'" && Props(an,"Flag1").at("DrawType")=="DT_Mesh" && Props(an,"Fish1").at("Mesh")=="SkeletalMesh'Fish.Shark'" && !Props(an,"Flag1").contains("StaticMesh"),"animated meshes and fish draw a Mesh");

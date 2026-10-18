@@ -154,8 +154,9 @@ To give a light a corona:
 
 ## How the MCP tools apply this
 
-`environment` with `lights[{id, preset: ceiling|spot|sun|echelon-spot, in|at, radius, brightness, hue, saturation, corona}]` (spec `environment.lights`; `defaults.lights:"rooms"` puts a ceiling light in each room):
-- **Static lights** use only `LE_None` (`ceiling`), `LE_Spotlight` (`spot`, with `LightCone`) or `LE_Sunlight` (`sun`). `sun` needs a Fake Backdrop in the zone.
+`environment` with `lights[{id, preset: ceiling|spot|sun|echelon-spot, in|at, radius, brightness, hue, saturation, corona, cone}]` (spec `environment.lights`; `defaults.lights:"rooms"` puts a ceiling light in each room):
+- **Static lights** use only `LE_None` (`ceiling`), `LE_Spotlight` (`spot`) or `LE_Sunlight` (`sun`). `sun` needs a Fake Backdrop in the zone.
+- **`cone`** (0-255) is the `spot` preset's `LightCone`: larger is a wider beam. Without it the light keeps the class's default cone. It shapes `LE_Spotlight` only, so on another preset it is not written (warning `light.cone`).
 - **`echelon-spot`** writes `LightEffect LE_ESpotShadow` with `EchelonNormalInfluence 0.9` and a modest `EchelonRange`.
 
 Caveats:

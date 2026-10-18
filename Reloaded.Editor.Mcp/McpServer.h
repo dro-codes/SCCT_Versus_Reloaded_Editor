@@ -6,9 +6,14 @@
 // lists, subscriptions and logging at once. tools/call, prompts/get and reads
 // of live resources go to one worker thread and run one at a time, since
 // they wait on the editor; notifications/cancelled drops a queued request or
-// asks the bridge to stop the running one, whose reply is then not sent.
-// Every write is one whole line under a lock.
+// stops the running one (the bridge call in flight, and the tool at its next
+// wait or progress report), whose reply is then not sent. A batch (protocol
+// 2025-03-26 and older) is answered with one array once all of it is; later
+// protocols have no batches and get an error. Subscribers of the live
+// resources hear of a change after a tool call that changed something in the
+// editor. Every write is one whole line under a lock.
 #include "McpProtocolModel.h"
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <iosfwd>
@@ -63,8 +68,11 @@ namespace Mcp
         void MapChanged();
         std::string NegotiatedVersion() const;
 
+        // A batch's replies, sent as one array once every request in it is answered.
+        struct Batch { std::mutex lock; Json replies = Json::array(); size_t pending = 0; bool sealed = false, sent = false; };
+
     private:
-        struct Job { Json id; std::string key, method; Json params; };
+        struct Job { Json id; std::string key, method; Json params; std::shared_ptr<Batch> batch; };
         void Dispatch(const Json& message);
         void Request(const Protocol::Message& m);
         void Notify(const Protocol::Message& m);
@@ -77,6 +85,9 @@ namespace Mcp
         const Resource* FindResource(const std::string& uri) const;
         std::function<void(double, double, const std::string&)> Progress(const Json& params);
         void Send(const Json& message);
+        void Write(const Json& message);
+        // One request of a batch answered (reply) or dropped (null).
+        void Settle(const std::shared_ptr<Batch>& batch, const Json* reply);
 
         Registry& registry;
         IBridge& bridge;
@@ -89,6 +100,8 @@ namespace Mcp
         std::set<std::string> cancelled, subscriptions;
         std::string running, protocol = Protocol::kFallback, client;
         bool busy = false, stopping = false, finished = false, initialized = false;
+        // The running request was cancelled: Tools::Cancelled() on the worker.
+        std::atomic<bool> stopRunning{false};
         int logRank = 1; // info
         std::thread worker;
     };

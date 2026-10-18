@@ -15,7 +15,7 @@ arguments:
     description: Importer options as JSON, such as {"cell":128,"legend":{"#":"wall"}} for a grid or {"scale":2} for a VMF.
 wiki: [index, spawn-points, game-modes, level-ingredients]
 docs: [tools]
-rules: true
+rules: false
 ---
 # Create an SCCT Versus level from a file
 
@@ -23,6 +23,8 @@ rules: true
 {{#mapName}}**Map name:** {{mapName}}
 {{/mapName}}{{#options}}**Importer options:** {{options}}
 {{/options}}
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
+
 ## Recipe
 
 1. **Connect.** Call `editor_status`. If the open map has unsaved work, ask the user before calling `map_file` with `action:"new"`.

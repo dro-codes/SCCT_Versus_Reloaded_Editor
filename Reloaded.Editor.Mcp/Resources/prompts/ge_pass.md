@@ -10,7 +10,7 @@ arguments:
     description: GE kinds to concentrate on (ledge, hoh, pipe, ladder, zipline, fence, pole), or "all".
     default: all
 wiki: [geometric-events, material-classes]
-rules: true
+rules: false
 ---
 # Geometric event pass
 
@@ -29,6 +29,8 @@ GEs give Spies their routes: ledges up to balconies, pipes up shafts, hand-over-
 | Zipline | Hang point ≤384 above the floor, 198 clearance below (161 tucked). Sloped, on the cable's upper edge |
 | Pipe and ladder points | Lower end first, with the side point at that end's height pointing where the Spy approaches from |
 | Joins | A connected pipe + hand-over-hand, or pipe + zipline, share the exact same vertex |
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

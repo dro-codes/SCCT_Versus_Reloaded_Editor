@@ -12,13 +12,15 @@ arguments:
   - name: details
     description: Specific requests, such as "a laser grid in the vault" or "lock the server door when the alarm goes".
 wiki: [alarms, level-ingredients, events, movers, zones-and-volumes, game-modes]
-rules: true
+rules: false
 ---
 # Design the security layer
 
 **Focus:** {{area}}. **Intensity:** {{intensity}}.
 {{#details}}**Requests:** {{details}}
 {{/details}}
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
+
 ## Recipe
 
 1. **Read the map.**

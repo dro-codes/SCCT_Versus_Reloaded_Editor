@@ -3,7 +3,12 @@
 `Reloaded.Editor/McpBridge.cpp` is the named-pipe end of the MCP bridge inside
 the editor. Its pure parts (framing, policies, plan checks, busy reasons) are
 covered by `McpBridgeModelTests.cpp`, `McpPlanModelTests.cpp` and
-`McpOpCoverageTests.cpp`. What only a running editor can show is checked by
+`McpOpCoverageTests.cpp`. The last also tests `McpSafetyModel.h`, what the
+bridge refuses before an op writes (stock packages in Map JSON `texture` and
+`save` operations, release folders and `exec` files outside the write roots,
+the commands `exec` never runs) and the button the dialog watchdog presses,
+and scans the DLL's sources for `std::min`/`std::max` where MSVC's windows.h
+macros are live. What only a running editor can show is checked by
 two runs in a disposable copy of the game:
 
 - the **native probe's MCP bridge section** (`tests/WorkflowNativeTests.h`,
@@ -83,6 +88,22 @@ Things the section does not cover yet: an op that pops an unknown message box
 an edit made while the review window is open (`stale` /
 `changed_during_review`), a frame header over 16 MiB, and RE+ Tools > MCP >
 Undo last MCP call (its failure path opens a message box nobody would answer).
+Worth adding, as the wine harness below runs them only against stubs:
+- an ownerless `MessageBox` open on the frame thread (LightmapFix's damage
+  notice during File > Open): `actors.query` and `design.block` give `busy` /
+  `modal` naming its title, `editor.state` says `busy:"modal"`, nothing runs
+  inside the box's loop; and a dialog owned by an RE+ tool window, which
+  leaves the frame enabled, does the same;
+- an `mcp.plan` whose post `map.save` meets an unknown question: `dialog_blocked`
+  with `stoppedAt`, `ran`, `wrote` (the `.sdc`) and `rolledBack:false`, the steps
+  after it not run and the map changes kept (`undo.call` takes them back);
+- `authoring.apply` with a `save` of a stock texture package: `refused` /
+  `not_map_owned`, the package file untouched; `optimise.release` with a
+  `folder` outside `Releases`, the work folder and `WriteRoots`: `refused` /
+  `outside_write_roots`;
+- with `AllowRawExec=1`: `exec` of `SAVEMAPPROP`, `MAP EXPORT FILE=...` and
+  `EXEC <file>` refused (`denied_command`), and `FILE=` outside the write roots
+  (`outside_write_roots`).
 
 What the section learned about the editor:
 - ContentRevision counts every transaction, a rolled-back one too, so it moves
@@ -142,6 +163,33 @@ refuses keys that differ only in case.
     harness.cpp Reloaded.Editor/McpBridge.cpp -static -lcomctl32 -o harness.exe
   xvfb-run -a wine64 harness.exe
   ```
+  It was run again with `McpOps.cpp` linked (`-DDLL_API=` so pch.h defines no
+  export twice), so `mcp.plan` is the real executor, and 24 more checks (108):
+  - the watchdog on dialogs from in-memory templates: "&Ja"/"&Nein" (IDYES,
+    IDNO) is answered IDNO, "OK"/"Annuler" IDCANCEL, and one with only buttons
+    of its own ids is closed as Escape closes it (it ends with IDCANCEL), never
+    by its first button;
+  - an ownerless `MessageBoxW(nullptr, ...)` opened by a frame message, a
+    dialog box over the tool window (the tool disabled, the frame not) and a
+    modeless ownerless panel: the first two give `busy` / `modal` (nothing
+    runs re-entrantly) and calls run again once they close; the panel does
+    not make the editor busy;
+  - plans an unknown question stops: in post after `map.save` (nothing undone,
+    `wrote` lists the file, the screenshot after it never runs), in post with
+    nothing written (an optional step too: the plan's Undo step is undone), in
+    steps (the JoinScope rolls back, the next step never runs), in pre (the
+    steps never run), and after a build (the message says the geometry stays).
+  What wine showed: a posted message dispatched by a message box's loop goes
+  through the WH_MSGFILTER hook (code MSGF_DIALOGBOX), one from the thread's
+  own `GetMessage` loop does not, and the message box's text is the static
+  with id 0xFFFF (its icon is 0x440 in wine, 0x14 in Windows).
+- MinGW cannot see MSVC's `min`/`max` macros (libstdc++ defines `NOMINMAX`).
+  To check a DLL file for them, copy it beside a `pch.h` that includes the
+  real one, then every standard header, then `#define min(a,b)` and
+  `max(a,b)` as minwindef.h does, and compile that copy with the MinGW
+  check: `LevelSnapshot.cpp` before its `#undef` gave the 18 errors clang's
+  MSVC mode gives, inside MinimapModel.h, and every DLL file changed since
+  ccff94d gives as many errors with the macros as without.
 - The probe's client and worker were run the same way, the harness's main
   thread playing the frame thread and running the section's flows through
   `McpPipe::Worker` and `McpPipe::Client` (add `-Itests`): the handshake, a

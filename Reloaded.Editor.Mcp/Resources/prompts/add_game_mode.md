@@ -9,13 +9,15 @@ arguments:
   - name: details
     description: What the mode should contain, such as "two terminals in the server room and a bomb in the vault" or "30 disks, 20 active, 12 to win".
 wiki: [game-modes, spawn-points, events, map-settings]
-rules: true
+rules: false
 ---
 # Add a game mode: {{mode}}
 
 {{#details}}**Requested:** {{details}}
 {{/details}}
 Follow the embedded **game-modes** page exactly. Name actors in lists by their **exact names**. The tools write those lists from spec ids.
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

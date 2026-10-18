@@ -14,19 +14,20 @@
   - Engine rotations use 65536 units per turn.
 - **Every change is one Undo step**, labelled `MCP <n>: <label>` in Undo History.
   - Mutating tools take `dryRun` (preview only) and `label`.
-  - Each result carries `undo.call`; `editor_undo` with that `call` undoes the whole call while it is still the newest. With no arguments `editor_undo` undoes this server's last call.
+  - Each result carries `undo.call`; `editor_undo` with that `call` undoes the whole call while it is still the newest. With no arguments `editor_undo` undoes this server's newest call that is still undoable (again: the one before it); when this server has made no change it undoes nothing, rather than something the user did. `steps` undoes the newest Undo steps whoever made them.
   - Saves, builds, package and texture imports are not Undo steps.
 - **One call at a time.** The editor runs each call on its own window thread, between the user's clicks.
 - **Staleness:** changes carry the map's identity and edits to existing actors their current values, so if the map changed meanwhile the call fails as `stale` and nothing changes. Re-read (`map_query`) and retry.
 - **Approval:** when the user turns on *Require approval*, each change opens a review window in the editor. After about 50 s the call fails with code `timeout`, reason `awaiting_approval` and a `ticket`; call `approval_wait` with it.
   - `denied` means the user said no. Do not retry the same change unasked.
-- **Busy:** the editor is in a dialog, a menu, a drag, a rebuild or a review. The server retries with backoff. If that keeps failing, ask the user to finish what they are doing in the editor (the reason says what).
+- **Busy:** the editor is in a dialog, a menu, a drag or a rebuild. The server retries with backoff. If that keeps failing, ask the user to finish what they are doing in the editor (the reason says what). Two reasons come back at once instead, since waiting cannot help: approval_pending (a change waits in the review window: call `approval_wait` with its ticket, which the error's details carry) and `another_client` (another MCP client holds the editor).
+- **Cancelling** a request stops it: the editor is asked to drop the call in flight, and waits (`editor_launch`, `editor_restart`, `approval_wait`) and long tools stop at their next progress report. Check `editor_status` before repeating a cancelled change.
 - **Never allowed:**
   - writing stock packages (only the map's own: `<Map>`, `<Map>-i`, `Amb_<Map>`, `<Map>_*`);
   - deleting actors without `allowDeletes`;
   - discarding unsaved work unless the user asked (`discardUnsaved`);
   - overwriting files without `overwrite`;
-  - writing outside the work folder and `[Mcp] WriteRoots` (media and import tools);
+  - writing outside the work folder and `[Mcp] WriteRoots` (media and import tools; `editor_exec` `FILE=`), or a release copy outside `<Game>\Releases`, the work folder and `WriteRoots`;
   - raw console commands, unless the user set `AllowRawExec=1`.
 
 ## Tools (32)
@@ -34,18 +35,44 @@
 | Group | Tools |
 |---|---|
 | Session | `editor_status` (start here; `pid` picks one of several editors), `editor_launch` (`waitSeconds`, `map`, `force`), `editor_restart` (`save`), `editor_undo` (`call`, `steps`, `redo`), `approval_wait` (`ticket`), `editor_log` (`level`, `contains`, `since`, `newOnly`), `map_file` (`action`: new, open, save or `save_as`; `path`, `mapName`, `discardUnsaved`, `overwrite`), `map_build` (`what`: geometry or all; `check`) |
-| Inspect | `map_query` (`what`: summary, actors, actor, level, schema, assets, wiring, spawns, missions, security, cameras, lights, stages, design, ges, spec; actors filter by `classes`, `tags`, `names`, `near`, `box`, `selected`, with `fields`, `limit`, `cursor`), `view_screenshot` (`viewport`, `maxEdge`, `camera`, `frame`, or `preset`: overview, spawn:spy, spawn:merc, objective:<name>), `plan_render` (`spec` offline, or the live map; `maxEdge`, `options`) |
-| Validate | `map_validate` (`profile`: draft or release; `include` groups wiki, design, security, mapcheck, lighting, release; `rules`; `spec` to check offline; findings cite `wikiPage` and carry a `fix` tool call) |
+| Inspect | `map_query` (`what`: summary, actors, actor, level, schema, assets, wiring, spawns, missions, security, cameras, lights, stages, design, ges, spec; actors filter by `classes`, `tags`, `names`, `near`, `box`, `selected`, with `fields`, `limit`, `cursor`), `view_screenshot` (`viewport`, `maxEdge`, `camera`, `frame`, or `preset`: overview, spawn:spy, spawn:merc, objective:<name>), `plan_render` (`spec` or `path` offline, or the live map; `maxEdge`, `options`: storey, labels, grid, legend, actorLabels, cones, title) |
+| Validate | `map_validate` (`profile`: draft or release; `include` groups wiki, design, security, mapcheck, lighting, release; `rules`; `spec` or `path` to check a spec offline; findings cite `wikiPage` and carry a `fix`: a tool call on the live map, an edit of the spec offline) |
 | Spec | `level_spec_validate` (`spec` or `path`, offline), `level_build` (`spec` or `path`; `mode`: preview (default) or apply; `sync`: incremental, replace or merge; `brushMode`: pieces or polygons; `build`: geometry, all or none; `screenshot`; `save`; `force`) |
 | Intent | `blockout`, `gameplay`, `security`, `mechanisms`, `events`, `environment`, `geometric_events`, `map_settings`: each takes its part of the spec at the top level, lays it over the spec the map was built from (matched by id; `remove` takes ids out) and builds only what changed, as `level_build` with `sync:"incremental"` does, so the wiki defaults always apply. `mode` defaults to apply here; `mode:"preview"` or `dryRun` changes nothing |
-| Release | `release` (`action`: check, sounds, optimise, package or interface) |
-| Escape hatches | `actors_edit` (`edits` of set, move, turn, copy, drop, delete, `copy_properties`, `rename_tag`; deletes need `allowDeletes`), `map_changes_apply` (a raw `scct.map-changes` `document`), `workflow_request` (one bridge `op` with `args`), `editor_exec` (one console `command`; off by default) |
+| Release | `release` (`action`: check, sounds, optimise, package or interface; a release copy's `folder` must be inside `<Game>\Releases`, the work folder or `[Mcp] WriteRoots`) |
+| Escape hatches | `actors_edit` (`edits` of set, move, turn, copy, drop, delete, `copy_properties`, `rename_tag`; deletes need `allowDeletes`), `map_changes_apply` (a raw `scct.map-changes` `document`), `workflow_request` (one bridge `op` with `args`; `scct://docs/ops` lists them), `editor_exec` (one console `command`; off by default) |
 | Import / media | `import_to_spec` (`source`: a full path or "live"; `format`: auto, level-spec, map-changes, map-authoring, grid, image, svg, tiled, geojson, csv, t3d, vmf, quake, obj, ase or r6v; `options`), `media_extract_frames` (`video`; `mode`: interval, count or scene), `media_read_image` (`path`; `grid`, `crop`, `palette`), `image_convert` (`file`; `size` or `slot`), `assets_import` (`items` of textures and static meshes into `<Map>_TXT` / `<Map>_STM`) |
 
 Mutating tools return `{summary, created[], changed[], warnings[], validation[], undo, next[]}`.
 - `next` suggests the follow-up calls.
 - Images come back as MCP image content.
 - Errors come back as results marked isError, with `code`, `reason`, a `hint` and whether a retry can help.
+
+## Conventions every spec tool shares
+
+**Units and directions.** Lengths are in the spec's `units.unit`: `uu` (Unreal units, the default), `m` or `ft` (through `uuPerMetre`, default 100). Z is up, east +X, north +Y. Yaw is in degrees (east 0, north 90); engine rotations are 65536 per turn.
+
+**Ids.** Every id matches `[A-Za-z_][A-Za-z0-9_]{0,62}`, is unique across the spec ignoring case, and becomes the actor's create id and its `Tag`, so alarms, targets, links and `{"$ref": id}` name things by id. `existing.refs` names live actors the spec did not make: each id maps to `{path, class}` or `{tag}`.
+
+**Positions**, anywhere a spec takes one:
+- `[x, y, z]`, where z may be `"floor+N"` or `"ceiling-N"` of the room under the point, or be left out for the usual height of the thing;
+- `{in: pieceId, u, v, h}`: u and v from -0.5 to 0.5 across and along the piece, h `"floor+N"` or `"ceiling-N"`;
+- `{near: id, offset: [dx, dy, dz]}`;
+- `{doorway: id}`.
+
+**How the intent tools apply their arguments.** `blockout`, `gameplay`, `security`, `mechanisms`, `events`, `environment`, `geometric_events` and `map_settings` each take their part of the spec at the top level:
+- The arguments are laid over the spec the map was last built from (`map_query what:"spec"`; a map without one starts a new spec, named by `mapName` or the map's file).
+- Objects merge field by field. List items match by `id` (vision by `target`, links by `from` and `to`, level events by `event`, objective player counts by `objective`, Map Settings modes by `mode`): a match is updated field by field, the rest are added. `remove: [ids]` takes items out of the tool's part.
+- Only what changed is built, as `level_build sync:"incremental"` does, in ONE Undo step. `mode: "apply"` is the default; `mode: "preview"` (or `dryRun: true`) returns the editor's preview rows and a plan PNG and changes nothing.
+- Errors the change brings block it unless `force: true`; errors the spec already had are listed as standing and do not.
+- `build`: `auto` (the default: a geometry build when brushes changed), `geometry`, `all` (with lighting) or `none`. `screenshot` (default: when it builds), `save` (a map path to save to afterwards), `label` (the Undo History name).
+- The result has `created`, `changed` and `removed` by id (with the actor paths), `validation` (this part's findings: JSON pointer, `wikiPage`, `fix`), `undo` and `next`.
+
+Every field of every tool, and the wiki defaults the compiler applies: `scct://docs/tool-reference`. Every bridge op `workflow_request` can call, with its policy and arguments: `scct://docs/ops`.
+
+**Fixes.** A finding's `fix` takes one of two forms:
+- On the live map (`map_validate` without a spec, the intent tools): `{tool, args, note?}`, the call that repairs it.
+- For a spec checked as a document (`level_spec_validate`, `level_build` with a spec, `map_validate` with `spec` or `path`): `{spec: [{pointer, merge | change}], note?}`. Merge `merge` into the spec at the JSON `pointer` the way the intent tools merge their arguments; `change` says in words what to write there. Then check the spec again. A fix only the built map can take (`release`, `map_build`, `actors_edit`) keeps its tool call, with `live: true`.
 
 ## The level spec
 
@@ -82,7 +109,7 @@ Rules:
   7. the spec sidecar.
 - **post:** build → Map Check → Map Settings and interface textures (when given) → save → screenshot.
 
-`mode:"preview"` (the default for `level_build`, or `dryRun`) changes nothing and returns the preview rows and a plan PNG.
+`mode:"preview"` (the default for `level_build`, or `dryRun`) changes nothing and returns the preview rows and a plan PNG. When the preview has errors or findings about other parts of the spec, the spec it built is saved in the work folder (`specFile`), and `next` runs `level_spec_validate` on that file.
 
 Sync:
 - `incremental` (the default once the map has a stored spec): new ids are created, changed pieces rebuilt, changed actors updated (or recreated when class, team or Tag changes), dropped ids deleted.
@@ -98,7 +125,7 @@ Sync:
 4. **Write the spec.** Use a prompt (`create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`) or `import_to_spec`.
    - Record where it came from in `provenance`.
    - Calibrate scale: a standing player is 180 uu tall and 96 wide; ≈100 uu/m; doors 96 × 128; stair risers ≤35 uu (the blockout uses ≤24 rise, ~32 run). `uuPerPx` = known size in uu / its size in pixels.
-5. **Check offline.** Run `level_spec_validate` (errors at JSON pointers, rule findings with wiki pages) and `plan_render`; compare the plan PNG with the source.
+5. **Check offline.** Run `level_spec_validate` (errors at JSON pointers, rule findings with wiki pages, fixes as edits of the spec) and `plan_render`; compare the plan PNG with the source. Both take `spec` or `path` (a spec saved to a file), as does `map_validate`.
 6. **Preview.** `level_build mode:"preview"`: read the rows and the plan image.
 7. **Apply.** `level_build mode:"apply"` makes one Undo step and builds the geometry; `editor_undo` reverts it.
 8. **Build.** `map_build what:"all"` when lighting matters (it can take minutes).
@@ -126,7 +153,7 @@ Known gaps to work around:
 | `scct://wiki/{page}` | Wiki digests (start at `scct://wiki/index`) |
 | `scct://rules` | Every validation rule with its severities and wiki page |
 | `scct://schema/{level-spec, map-changes, map-authoring, stages, smagic-event, build-plan}` | JSON Schemas |
-| `scct://docs/{tools, map-authoring, map-design}` | These documents |
+| `scct://docs/{tools, tool-reference, ops, map-authoring, map-design}` | This guide, every tool field and wiki default, the bridge ops, and the Map JSON and Map Design formats |
 | `scct://examples/{versus-starter, diskhunt-arena, elevator-3floors, security-camnet, three-modes-sectors}` | Example specs |
 | `scct://editor/state`, `scct://map/summary`, `scct://map/validation`, `scct://map/spec`, `scct://map/screenshot/latest`, `scct://map/actor/{path}` | Live, from the editor |
 
@@ -134,14 +161,14 @@ Known gaps to work around:
 
 `create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`, `add_game_mode`, `design_security`, `ge_pass`, `review_map_against_wiki`, `fix_validation` and `prepare_release`.
 
-Each prompt is a step-by-step recipe that embeds the wiki pages and the rules it needs.
+Each prompt is a step-by-step recipe that embeds the wiki pages it needs and points at `scct://rules`.
 
 ## Errors
 
 | Code | Meaning / what to do |
 |---|---|
 | `not_connected` / `disabled` | No editor, or the server is off: `editor_status`, `editor_launch`, or ask the user to enable it |
-| `busy` | The editor is occupied (reason given: modal, menu, drag, rebuild, approval pending, another client); the server already retried. Ask the user to close dialogs |
+| `busy` | The editor is occupied (reason given: modal, menu, drag, rebuild); the server already retried. Ask the user to close dialogs. approval_pending (call `approval_wait` with the ticket) and `another_client` come back at once |
 | `stale` | The map changed since you read it; re-read and retry |
 | `invalid` | Bad arguments or document; the message names the field (reason several editors: pass `pid` to `editor_status`) |
 | `refused` | Blocked op, or one that needs a setting the user has not enabled (`AllowRawExec`, `AllowPlay`), unsaved changes, or a package that is not the map's own |

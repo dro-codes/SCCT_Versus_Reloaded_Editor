@@ -1,6 +1,7 @@
 // Checking a map against the wiki: map_validate, over the open map or a level
 // spec compiled offline. The rules themselves are LevelRulesModel.h.
 #include "Common.h"
+#include "../Embedded.h"
 #include "../LevelRulesModel.h"
 #if !defined(RE_MCP_STANDALONE) && __has_include("../LevelSpecCompiler.h")
 #include "../LevelSpecCompiler.h"
@@ -277,23 +278,26 @@ namespace
         Json compiled = Json::array(); // compiler diagnostics, offline
         Rules::Scene scene;
         std::string source;
-        if (Has(a, "spec") || Has(a, "scene"))
+        std::string specSource;
+        if (Has(a, "spec") || Has(a, "path") || Has(a, "scene"))
         {
             Json sceneJson;
             if (Has(a, "scene"))
             {
+                if (Has(a, "spec") || Has(a, "path")) throw std::runtime_error("Give scene, spec or path, one of them.");
                 sceneJson = Object(a, "scene");
                 source = "scene";
             }
             else
             {
 #ifdef RE_MCP_SPEC
-                const auto spec = Object(a, "spec");
+                const auto spec = LoadSpec(a, c, specSource, EmbeddedFiles());
                 Spec::Compiled result;
                 try { result = Spec::Compile(spec); }
                 catch (const Spec::SpecError& e)
                 {
-                    return Fail(std::string("The level spec does not compile: ") + e.what(), {{"pointer", e.pointer}, {"next", Json::array({Next("level_spec_validate", "See every problem in the spec, with its JSON pointer.")})}});
+                    return Fail(std::string("The level spec does not compile: ") + e.what(),
+                                {{"pointer", e.pointer}, {"next", Json::array({Next("level_spec_validate", "See every problem in the spec, with its JSON pointer.", specSource == "spec" ? Json() : Json{{"path", specSource}})})}});
                 }
                 sceneJson = result.scene;
                 PlanDocuments(result.plan, sceneJson);
@@ -303,10 +307,10 @@ namespace
                 {
                     Json f{{"severity", d.severity}, {"rule", d.rule}, {"wikiPage", d.wikiPage}, {"message", d.message}, {"actors", Json::array()}, {"source", "compiler"}};
                     if (!d.pointer.empty()) f["pointer"] = d.pointer;
-                    if (!d.fix.is_null()) f["fix"] = d.fix;
+                    if (!d.fix.is_null()) f["fix"] = SpecFix(d.fix);
                     compiled.push_back(f);
                 }
-                sources["spec"] = "compiled offline";
+                sources["spec"] = specSource == "spec" ? std::string("compiled offline") : "compiled offline from " + specSource;
 #else
                 return Fail("This build of Reloaded.Editor.Mcp has no level-spec compiler, so a spec cannot be checked offline. Check the open map (leave spec out) or pass a rules scene.");
 #endif
@@ -397,6 +401,9 @@ namespace
         }
         if (profile.empty()) profile = "draft";
 
+        // A spec checked offline is fixed by editing it, not by the tools
+        // that change the open map (Tools::SpecFix).
+        const bool offline = source == "spec";
         const auto findings = Rules::Check(scene, profile);
         std::set<std::pair<std::string, std::string>> seen;
         Json selected = Json::array();
@@ -404,7 +411,9 @@ namespace
         {
             seen.insert({f.rule, f.message});
             if (!include.count(Rules::Group(f.rule)) || !Selected(f.rule, only) || (!withInfo && f.severity == "info")) continue;
-            selected.push_back(Rules::ToJson(f));
+            auto finding = Rules::ToJson(f);
+            if (offline && finding.contains("fix")) finding["fix"] = SpecFix(finding.at("fix"));
+            selected.push_back(finding);
         }
         // What the compiler found in the spec itself. It runs these rules on
         // the scene too: those copies are the findings above (in this
@@ -430,12 +439,19 @@ namespace
         std::set<std::string> tools;
         for (const auto& f : shown)
         {
-            if (rank(f) > 0 || next.size() >= 3) break;
-            const auto tool = f.contains("fix") ? f.at("fix").value("tool", std::string()) : std::string();
+            if (offline || rank(f) > 0 || next.size() >= 3) break;
+            const auto tool = f.contains("fix") && f.at("fix").is_object() ? f.at("fix").value("tool", std::string()) : std::string();
             if (!tool.empty() && tools.insert(tool).second) next.push_back(Next(tool, "Fixes " + f.value("rule", std::string()) + " (see that finding's fix)."));
         }
-        if (errors || warnings) next.push_back(Next("map_validate", "Check again after the fixes.", {{"profile", profile}}));
-        else if (profile == "draft") next.push_back(Next("map_validate", "No errors or warnings in draft; check against the release profile before sharing the map.", {{"profile", "release"}}));
+        Json again{{"profile", profile}};
+        if (offline && specSource != "spec") again["path"] = specSource;
+        if (offline && errors) next.push_back(Next("level_spec_validate", "Fix the errors in the spec (fix.spec lists the edits at their JSON pointers), then check it again.", again));
+        else if (errors || warnings) next.push_back(Next("map_validate", offline ? "Check the spec again after editing it." : "Check again after the fixes.", again));
+        else if (profile == "draft")
+        {
+            again["profile"] = "release";
+            next.push_back(Next("map_validate", "No errors or warnings in draft; check against the release profile before sharing the map.", again));
+        }
 
         const std::string what = source == "live" ? "the open map" : source == "spec" ? "the level spec (offline)" : "the scene";
         std::string summary = (profile == "release" ? "Release" : "Draft") + std::string(" check of ") + what + ": " + Count(errors, "error") + ", " + Count(warnings, "warning") + ", " + Count(notes, "note") + ".";
@@ -455,56 +471,34 @@ void RegisterValidateTools(Registry& registry)
     t.name = "map_validate";
     t.title = "Check the map against the wiki";
     t.description =
-        "Checks a Versus map against the SCCT Versus Reloaded wiki and returns what to fix. Read-only. Without spec it checks the map open in the editor "
-        "(it reads the actors, Level Properties, Map Settings, GEs and the Map Design pieces, runs Map Check and the lighting budget, and traces the built level for floor heights); "
-        "with spec it compiles that scct.level-spec offline and checks what level_build would make, with no editor needed.\n"
-        "What it checks (scct://rules lists every rule with its severities):\n"
-        "- spawns: PlayerStarts for both teams (TeamNumber 0 spy, 1 merc), at least 3 each; spy starts not within 512 units of an objective, the teams not within 768 "
-        "of each other, every objective within 4096 of a merc start; starts out of solid geometry; objectives the spies can reach through the blockout;\n"
-        "- Story / Disk Hunt / Deathmatch: an SMission per mode (GameMode GM_Multi, GM_DiskHunt, GM_DeathMatch); Objectives and Triggers naming real actors of the right "
-        "kind; no SObjective outside a mission; MinimumObjectives reachable; sector chains (top mission bChained True over GM_Undefined sectors); SFlag with 1-5 drop zones; "
-        "SComputerObjectiveTrigger about 78 units above the floor, clear of collision, using DominationCaptureTime; SDisk Group 1-3, listed in the Disk Hunt mission, "
-        "enough for ScoreLimit and Handicap; Deathmatch AtResetEvent switching security off; objective player counts;\n"
-        "- CamNet: at least one SCamNetwork (mercs softlock without), exactly one bFirstCam, one closed NextCam/PrevCam loop, collision on;\n"
-        "- security: detectors' Event reaching an SAlarm Tag, motion sensors with volumes, alarms fed and doing something, no SBombTargetObjectiveTrigger locked, "
-        "MessagePriority 0-5, no SAlarmZoneInfo;\n"
-        "- other actors: LightEffect LE_None/LE_Spotlight/LE_Sunlight (LE_ESpotShadow for Echelon), no bPickable, no duplicated SoftBody, movers with a static mesh, "
-        "hidden tutorial and sprinkler sprites, ingredient collision and interaction sizes, Events that reach a Tag, fDeathPawnHeight and level SendAtTime;\n"
-        "- release: Map Settings (created, MapName in capitals, RespawnTime 5-15, lives 0-10, TimeLimit 0-20, Modes and ModesStrings aligned), the <Map>-i interface "
-        "textures (Menu/Briefing 256 DXT5, LoadingATT0/DEF0 512 DXT1), the map file name and release package names and .uas contents;\n"
-        "- geometric events against the wiki's measurements: ledge grab 208-320 standing, 448 running, 512 co-op, 115 obstacle, 64 pull-up, 32 long; fence 88-128 "
-        "(96 best); hand-over-hand 216 clearance; ladders an even number of bars, at least 8 (32 units a bar); zip line at most 384 up with 198 clearance (161 tucked); "
-        "pipes and ladders from the lower end;\n"
-        "- folded in: the Map Design check on blockout pieces (layout, traversal), Map Check rows (zone leaks among them) and the lighting budget.\n"
-        "Each finding has severity (error, warning or info), rule, wikiPage (read scct://wiki/<page>), message, actors (paths, or spec ids offline) and usually fix: "
-        "{tool, args, note?}, the tool call that repairs it (actors_edit edits on the live map; gameplay, security, environment, map_settings, geometric_events, "
-        "blockout, map_build or release fragments otherwise). Findings come errors first; summary counts them all, findings shows up to limit.\n"
-        "profile draft (default; a spec's own profile when spec is given) suits a map in progress; release is stricter (3 starts per team, Map Settings, interface "
-        "textures, isolated rooms and unreachable objectives become errors). include runs only some groups, and makes only their editor calls: wiki, design, "
-        "security, mapcheck, lighting, release. Fix the errors, then call map_validate again.";
+        "Checks a Versus map against the SCCT Versus Reloaded wiki and returns what to fix. Read-only. Without spec or path it checks the map open in the "
+        "editor (actors, Level Properties, Map Settings, GEs, Map Design pieces, Map Check, the lighting budget, floor heights traced in the built level); with "
+        "spec or path it compiles that scct.level-spec offline and checks what level_build would make. scct://rules lists every rule; "
+        "scct://docs/tool-reference#map_validate what each group covers.\n"
+        "Each finding has severity, rule, wikiPage (scct://wiki/<page>), message, actors and usually fix: on the live map {tool, args, note?}, the call that "
+        "repairs it; for a spec {spec: [{pointer, merge | change}], note?}, the edit of that spec. Errors come first; summary counts them all. profile draft "
+        "(default, or the spec's) or release (stricter). include runs only some groups and makes only their editor calls.";
     t.inputSchema = S::Input(
         {{"profile", S::Enum({"draft", "release"}, "Severities: draft for a map in progress (default), release before sharing it.")},
-         {"include", S::Array(S::Enum(Groups(), "A group of checks."),
-                              "Groups to run (default all): wiki (spawns, modes, objectives, CamNet, actors, level, GEs), design (Map Design pieces: layout, traversal, reachability), "
-                              "security (alarms and detectors), mapcheck (the editor's Map Check, zone leaks), lighting (the lighting budget), release (Map Settings, interface "
-                              "textures, file and package names).")},
+         {"include", S::Array({{"type", "string"}, {"enum", Groups()}}, "Groups to run, default all (scct://docs/tool-reference#map_validate says what each holds).")},
          {"spec", S::Free("A scct.level-spec to check offline instead of the open map (scct://schema/level-spec).")},
-         {"scene", S::Free("Advanced: a rules scene to check as it is (the shape scct://rules and LevelRulesModel.h describe).")},
-         {"modes", S::Array(S::Enum({"story", "diskhunt", "deathmatch"}, "A game mode."), "The modes the map must play. Default: the spec's gameplay.modes, or Story.")},
-         {"release", S::Free("Release facts to check: {packages: [name | {name, stock}], uas: {packages: [...]}, interface: {menu, briefing, loadingAtt, loadingDef}}.")},
+         {"path", S::String("Instead of spec: a .level.json file on this machine (absolute, or relative to the work directory), or scct://examples/<name>.")},
+         {"scene", S::Free("Advanced: a rules scene (LevelRulesModel.h) to check as it is.")},
+         {"modes", S::Array({{"type", "string"}, {"enum", {"story", "diskhunt", "deathmatch"}}}, "The modes the map must play. Default: the spec's, or Story.")},
+         {"release", S::Free("Release facts to check, as release action check returns them.")},
          {"rules", S::Array({{"type", "string"}}, "Only these rules: ids such as camnet.loop, or prefixes such as ge, story or spawns.")},
-         {"info", S::Boolean("Include info findings (summaries, travel times, recommendations). Default true.")},
-         {"trace", S::Boolean("Live map: trace the built level for the floors under terminals, disks and GEs, which heights and clearances need. Default true.")},
+         {"info", S::Boolean("Include info findings. Default true.")},
+         {"trace", S::Boolean("Live map: trace floor heights under terminals, disks and GEs. Default true.")},
          {"limit", S::Integer("Most findings to return, errors first. Default 200.", 1, 2000)}});
     Json finding{{"type", "object"},
                  {"properties",
-                  {{"severity", S::Enum({"error", "warning", "info"}, "How much it matters in this profile.")},
-                   {"rule", S::String("The rule id (scct://rules).")},
-                   {"wikiPage", S::String("The wiki page behind the rule: read scct://wiki/<page>.")},
-                   {"message", S::String("What is wrong and why.")},
-                   {"actors", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Actor paths (spec ids offline)."}}},
-                   {"fix", {{"type", "object"}, {"description", "The tool call that repairs it: {tool, args, note?}."}}},
-                   {"pointer", S::String("Offline: the JSON pointer into the spec.")}}},
+                  {{"severity", {{"type", "string"}, {"enum", {"error", "warning", "info"}}}},
+                   {"rule", {{"type", "string"}}},
+                   {"wikiPage", {{"type", "string"}}},
+                   {"message", {{"type", "string"}}},
+                   {"actors", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                   {"fix", {{"type", "object"}}},
+                   {"pointer", {{"type", "string"}}}}},
                  {"required", {"severity", "rule", "wikiPage", "message"}}};
     t.outputSchema = {{"type", "object"},
                       {"properties",
@@ -513,7 +507,7 @@ void RegisterValidateTools(Registry& registry)
                                                      {"source", {{"type", "string"}}}, {"total", {{"type", "integer"}}}, {"shown", {{"type", "integer"}}}}},
                                      {"required", {"errors", "warnings", "info"}}}},
                         {"findings", {{"type", "array"}, {"items", finding}}},
-                        {"sources", {{"type", "object"}, {"description", "What was read for the check, and what could not be."}}},
+                        {"sources", {{"type", "object"}}},
                         {"next", {{"type", "array"}}}}},
                       {"required", {"summary", "findings"}}};
     t.readOnly = true;

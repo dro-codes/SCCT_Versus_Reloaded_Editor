@@ -392,6 +392,18 @@ Json BridgeClient::Call(const std::string& op, const Json& args, const CallOptio
             s.Remember(id, op, message);
             if (message.value("ok", false)) return message.contains("result") ? message.at("result") : Json();
             auto error = FromBody(message.value("error", Json()));
+            // A review window holds the editor until the user answers it, and
+            // the call that waits for that answer (approval_wait) would queue
+            // behind this one; another client holds the pipe until it leaves.
+            // Neither passes by waiting, so the agent hears at once.
+            if (error.code == Busy && (error.reason == "approval_pending" || error.reason == "another_client"))
+            {
+                Json details = error.details.is_object() ? error.details : Json::object();
+                if (error.reason == "approval_pending" && !details.contains("ticket"))
+                    for (auto it = s.abandoned.rbegin(); it != s.abandoned.rend(); ++it)
+                        if (!it->second.empty()) { details["ticket"] = it->second; break; }
+                throw Bridge::Error(error.code, error.what(), error.reason, details.empty() ? Json() : details);
+            }
             if (error.code == Busy && Clock::now() + std::chrono::milliseconds(backoff) < deadline)
             {
                 // The wait shows as progress, so the client sees why the call is slow.
@@ -423,6 +435,8 @@ Json BridgeClient::Call(const std::string& op, const Json& args, const CallOptio
 Json BridgeClient::Hello()
 {
     std::lock_guard<std::mutex> guard(impl->lock);
+    // A cancelled request stops here too: editor_launch polls Hello and Editors.
+    if (impl->stopped) throw Bridge::Error(Cancelled, "The request was cancelled.");
     if (impl->pipe == INVALID_HANDLE_VALUE) impl->Connect();
     return impl->hello;
 }
@@ -439,6 +453,7 @@ Json BridgeClient::State()
 Json BridgeClient::Editors()
 {
     std::lock_guard<std::mutex> guard(impl->lock);
+    if (impl->stopped) throw Bridge::Error(Cancelled, "The request was cancelled.");
     Json out = Json::array();
     for (auto pid : Discover())
         out.push_back({{"pid", pid}, {"selected", pid == impl->selected}, {"connected", impl->pipe != INVALID_HANDLE_VALUE && pid == impl->pid}});

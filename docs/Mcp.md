@@ -144,7 +144,10 @@ writes messages; it never touches the map.
 
 **Busy.** When the editor cannot take a call, the reply is `busy` with a
 reason, and the server tries again (after 250 ms, doubling to 4 s) until the
-call's time runs out:
+call's time runs out. Two reasons come back to the agent at once instead,
+since waiting cannot help and the server runs one request at a time:
+`approval_pending` (the agent should call `approval_wait` with the ticket the
+error carries) and `another_client`.
 
 | Reason | What is going on |
 | --- | --- |
@@ -180,8 +183,11 @@ To take a call back:
 
 - **Edit > Undo** or Ctrl+Z, as for any change;
 - **RE+ Tools > MCP > Undo last MCP call**;
-- the agent's `editor_undo`, which by default undoes the server's last call,
-  and refuses rather than undo something newer that you did.
+- the agent's `editor_undo`, which with no arguments undoes the server's
+  newest call that is still undoable (called again, the one before it). It
+  refuses rather than undo something newer that you did, and undoes nothing
+  when this server has made no change: it never undoes blindly. `steps`
+  undoes the newest Undo steps whatever made them.
 
 An MCP call is undone as a whole only while its steps are the newest in the
 Undo buffer; otherwise it is refused (`not_newest`) and Redo is kept.
@@ -192,10 +198,16 @@ preview rows (the Map JSON preview's **Add**, **Modify**, **Move**, **Delete**,
 **Link**, **Package** and **Surface** rows) and changes nothing.
 
 **Dialogs.** While a call runs, a dialog it opens is answered: known ones with
-their known answer, any other with its most cautious button (Cancel, No, Close
-or OK, in that order). The call then fails as `dialog_blocked` with the
-dialog's title and text, and its map changes are undone. Progress windows are
-left alone.
+their known answer, any other with its most cautious button, chosen by its
+control id (Cancel, No, Close, then Abort) so that a translated message box is
+answered the same way, OK only when it is the only button; a dialog with no
+safe button is closed. The call then stops as `dialog_blocked` with the
+dialog's title and text, and its map changes are undone, unless a step had
+already written a file (a save, an interface texture or a package), in which
+case the reply says what was written and nothing is undone, so the map and
+the file stay alike. Progress windows are left alone. A call that arrives
+while another program's or RE+'s own dialog is open waits (`busy` /
+`modal`) instead of running inside it.
 
 **History.** Every change, applied or failed, is written to
 `System\ReloadedEditor\Mcp\history\<date>-<time>-<call>-<op>.json`
@@ -210,7 +222,10 @@ reported meanwhile. Some MCP clients stop waiting sooner on their own (Claude
 Code's limit is set with the `MCP_TOOL_TIMEOUT` environment variable, in
 milliseconds). A cancelled request is dropped if it has not started, and taken
 out of the review window if it is waiting there; a change already running in
-the editor finishes.
+the editor finishes. A tool that waits without the editor (`editor_launch`,
+`editor_restart`'s wait for the editor to close, `approval_wait`, frame
+extraction) stops at its next check or progress report, so the next request
+does not queue behind it.
 
 ### Approval
 
@@ -242,7 +257,20 @@ Every tool that changes something takes `dryRun` and `label`, and returns
 `editor_undo` takes the `call`) and `next` (suggested follow-up calls).
 Pictures (screenshots, plans, frames) come back as MCP image content.
 Errors come back as tool results marked `isError`, with `code`, `reason`, a
-`hint` and whether retrying can help.
+`hint` and whether retrying can help. An error carries those details as
+`structuredContent` only when they fit the tool's `outputSchema`; otherwise
+(`map_validate`, `level_spec_validate`) they are in the text block, since
+clients validate any `structuredContent` they get, errors included.
+
+To keep `tools/list` small (about 75 KB for the 32 tools, from 150 KB), the
+descriptions give each argument's shape and point at three documents the
+agent reads as resources: `scct://docs/tools` (the conventions every tool
+shares: units, ids, positions, how the intent tools merge, the two forms of a
+finding's fix), `scct://docs/tool-reference` (every field of every tool and
+the wiki defaults the compiler applies) and `scct://docs/ops` (the bridge
+ops). The intent tools' input schemas are outlines (each argument's type, and
+`id` where a list matches by id); the merged spec is checked in full, with the
+JSON pointer of any problem.
 
 ### Session
 
@@ -251,7 +279,7 @@ Errors come back as tool results marked `isError`, with `code`, `reason`, a
 | `editor_status` | Start here. Connection, the open map, unsaved changes, Undo state, approval, the `[Mcp]` settings and every editor with a pipe. `pid` picks an editor when several run. Read-only. |
 | `editor_launch` | Starts `Reloaded_Editor.exe -reMcp` and waits (`waitSeconds`, default 180) for its pipe; `map` opens a map once started. Refuses when `Enabled` is 0 unless `force`. With `-reMcp` the editor skips its startup update check. |
 | `editor_restart` | Saves (`save`, default true), closes the editor, starts it again and reopens the map. The wiki requires this once a new map is first saved, before Map Settings can be edited. Refuses a map that was never saved. |
-| `editor_undo` | No arguments: undoes this server's last call. `call` undoes that MCP call; `steps` undoes that many Undo steps whatever made them; `redo` with `steps` redoes. |
+| `editor_undo` | No arguments: undoes this server's newest call that is still undoable, and nothing when it has made none. `call` undoes that MCP call; `steps` undoes that many Undo steps whatever made them; `redo` with `steps` redoes (and makes a redone call undoable again). |
 | `approval_wait` | Keeps waiting for the review window: `ticket` (required), `timeoutSeconds` (default 50). |
 | `editor_log` | The editor's log (last 2,000 lines): `level` (all, warning, error), `contains`, `since`, `newOnly`, `max`. Read-only. |
 | `map_file` | `action`: `new`, `open`, `save` or `save_as`. `path` (a bare name such as `AquaD` is looked up in `Packages\MapsEd`), `mapName` (save_as names the file after its first four letters plus `D`), `discardUnsaved`, `overwrite`. |
@@ -263,20 +291,20 @@ Errors come back as tool results marked `isError`, with `code`, `reason`, a
 | --- | --- |
 | `map_query` | Reads the map. `what`: `summary`, `actors`, `actor`, `level`, `schema`, `assets`, `wiring`, `spawns`, `missions`, `security`, `cameras`, `lights`, `stages`, `design`, `ges` or `spec`. `actors` filters by `classes`, `tags`, `names`, `near {at, radius}`, `box {min, max}`, `selected`, with `fields` (names or `"all"`), `limit` and `cursor`; `actor` takes `actor` (path, name or `{path, class}`) and `includeSchema`; `assets` takes `kind` and `query`. Read-only. |
 | `view_screenshot` | A PNG of a viewport: `viewport` (`perspective` or `top`), `maxEdge` (64-2048, default 1024), `camera {location, rotation}`, `frame` (actors), or `preset`: `overview`, `spawn:spy`, `spawn:merc`, `objective:<name>`. The camera is put back afterwards. |
-| `plan_render` | A top-down plan PNG, north up, of a `spec` (offline) or of the live map (no spec): pieces, brushes, spawns in team colours, objectives, cameras, security, lights, Event links and zones. `maxEdge`, `options` (storey, labels, grid, ...). |
+| `plan_render` | A top-down plan PNG, north up, of a `spec` or `path` (a `.level.json`, or `scct://examples/<name>`; offline) or of the live map (neither): pieces, brushes, spawns in team colours, objectives, cameras, security, lights, Event links and zones. `maxEdge`, `options` (`storey`, `labels`, `grid`, `legend`, `actorLabels`, `cones`, `title`). |
 
 ### Validate
 
 | Tool | Purpose and main arguments |
 | --- | --- |
-| `map_validate` | Checks the open map, or a `spec` offline, against the wiki. `profile` (`draft` or `release`), `include` (groups), `rules` (ids or prefixes), `modes`, `release`, `trace`, `info`, `limit`. See [Validation](#validation). Read-only. |
+| `map_validate` | Checks the open map, or a `spec` or `path` offline, against the wiki. `profile` (`draft` or `release`), `include` (groups), `rules` (ids or prefixes), `modes`, `release`, `trace`, `info`, `limit`. See [Validation](#validation). Read-only. |
 
 ### Spec
 
 | Tool | Purpose and main arguments |
 | --- | --- |
-| `level_spec_validate` | Parses and compiles a `scct.level-spec` offline, runs every rule and draws the plan. `spec` or `path` (a file, or `scct://examples/<name>`), `profile`, `render`, `maxEdge`, `options`, `limit`. Returns `valid`, `summary`, `diagnostics` (each with a JSON `pointer` into the spec), the plan's steps and the plan image. |
-| `level_build` | Builds a spec in the open map as one Undo step. `spec` or `path`; `mode` `preview` (default) or `apply`; `sync` `incremental`, `replace` or `merge`; `brushMode` `pieces` or `polygons`; `build` `geometry` (default), `all` or `none`; `screenshot` (default true); `save` (a path in `Packages\MapsEd`); `force` (apply despite errors); `profile`. See [The level spec](#the-level-spec). |
+| `level_spec_validate` | Parses and compiles a `scct.level-spec` offline, runs every rule and draws the plan. `spec` or `path` (a file, or `scct://examples/<name>`), `profile`, `render`, `maxEdge`, `options`, `limit`. Returns `valid`, `summary`, `diagnostics` (each with a JSON `pointer` into the spec, and a `fix` that is an edit of the spec), the plan's steps and the plan image. |
+| `level_build` | Builds a spec in the open map as one Undo step. `spec` or `path`; `mode` `preview` (default) or `apply`; `sync` `incremental`, `replace` or `merge`; `brushMode` `pieces` or `polygons`; `build` `geometry` (default), `all` or `none`; `screenshot` (default true); `save` (a path in `Packages\MapsEd`); `force` (apply despite errors); `profile`. A preview with errors, or with findings about other parts of the spec, saves the spec it built in the work folder (`specFile`) and points `level_spec_validate` at that file. See [The level spec](#the-level-spec). |
 
 ### Intent
 
@@ -289,14 +317,15 @@ from (a map without one starts a new spec), and only what changed is built, as
 `existing` (live actors to refer to by id), `build` (`auto`, `geometry`, `all`,
 `none`), `screenshot`, `save`, `force`, `mapName` (for a map with no spec yet).
 Errors the change brings block it unless `force`; errors the spec already had
-are listed as standing and do not.
+are listed as standing and do not. Each description lists the fields;
+`scct://docs/tool-reference` has every field and the wiki defaults.
 
 | Tool | Purpose and main arguments |
 | --- | --- |
 | `blockout` | Rooms, corridors, vents, crawlways, doorways, stairs, ramps and platforms as Map Design pieces: `pieces`, `doorways`, `storeys`, `vertical`, `brushes`, `surfaces`, `meshes`, `defaults`, `brushMode`. |
 | `gameplay` | `spawns` (spy, merc, toggles), `modes` and `removeModes`, `story` (mission, objectives with terminal, flag and bomb triggers, sectors), `diskhunt`, `deathmatch`, `playerCounts`, `targets`. |
 | `security` | `alarms`, `devices` (laser, camera, motion, presence, mine) and `camnet` (the Mercenaries' camera loop). |
-| `mechanisms` | `doors`, other static-mesh `movers`, `lifts` (with `doorMesh`, `doors`, `carSwitch`), `buttons` (buttons and hacking panels). |
+| `mechanisms` | `doors`, other static-mesh `movers`, `lifts` (with `doorMesh`, `carDoorMesh`, `doorOpen`, `doorMoveTime`, `doors`, `switches`, `carSwitch`: the lift makes its own external doors, Key 0 open and Key 1 closed, and the car's SLiftDoor, all run by the SLift; never model them as `doors`), `buttons` (buttons and hacking panels). |
 | `events` | `links` (Event to Tag, with delay), `magic` (SMagicEvent documents), `messages`, `shakers`, `noises`, `level` (LevelInfo events at a time), `triggerLights`. |
 | `environment` | `lights` (presets ceiling, spot, sun, echelon-spot), `sounds`, `zones`, `volumes`, `ingredients`, `objects`, `meshes`, `vision`, `props`, `fish`, `softbody`, `animated`, `tutorials`. |
 | `geometric_events` | `ges` (ledge, hoh, pipe, ladder, zipline, fence, pole) and `geTriggers`. With no arguments it lists the GEs it knows. |
@@ -308,8 +337,8 @@ are listed as standing and do not.
 | --- | --- |
 | `actors_edit` | Direct edits in one Undo step: `edits` of `{action, actor, ...}` with `action` `set` (`properties` in Map JSON form), `move` (`delta`), `turn` (`rotation`), `drop`, `copy` (`offsets`), `delete` (needs `allowDeletes: true`), `copy_properties` (`from`, `only`) or `rename_tag` (`tag`, renaming the Events that use it too). |
 | `map_changes_apply` | A `scct.map-changes` `document` as written by hand ([MapAuthoring.md](MapAuthoring.md)), with `baseDirectory` for relative texture paths. |
-| `workflow_request` | One bridge op by name: `op` and `args`. See [Bridge ops](#bridge-ops). |
-| `editor_exec` | One console `command`. Off unless `AllowRawExec=1`; QUIT, EXIT, MAP NEW/LOAD/SAVE/IMPORT, OBJ SAVEPACKAGE, TRANSACTION and AUDIO are always refused. Console commands skip the stale checks and may not be undoable. |
+| `workflow_request` | One bridge op by name: `op` and `args`. `scct://docs/ops` lists every op with its policy and arguments; see [Bridge ops](#bridge-ops). |
+| `editor_exec` | One console `command`. Off unless `AllowRawExec=1`. Always refused: commands that quit or crash the editor, run a file of commands (`EXEC`), load, save, import or export maps, packages, textures, meshes or brushes (`MAP`, `OBJ`, `SAVEMAPPROP`, `LOADMAPPROP`, `TEXTURE`, `STATICMESH`, `MESH`, `BRUSH` imports and exports), `TRANSACTION` and `AUDIO`; `FILE=` outside the work folder and `WriteRoots`; `PACKAGE=` other than the map's own. The description lists the editor's deny list. Console commands skip the stale checks and may not be undoable. |
 
 ### Import and media
 
@@ -325,13 +354,14 @@ are listed as standing and do not.
 
 | Tool | Purpose and main arguments |
 | --- | --- |
-| `release` | `action`: `check` (read-only: file names, the MapsEd and Maps copies, package names, `<Map>-i.utc` and its interface textures, the `.uas`, the packages the map imports; `base` compares stock packages with a clean install), `sounds` (builds `Packages\Sounds\<Map>.uas` with Interface and `Amb_<Map>`, `quality` default 5.0), `optimise` (Optimise Map Assets' report, or a release copy with `packs`/`suggested`), `package` (the archive's file list) or `interface` (`images` into `<Map>-i`). |
+| `release` | `action`: `check` (read-only: file names, the MapsEd and Maps copies, package names, `<Map>-i.utc` and its interface textures, the `.uas`, the packages the map imports; `base` compares stock packages with a clean install), `sounds` (builds `Packages\Sounds\<Map>.uas` with Interface and `Amb_<Map>`, `quality` default 5.0), `optimise` (Optimise Map Assets' report, or a release copy with `packs`/`suggested`, in `<Game>\Releases\<Map>` or `folder`, which must be a full path inside `<Game>\Releases`, the work folder or `[Mcp] WriteRoots`: the editor refuses any other, since with `overwrite` the copy deletes and rewrites the map's files there), `package` (the archive's file list) or `interface` (`images` into `<Map>-i`). |
 
 ## Bridge ops
 
 `workflow_request` runs one op of the editor's workflow bridge, the same ops
-RE+'s own tests drive. Each op has a policy, which the editor enforces whatever
-the client asks:
+RE+'s own tests drive. The agent reads the list, with each op's policy and
+arguments, as `scct://docs/ops`. Each op has a policy, which the editor
+enforces whatever the client asks:
 
 | Policy | Ops |
 | --- | --- |
@@ -362,6 +392,9 @@ Arguments of the ops made for the MCP server (the others take the shapes
   `blob.free {blob}`.
 - `authoring.preview` / `authoring.apply {document, baseDirectory}`: the Map
   JSON import; the result adds `identities` (create id to `{path, class}`).
+  Over the bridge, a document's `texture` and `save` operations are refused
+  unless their package is one of the map's own (`<Map>_<name>`, as for
+  `package.save`); a `load` alone is allowed.
 - `settings.inspect {}`, `settings.edit {snapshot, changes}`: Level Properties
   against the snapshot just read.
 - `design.block` / `design.blockbatch` take `spec.material`;
@@ -384,7 +417,9 @@ Arguments of the ops made for the MCP server (the others take the shapes
   alphaTexture, lodSet}`, `asset.mesh {file (.ase), package, group, name,
   collision}`, `package.save {package, overwrite}`,
   `interface.texture {slot, file}`, `minimap.apply {...}`,
-  `uas.build {packages, quality}`.
+  `uas.build {packages, quality}`, `optimise.release {packs, destination,
+  assetPackage, folder, overwrite}` (the folder only inside `<Game>\Releases`,
+  the work folder or `WriteRoots`).
 - `undo.call {call}`, `undo.steps {count}`, `redo.steps {count}`,
   `log.tail {since}`, `approval.status {ticket}`, `exec {command}`.
 - `mcp.plan {label, pre, steps, post, dryRun}`: steps are `{id, op, args,
@@ -406,7 +441,7 @@ Arguments of the ops made for the MCP server (the others take the shapes
 | `scct://wiki/{page}` | One digest per wiki page, with class and property names exactly as the wiki writes them: `home`, `spawn-points`, `game-modes`, `map-settings`, `level-properties`, `vision-mode-properties`, `geometric-events`, `events`, `alarms`, `movers`, `elevators`, `lighting`, `material-classes`, `static-meshes`, `sound-actors`, `sound-browser`, `gameplay-objects`, `buttons-and-hacking-panels`, `level-ingredients`, `zones-and-volumes`, `softbody-actors`, `animated-meshes`, `fish`, `map-tutorials`, `map-packaging`. |
 | `scct://rules` | Every validation rule with its draft and release severity, its wiki page and what it checks, generated from the checks themselves. |
 | `scct://schema/{name}` | JSON Schemas: `level-spec`, `map-changes`, `map-authoring`, `stages`, `smagic-event`, `build-plan`. |
-| `scct://docs/{name}` | `tools` (the agent's guide), `map-authoring` and `map-design` (abridged from this folder). |
+| `scct://docs/{name}` | `tools` (the agent's guide and the conventions every tool shares), `tool-reference` (every tool field and the wiki defaults), `ops` (the bridge ops, their policies and arguments), `map-authoring` and `map-design` (abridged from this folder). |
 | `scct://examples/{name}` | Example level specs (see [Examples](#examples)). |
 | `scct://editor/state` | Live: the open map's identity and state. |
 | `scct://map/summary` | Live: actor counts, spawns per team, missions, security, cameras. |
@@ -416,7 +451,16 @@ Arguments of the ops made for the MCP server (the others take the shapes
 | `scct://map/actor/{path}` | Live: one actor's editable values, such as `scct://map/actor/MyLevel.Light12`. |
 
 Clients can subscribe to the live resources; the server announces a change
-after each change it makes.
+after each call that changed something in the editor (a bridge call that
+edits, saves, builds or undoes, and not a dry run, a preview or a read), so a
+preview does not make subscribers re-read `scct://map/validation`.
+
+**Protocol details.** Versions 2025-11-25, 2025-06-18, 2025-03-26 and
+2024-11-05 are spoken. A JSON-RPC batch is answered with one array of
+replies under 2025-03-26 and older; 2025-06-18 removed batches, so from then
+on a batch gets one `-32600` error. A `prompts/get` argument the prompt does
+not take, or one that is not a string, is `-32602`; reading
+`scct://map/actor/<path>` for an actor the map does not have is `-32002`.
 
 The digests were written from the wiki's raw pages; each names its source page.
 `tools/mcp/build_wiki_resources.ps1` fetches the pages again and lists names and
@@ -424,8 +468,9 @@ numbers a digest lacks, for when the wiki changes.
 
 ## Prompts
 
-Each prompt is a step-by-step recipe that carries the wiki pages and rules it
-needs.
+Each prompt is a step-by-step recipe that carries the wiki pages it needs and
+points at `scct://rules`, which it no longer embeds (the catalogue alone is
+18 KB).
 
 | Prompt | Arguments (required in bold) | What it does |
 | --- | --- | --- |
@@ -701,10 +746,15 @@ textures, isolated rooms and objectives the spies cannot reach become errors.
 
 **Findings.** Each has `severity` (error, warning or info), `rule`,
 `wikiPage` (read it as `scct://wiki/<page>`), `message`, `actors` (paths, or
-spec ids offline) and usually `fix`: the tool call that repairs it. Errors come
-first. On the live map, `trace` (on by default) measures the built level: the
-floor under terminals, disks and GEs, so heights and clearances are checked
-for real.
+spec ids offline) and usually `fix`. On the live map the fix is the tool call
+that repairs it, `{tool, args, note?}`. For a spec checked offline
+(`map_validate` with `spec` or `path`, `level_spec_validate`, `level_build`
+with a spec) it is an edit of that spec, `{spec: [{pointer, merge | change}],
+note?}`: the intent tools would change the open map's stored spec instead of
+the document being checked. A fix only the built map can take keeps its tool
+call, marked `live: true`. Errors come first. On the live map, `trace` (on
+by default) measures the built level: the floor under terminals, disks and
+GEs, so heights and clearances are checked for real.
 
 `level_spec_validate` and `level_build` run the same rules on the compiled spec
 before anything reaches the editor.
@@ -729,8 +779,9 @@ What the server and the editor never do, whatever the agent asks:
 - **Write elsewhere.** Maps are saved in `Packages\MapsEd` under ASCII names
   without spaces. The editor writes packages in `Packages\Textures`,
   `Packages\StaticMeshes` and `Packages\Sounds` under the map's names, release
-  copies in `Releases\<Map>` (as Optimise Map Assets does), and its own files in
-  `System\ReloadedEditor\Mcp`. The media and import tools write only in the work
+  copies in `Releases\<Map>` (as Optimise Map Assets does; over the bridge a
+  release copy elsewhere must be inside the work folder or `WriteRoots`), and
+  its own files in `System\ReloadedEditor\Mcp`. The media and import tools write only in the work
   folder and `WriteRoots`, and run only the ffmpeg you configured.
 - **Run console commands.** `editor_exec` is off unless `AllowRawExec=1`, and
   quitting, map loads and saves, package saves, transactions and audio
@@ -789,6 +840,8 @@ what follows as the current state, not a promise:
   answer or the client goes away.
 - The DLL sends no change events of its own yet: live resources are marked
   updated after each change the server makes, not after your own edits.
+- `tools/list` is about 75 KB; the import and media tools' descriptions
+  (about 20 KB) are now its largest part.
 
 ## Troubleshooting
 
@@ -800,6 +853,8 @@ what follows as the current state, not a promise:
 | `protocol_mismatch` | The exe and the DLL come from different RE+ versions. Install both from the same release, then restart the MCP client. |
 | `busy` with a reason | See [How calls run](#how-calls-run): close the dialog or menu, finish the drag, answer a startup window, restore a minimised editor. |
 | `busy` / `another_client` | Another client holds the editor. Close it, or use **Disconnect client**. |
+| `busy` / `approval_pending` | A change waits in the review window. Answer it; the agent continues with `approval_wait`. |
+| `refused` / `outside_write_roots` | A release copy's folder is outside `<Game>\Releases`, the work folder and `WriteRoots`. Leave the folder out, or add it to `[Mcp] WriteRoots`. |
 | `invalid` / `several_editors` | Several editors are running; `editor_status` lists them and takes `pid`. |
 | `stale` | The map changed since the agent read it. It should read again and retry. |
 | `timeout` / `awaiting_approval` | The change is waiting in the review window. Answer it; the agent continues with `approval_wait`. |

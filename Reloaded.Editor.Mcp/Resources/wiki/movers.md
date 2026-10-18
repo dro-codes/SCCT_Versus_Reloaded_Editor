@@ -146,6 +146,12 @@ Triggers (`trigger:{kind}`):
 - `button` or `panel`: an `SInterrupteur`. See `scct://wiki/buttons-and-hacking-panels`.
 - `event`: any Tag.
 
+Doors a story sector opens (`gameplay.story.sectors[].actions` `{kind: "open", target, hold}`):
+- With `hold` (the default) the door becomes `TriggerToggle`, so the sector's one Trigger leaves it open.
+- **Every other Trigger would toggle it shut again.** So a held door that something else also opens is an error (`story.action-door-trigger`): its own `presence`, `button` or `panel` trigger, a button's `targets`, an `events.links` link, an alarm's `outputs`, or another sector that holds it open.
+  - Give that door `trigger:{kind:"event"}`, so only the sector opens it, and the other team a door of its own (`three-modes-sectors` puts a merc hatch beside each shutter).
+  - Or set `hold: false`: the door then opens for its `stayOpen` time and stays `TriggerOpenTimed`.
+
 Locks and lifts:
 - An alarm's `lockMovers` puts a door into `MoversToLock`.
 - Elevators use `lifts` (see `scct://wiki/elevators`).

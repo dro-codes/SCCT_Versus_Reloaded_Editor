@@ -6,6 +6,7 @@
 #include "../Reloaded.Editor.Mcp/FakeBridge.h"
 #include "../Reloaded.Editor.Mcp/BridgeClient.h"
 #include "../Reloaded.Editor.Mcp/Tools/Common.h"
+#include "../Reloaded.Editor.Mcp/Embedded.h"
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -143,9 +144,33 @@ void Errors()
     auto busy=h.Call("test_throw");
     Check(busy.at("isError")==true && busy.at("structuredContent").at("code")=="busy" && busy.at("structuredContent").at("retryable")==true,"bridge errors keep their code");
     Check(Text(busy).find("A dialog is open in the editor")!=std::string::npos,"busy reasons explained");
-    // A batch is answered message by message.
+    // 2025-06-18 has no batches: one error, nothing run.
+    h.Clear();
     h.server->Handle(R"([{"jsonrpc":"2.0","id":"b1","method":"ping"},{"jsonrpc":"2.0","id":"b2","method":"ping"}])");
-    Check(h.Find("b1").contains("result") && h.Find("b2").contains("result"),"batch");
+    Check(h.Find("b1").is_null() && h.Find("b2").is_null() && h.Find(nullptr).at("error").at("code")==-32600,"batches are refused from 2025-06-18");
+    // Prompt arguments the prompt does not take are the caller's mistake.
+    auto extra=h.Request("prompts/get",{{"name","versus_starter"},{"arguments",{{"theme","harbour"},{"colour","red"}}}});
+    Check(extra.at("error").at("code")==-32602 && extra.at("error").at("message").get<std::string>().find("no argument \"colour\"")!=std::string::npos,"an unknown prompt argument is invalid params");
+    Check(h.Request("prompts/get",{{"name","versus_starter"},{"arguments",{{"theme",5}}}}).at("error").at("code")==-32602,"prompt arguments are strings");
+    // A missing actor is a missing resource.
+    h.fake.On("actors.query",Json{{"actors",Json::array()},{"total",0}});
+    Check(h.Request("resources/read",{{"uri","scct://map/actor/MyLevel.Nothing7"}}).at("error").at("code")==-32002,"a missing actor resource is not found");
+}
+// 2025-03-26 batches come back as one array, queued requests included.
+void Batches()
+{
+    Harness h("2025-03-26");
+    h.fake.On("log.tail",Json{{"lines",Json::array()},{"last",3}});
+    h.Clear();
+    h.server->Handle(R"([{"jsonrpc":"2.0","id":"b1","method":"ping"},{"jsonrpc":"2.0","id":"b2","method":"tools/call","params":{"name":"editor_log","arguments":{}}},)"
+                     R"({"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":"b3","method":"no/such"}])");
+    h.server->Wait();
+    std::lock_guard<std::mutex> g(h.m);
+    Check(h.out.size()==1 && h.out[0].is_array() && h.out[0].size()==3,("one array of three replies: "+std::string(h.out.empty()?"":h.out[0].dump().substr(0,300))).c_str());
+    std::set<std::string> ids;
+    for(const auto& reply:h.out[0])ids.insert(reply.at("id").get<std::string>());
+    Check(ids==std::set<std::string>({"b1","b2","b3"}),"every request of the batch answered, the notification not");
+    for(const auto& reply:h.out[0])if(reply.at("id")=="b2")Check(reply.at("result").at("isError")==false,"the queued tool call ran");
 }
 void Lists()
 {
@@ -535,6 +560,186 @@ void Launch()
     Check(off.at("isError")==true && Text(off).find("Enable MCP server")!=std::string::npos && launched.size()==before+1,"an editor with MCP off is not started");
     process=saved;
 }
+// Every tool with an outputSchema keeps to it: results always carry
+// structuredContent that fits, errors carry it only when it fits (clients
+// validate it even with isError).
+void Conforms(const Json& reply,const Tool& tool,const std::string& what)
+{
+    Check(reply.contains("result"),(tool.name+" "+what+" answers: "+reply.dump().substr(0,300)).c_str());
+    const auto& result=reply.at("result");
+    if(!result.value("isError",false))Check(result.contains("structuredContent"),(tool.name+" "+what+": a result has structured content").c_str());
+    if(!result.contains("structuredContent"))return;
+    const auto problem=Protocol::CheckStructured(tool.outputSchema,result.at("structuredContent"));
+    Check(problem.empty(),(tool.name+" "+what+": "+problem+" in "+result.at("structuredContent").dump().substr(0,400)).c_str());
+}
+void OutputSchemas()
+{
+    Harness h;
+    auto& memory=Tools::Memory();
+    {std::lock_guard<std::mutex> g(memory.lock);memory.Reset();}
+    // A working editor for each tool's success path.
+    h.fake.On("editor.state",OpenState());
+    h.fake.On("map.save",Json{{"file","C:/Game/Packages/MapsEd/AquaD.sdc"}});
+    h.fake.On("design.build",Json(true));
+    h.fake.On("mapcheck.run",Json{{"rows",Json::array()},{"summary",Json::object()}});
+    h.fake.On("undo.call",Json{{"steps",1}});
+    h.fake.On("authoring.apply",Json{{"identities",{{"Lamp",{{"path","MyLevel.Light5"},{"class","Engine.Light"}}}}},{"deleted",Json::array()}});
+    h.fake.On("actors.query",Json{{"actors",Json::array({{{"path","MyLevel.Light1"},{"class","Engine.Light"},{"name","Light1"}}})},{"total",1}});
+    h.fake.On("magic.inspect",Json{{"actor",{{"path","MyLevel.Light1"},{"class","Engine.Light"}}},{"values",{{"LightBrightness","64"}}}});
+    h.fake.On("authoring.mapid",Json{{"map","unsaved:7:2"}});
+    h.fake.On("mcp.plan",Json{{"steps",Json::object()},{"undo",{{"steps",1}}}});
+    h.fake.On("exec",Json{{"ok",true},{"output",""}});
+    const Json document{{"format","scct.map-changes"},{"version",2},{"map","*"},{"operations",Json::array({{{"op","create"},{"id","Lamp"},{"class","Engine.Light"}}})}};
+    const std::map<std::string,Json> working{
+        {"editor_launch",Json::object()},{"editor_restart",{{"dryRun",true}}},{"editor_undo",{{"call",3}}},
+        {"map_file",{{"action","save_as"},{"mapName","AQUARIUM"}}},{"map_build",Json::object()},
+        {"actors_edit",{{"edits",Json::array({{{"action","set"},{"actor","Light1"},{"properties",{{"LightBrightness","96"}}}}})}}},
+        {"map_changes_apply",{{"document",document}}},{"editor_exec",{{"command","STAT FPS"}}}};
+    size_t tools=0;
+    for(const auto& tool:h.registry.tools)
+    {
+        if(!tool.outputSchema.is_object())continue;
+        ++tools;
+        const auto args=working.count(tool.name)?working.at(tool.name):Json::object();
+        Check(working.count(tool.name)!=0,("a working call is known for "+tool.name).c_str());
+        h.fake.connected=true;
+        Conforms(h.Request("tools/call",{{"name",tool.name},{"arguments",args}}),tool,"working");
+        Conforms(h.Request("tools/call",{{"name",tool.name},{"arguments",{{"no_such_argument",1}}}}),tool,"with a bad argument");
+        h.fake.connected=false;
+        Conforms(h.Request("tools/call",{{"name",tool.name},{"arguments",args}}),tool,"without an editor");
+    }
+    h.fake.connected=true;
+    Check(tools==working.size(),"every tool with an output schema was called");
+    // The tool list stays small enough for clients that load it whole.
+    size_t total=0;
+    const auto listed=h.Result("tools/list").at("tools");
+    for(const auto& t:listed)
+    {
+        const auto size=t.dump().size();
+        total+=size;
+        Check(size<4500,(t.at("name").get<std::string>()+" is "+std::to_string(size)+" bytes in tools/list").c_str());
+    }
+    Check(total<26000,("the session, query and escape tools take "+std::to_string(total)+" bytes").c_str());
+}
+// editor_undo with no arguments takes back this server's own calls, newest
+// first, and never undoes blindly.
+void UndoStack()
+{
+    Harness h;
+    auto& memory=Tools::Memory();
+    {std::lock_guard<std::mutex> g(memory.lock);memory.Reset();}
+    h.fake.On("editor.state",OpenState());
+    auto none=h.Call("editor_undo");
+    Check(none.at("isError")==true && Text(none).find("no change it can still undo")!=std::string::npos && h.fake.Count("undo.steps")==0 && h.fake.Count("undo.call")==0,
+          "a fresh server undoes nothing rather than the user's own edit");
+    const Json document{{"format","scct.map-changes"},{"version",2},{"map","*"},{"operations",Json::array({{{"op","create"},{"id","Lamp"},{"class","Engine.Light"}}})}};
+    h.fake.On("authoring.apply",Json{{"identities",Json::object()},{"deleted",Json::array()}});
+    const auto first=h.Call("map_changes_apply",{{"document",document}}).at("structuredContent").at("undo").at("call").get<unsigned>();
+    const auto second=h.Call("map_changes_apply",{{"document",document}}).at("structuredContent").at("undo").at("call").get<unsigned>();
+    std::vector<unsigned> undone;
+    h.fake.On("undo.call",[&](const Json& a,const CallOptions&){undone.push_back(a.at("call").get<unsigned>());return Json{{"steps",1}};});
+    h.Call("editor_undo");
+    h.Call("editor_undo");
+    Check(undone==std::vector<unsigned>({second,first}),"newest call first, then the one before");
+    auto empty=h.Call("editor_undo");
+    Check(empty.at("isError")==true && h.fake.Count("undo.steps")==0 && undone.size()==2,"once its calls are undone, nothing more is undone");
+    h.fake.On("redo.steps",Json{{"done",1}});
+    h.Call("editor_undo",{{"redo",true},{"steps",1}});
+    h.Call("editor_undo");
+    Check(undone.size()==3 && undone.back()==first,"a redone call can be undone again");
+    const auto third=h.Call("map_changes_apply",{{"document",document}}).at("structuredContent").at("undo").at("call").get<unsigned>();
+    h.fake.Clear("undo.call");
+    h.fake.Fail("undo.call",Bridge::Code::Refused,"MCP call is undone already.","already_undone");
+    Check(h.Call("editor_undo").at("isError")==true && h.fake.Last("undo.call")->args.at("call")==third,"the newest call is tried");
+    Check(h.Call("editor_undo").at("isError")==true && Text(h.Call("editor_undo")).find("no change it can still undo")!=std::string::npos && h.fake.Count("undo.steps")==0,
+          "a call the editor no longer has is forgotten, not replaced by a blind undo");
+    h.fake.On("undo.steps",Json{{"done",2}});
+    Check(h.Call("editor_undo",{{"steps",2}}).at("isError")==false && h.fake.Last("undo.steps")->args.at("count")==2,"steps still undoes whatever made them");
+}
+// A cancelled editor_launch stops waiting at once instead of holding the
+// worker for waitSeconds.
+void CancelLaunch()
+{
+    Harness h;
+    {
+        std::ofstream(h.dir/"Reloaded_Editor.exe")<<"MZ";
+        std::ofstream(h.dir/"Reloaded_Editor.ini")<<"[Mcp]\r\nEnabled=1\r\n";
+    }
+    auto& process=Process();
+    const auto saved=process;
+    process.launch=[](const std::filesystem::path&,const std::string&,const std::filesystem::path&){return 9100ul;};
+    process.running=[](unsigned long){return true;};
+    h.fake.editors=Json::array();
+    const auto started=std::chrono::steady_clock::now();
+    h.Send(Message(77,"tools/call",{{"name","editor_launch"},{"arguments",{{"waitSeconds",600}}},{"_meta",{{"progressToken","launch"}}}}));
+    while(h.Notes("notifications/progress").empty() && std::chrono::steady_clock::now()-started<std::chrono::seconds(5)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    h.Send(Message(nullptr,"notifications/cancelled",{{"requestId",77}}));
+    h.server->Wait();
+    Check(!h.Notes("notifications/progress").empty() && std::chrono::steady_clock::now()-started<std::chrono::seconds(5),"the wait ended with the cancel");
+    Check(h.Find(77).is_null() && h.cancels==1,"a cancelled request gets no reply");
+    // The next request runs normally.
+    h.fake.On("editor.state",OpenState());
+    h.fake.editors=Json::array({{{"pid",4242}}});
+    Check(h.Call("editor_status").at("isError")==false,"the server goes on");
+    process=saved;
+}
+// Subscribers hear of a change only when a call changed something.
+void ChangeNotices()
+{
+    Harness h;
+    h.fake.On("editor.state",OpenState());
+    h.Result("resources/subscribe",{{"uri","scct://map/summary"}});
+    h.fake.On("security.actors",Json::array());
+    h.fake.On("authoring.preview",Json{{"rows",Json::array()},{"tally","nothing"}});
+    h.Clear();
+    h.Call("workflow_request",{{"op","security.actors"}});
+    h.Call("editor_launch");
+    const Json document{{"format","scct.map-changes"},{"version",2},{"map","*"},{"operations",Json::array({{{"op","create"},{"id","Lamp"},{"class","Engine.Light"}}})}};
+    h.Call("map_changes_apply",{{"document",document},{"dryRun",true}});
+    h.Call("map_build",{{"dryRun",true}});
+    Check(h.Notes("notifications/resources/updated").empty(),"reads, previews and an editor already running change nothing");
+    h.fake.On("authoring.apply",Json{{"identities",Json::object()},{"deleted",Json::array()}});
+    h.Call("map_changes_apply",{{"document",document}});
+    Check(h.Notes("notifications/resources/updated").size()==1,"a change is announced");
+    // A plan that failed after some steps ran (rolledBack false) changed the map.
+    h.Clear();
+    h.fake.Fail("authoring.apply",Bridge::Code::EditorError,"Step save failed.","",Json{{"rolledBack",false}});
+    h.fake.Clear("authoring.apply");
+    h.fake.Fail("authoring.apply",Bridge::Code::EditorError,"Step save failed.","",Json{{"rolledBack",false}});
+    Check(h.Call("map_changes_apply",{{"document",document}}).at("isError")==true && h.Notes("notifications/resources/updated").size()==1,"a partly applied change is announced too");
+}
+// Hints: a review window holding the editor is not worth waiting for.
+void Hints()
+{
+    const auto pending=Tools::ErrorResult(Bridge::Error(Bridge::Code::Busy,"A change is waiting for approval in the editor.","approval_pending",Json{{"ticket","t9"}}));
+    Check(pending.isError && pending.content[0].text.find("approval_wait")!=std::string::npos && pending.structured.at("details").at("ticket")=="t9","approval_pending names approval_wait and the ticket");
+    Check(Tools::ErrorResult(Bridge::Error(Bridge::Code::Busy,"x","modal")).content[0].text.find("Wait a moment")!=std::string::npos,"other busy reasons are waited out");
+}
+// The ops workflow_request can call are documented where the agent can read them.
+void OpsDoc()
+{
+    Harness h;
+    std::string ops;
+    for(const auto& file:EmbeddedFiles())if(std::string(file.path)=="docs/ops.md")ops.assign(reinterpret_cast<const char*>(file.data),file.size);
+    Check(!ops.empty(),"scct://docs/ops is embedded");
+    for(const auto& op:Bridge::OpPolicies())Check(ops.find("`"+std::string(op.name)+"`")!=std::string::npos,(std::string("scct://docs/ops lists ")+op.name).c_str());
+    std::set<std::string> uris;
+    const auto resources=h.Result("resources/list").at("resources");
+    for(const auto& r:resources)uris.insert(r.at("uri").get<std::string>());
+    Check(uris.count("scct://docs/ops") && uris.count("scct://docs/tool-reference") && uris.count("scct://docs/tools"),"the docs are resources");
+    Check(Text(h.Call("workflow_request",{{"op","no.such"}})).find("scct://docs/ops")!=std::string::npos,"an unknown op points at the list");
+    h.fake.On("editor.state",OpenState());
+    Check(h.Call("editor_status").at("structuredContent").at("bridge").at("opsDoc")=="scct://docs/ops","editor_status points at it");
+    const auto listed=h.Result("tools/list").at("tools");
+    for(const auto& t:listed)
+        if(t.at("name")=="workflow_request")Check(t.at("description").get<std::string>().find("scct://docs/ops")!=std::string::npos,"so does workflow_request");
+    // plan_render and the other spec readers take a path.
+    auto plan=h.Call("plan_render",{{"path","scct://examples/versus-starter"}});
+    Check(plan.at("isError")==false && plan.at("structuredContent").at("source").get<std::string>().find("versus-starter")!=std::string::npos && plan.at("content").size()==2,"plan_render draws a spec from a path");
+    auto wrong=h.Call("plan_render",{{"path","scct://map/spec"}});
+    Check(wrong.at("isError")==true && Text(wrong).find("map_query what:\"spec\"")!=std::string::npos,"the live spec is not a path");
+}
 void Stub()
 {
     BridgeClient client({});
@@ -553,7 +758,8 @@ void Stub()
 }
 int main()
 {
-    try{Handshake();Errors();Lists();Status();Queries();Screenshot();Mutations();ActorsEdit();Escape();Resources();Approval();Cancellation();Launch();Stub();}
+    try{Handshake();Errors();Batches();Lists();Status();Queries();Screenshot();Mutations();ActorsEdit();Escape();Resources();Approval();Cancellation();Launch();
+        OutputSchemas();UndoStack();CancelLaunch();ChangeNotices();Hints();OpsDoc();Stub();}
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
     std::cout<<"McpServer passed\n";
     return 0;

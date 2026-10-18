@@ -269,8 +269,11 @@ namespace Mcp::Spec
         {
             return Polygons(Design::Box({-half[0], -half[1], -half[2]}, {half[0], half[1], half[2]}).faces, "", 0);
         }
-        // Which named face of a brush a polygon is: the side its outward normal
-        // points to, with floor and ceiling the faces a room shows inside.
+        // Which named face of a brush a polygon is: the way its surface faces,
+        // as surface.texture names the BSP surfaces after a build. A subtractive
+        // brush's surfaces face into the space it carves, so its polygon on the
+        // +X side is the east wall, which faces west (-X), and its top is the
+        // ceiling.
         inline std::string FaceName(const Json& vertices, bool subtract)
         {
             double n[3] = {0, 0, 0};
@@ -285,9 +288,9 @@ namespace Mcp::Spec
             // Newell's normal follows the winding, which points out of the solid.
             int axis = 0;
             for (int k = 1; k < 3; ++k) if (std::abs(n[k]) > std::abs(n[axis])) axis = k;
-            const bool positive = n[axis] > 0;
-            if (axis == 2) return (positive != subtract) ? "floor" : "ceiling";
-            return std::string(positive ? "+" : "-") + (axis == 0 ? "X" : "Y");
+            const bool facing = (n[axis] > 0) != subtract;
+            if (axis == 2) return facing ? "floor" : "ceiling";
+            return std::string(facing ? "+" : "-") + (axis == 0 ? "X" : "Y");
         }
 
         struct Piece
@@ -720,16 +723,20 @@ namespace Mcp::Spec
             }
             // A class from the live schema when it is given, so a package the
             // compiler only guessed (Echelon.ERainVolume) takes the loaded one.
+            // Entries the bridge could not load ({error}) say nothing about the
+            // class, so the search goes on to one that was loaded.
             std::string ClassName(const std::string& cls) const
             {
                 const auto& classes = SchemaClasses();
                 if (!classes.is_object() || classes.empty()) return cls;
+                const auto loaded = [](const Json& entry) { return entry.is_object() && !entry.contains("error"); };
                 const auto shortName = Fold(cls.substr(cls.find_last_of('.') + 1));
                 for (auto it = classes.begin(); it != classes.end(); ++it)
-                    if (Fold(it.key()) == Fold(cls)) return it.value().value("class", it.key());
+                    if (loaded(it.value()) && Fold(it.key()) == Fold(cls)) return it.value().value("class", it.key());
                 for (auto it = classes.begin(); it != classes.end(); ++it)
                 {
-                    const auto full = it.value().is_object() ? it.value().value("class", it.key()) : it.key();
+                    if (!loaded(it.value())) continue;
+                    const auto full = it.value().value("class", it.key());
                     if (Fold(full.substr(full.find_last_of('.') + 1)) == shortName) return full;
                 }
                 return cls;
@@ -746,7 +753,7 @@ namespace Mcp::Spec
                 const auto& classes = SchemaClasses();
                 for (auto it = classes.begin(); it != classes.end(); ++it)
                 {
-                    if (!it.value().is_object()) continue;
+                    if (!it.value().is_object() || it.value().contains("error")) continue;
                     if (Fold(it.value().value("class", it.key())) != Fold(cls) && Fold(it.key()) != Fold(cls)) continue;
                     const auto& schema = it.value().contains("schema") ? it.value().at("schema") : it.value();
                     if (!schema.is_object()) return nullptr;
@@ -807,17 +814,28 @@ namespace Mcp::Spec
                 }
                 return value;
             }
+            // A class the schema lacks stays a warning: its package may be one
+            // the plan loads first. A property a loaded class's schema lacks is
+            // an error, because authoring.schema lists exactly what Import Map
+            // from JSON writes and it refuses the rest ("unsupported property");
+            // only a new player start's TeamNumber, which the bridge pastes,
+            // is written without being listed.
             void CompleteAll()
             {
                 if (SchemaClasses().empty()) return;
                 for (auto& actor : low.actors)
                 {
                     if (!ClassKnown(actor.cls)) { Diag("warning", "schema.class", actor.pointer, "The schema given has no class " + actor.cls + "; its properties are written unchecked."); continue; }
+                    const bool start = Fold(actor.cls).find("playerstart") != std::string::npos;
                     for (auto it = actor.properties.begin(); it != actor.properties.end(); ++it)
                     {
-                        if (it.key() == "Location" || it.key() == "Rotation" || it.key() == "Tag") continue;
+                        if (it.key() == "Location" || it.key() == "Rotation" || it.key() == "Tag" || (start && it.key() == "TeamNumber")) continue;
                         const auto* schema = PropertySchema(actor.cls, it.key());
-                        if (!schema) { Diag("warning", "schema.property", actor.pointer, actor.cls + " has no property " + it.key() + " in the schema given."); continue; }
+                        if (!schema)
+                        {
+                            Diag("error", "schema.property", actor.pointer, actor.id + ": " + actor.cls + " has no property " + it.key() + " that Map JSON writes, so the editor would refuse the whole actors document. Remove it, or set it by hand in the editor.");
+                            continue;
+                        }
                         if (schema->contains("writable") && !schema->value("writable", true) && !schema->value("create", false))
                             Diag("warning", "schema.writable", actor.pointer, actor.cls + "." + it.key() + ": " + schema->value("reason", std::string("Map JSON does not write this property.")));
                         it.value() = Complete(it.value(), *schema, actor.id + "." + it.key(), actor.pointer);
@@ -1492,11 +1510,22 @@ namespace Mcp::Spec
                             for (size_t z = 0; z < zones.size() && z < 5; ++z)
                             {
                                 const auto zoneWhere = Child(Child(where, "dropZones"), z);
+                                // {ref} shares a zone another entry made: flags may share drop zones.
+                                if (zones[z].contains("ref"))
+                                {
+                                    zoneRefs.push_back({zones[z].at("ref").get<std::string>(), flagId, Child(zoneWhere, "ref"), z});
+                                    slots.push_back(Ref(zones[z].at("ref").get<std::string>()));
+                                    continue;
+                                }
                                 const auto zoneId = zones[z].contains("id") ? zones[z].at("id").get<std::string>() : NewId(flagId + "_Drop" + std::to_string(z + 1));
                                 const auto zoneAt = Locate(zones[z].at("at"), Child(zoneWhere, "at"), Floor(64)).at;
                                 Add(zoneId, "SBase.SFlagDropZone", "dropzone", zoneWhere, zoneAt, 0);
                                 slots.push_back(Ref(zoneId));
                             }
+                            for (size_t a = 0; a < slots.size(); ++a)
+                                for (size_t b = a + 1; b < slots.size(); ++b)
+                                    if (Fold(slots[a].at("$ref").get<std::string>()) == Fold(slots[b].at("$ref").get<std::string>()))
+                                        Diag("error", "story.flag-dropzones", Child(Child(where, "dropZones"), b), triggerId + " lists the drop zone " + slots[b].at("$ref").get<std::string>() + " twice.", "game-modes");
                             auto* flag = FindActor(flagId);
                             const auto size = Dimension(flag->cls, "DropZone", 5);
                             while (slots.size() < size) slots.push_back("None");
@@ -1538,7 +1567,23 @@ namespace Mcp::Spec
                     objectiveOrder.push_back(id);
                     objectivePositions[Fold(id)] = at;
                 }
+                // Shared drop zones, once every flag has made its own: the slot
+                // takes the zone's own spelling of its id, unless props replaced it.
+                for (const auto& shared : zoneRefs)
+                {
+                    const auto* zone = FindActor(shared.ref);
+                    if (!zone || zone->cls.find("SFlagDropZone") == std::string::npos)
+                    {
+                        Diag("error", "story.flag-dropzones", shared.pointer, "\"" + shared.ref + "\" is not a drop zone of the spec; {ref} names the id of another flag's dropZones entry, one with at.", "game-modes");
+                        continue;
+                    }
+                    const auto spelling = zone->id;
+                    auto& slots = FindActor(shared.flag)->properties["DropZone"];
+                    if (slots.is_array() && shared.slot < slots.size() && slots[shared.slot] == Ref(shared.ref)) slots[shared.slot] = Ref(spelling);
+                }
             }
+            struct ZoneRef { std::string ref, flag, pointer; size_t slot; };
+            std::vector<ZoneRef> zoneRefs;
             // The story mission, and the sectors the Zones window would build:
             // a chained GM_Multi mission holding one GM_Undefined mission per
             // sector, each sector's completion event, announcement and sounds.
@@ -1648,10 +1693,19 @@ namespace Mcp::Spec
                     {
                         if (target.empty()) { Diag("error", "story.action", where, "an open action needs a target door.", "game-modes"); continue; }
                         entries.push_back(entry(TagOf(target, Child(where, "target"), true), delay, false));
+                        // Held open is TriggerToggle, which every other Trigger the
+                        // door gets would swap shut again.
                         if (auto* door = FindActor(target); door && action.value("hold", true))
                         {
                             const auto state = Fold(door->properties.value("InitialState", std::string()));
-                            if (state.empty() || state.find("timed") != std::string::npos) door->properties["InitialState"] = "TriggerToggle";
+                            if (const auto other = OtherTrigger(door->id); !other.empty())
+                                Diag("error", "story.action-door-trigger", where, door->id + " also opens from " + other + ", so held open (TriggerToggle) it would be toggled shut by that. Set hold false on this action (the door opens for its stayOpen time), or give " +
+                                     door->id + " trigger {kind: \"event\"} so only the sector opens it, and the other team a door of its own.", "movers");
+                            else
+                            {
+                                if (state.empty() || state.find("timed") != std::string::npos) door->properties["InitialState"] = "TriggerToggle";
+                                heldDoors.insert(Fold(door->id));
+                            }
                         }
                     }
                     else if (kind == "light")
@@ -2156,6 +2210,7 @@ namespace Mcp::Spec
                     doorIds.push_back(id);
                     const auto trigger = item.value("trigger", Json{{"kind", "presence"}});
                     const auto kind = trigger.value("kind", std::string("presence"));
+                    if (kind != "event") doorTriggers[Fold(id)] = "its own " + kind + " trigger";
                     const auto usable = trigger.value("usableBy", std::string(kind == "panel" ? "spy" : "both"));
                     const auto where = Child(pointer, "trigger");
                     if (kind == "button" || kind == "panel")
@@ -2245,6 +2300,24 @@ namespace Mcp::Spec
             }
             struct Pending { std::string id; Json targets; std::string pointer; };
             std::vector<Pending> pendingTargets;
+            std::map<std::string, std::string> doorTriggers; // door id -> its own presence, button or panel trigger
+            std::set<std::string> heldDoors;                 // doors a sector holds open (TriggerToggle)
+            // What besides the sector's own event triggers a door: its own
+            // trigger, a button's targets, a link, an alarm's outputs or a sector
+            // that holds it open already. Each of those would toggle a held door.
+            std::string OtherTrigger(const std::string& door) const
+            {
+                const auto id = Fold(door);
+                if (const auto found = doorTriggers.find(id); found != doorTriggers.end()) return found->second;
+                if (heldDoors.count(id)) return "an earlier sector that holds it open";
+                for (const auto& pending : pendingTargets)
+                    for (const auto& t : Strings(pending.targets)) if (Fold(t) == id) return "the button " + pending.id;
+                for (const auto& link : List(Section({"events", "links"})))
+                    if (Fold(link.value("to", std::string())) == id) return "the link from " + link.value("from", std::string());
+                for (const auto& alarm : List(Section({"security", "alarms"})))
+                    for (const auto& output : Strings(alarm.value("outputs", Json::array()))) if (Fold(output) == id) return "the alarm " + alarm.value("id", std::string());
+                return {};
+            }
             // Buttons fire their one target, or an SMagicEvent that fires them all;
             // done once everything they may name exists.
             void ButtonTargets()
@@ -2530,7 +2603,7 @@ namespace Mcp::Spec
                 Objects();
                 Generic("props", "Engine.StaticMeshActor", "other");
                 Generic("fish", "SBase.SFish", "other");
-                Generic("softbody", "Echelon.ESBPatchActor", "other");
+                Generic("softbody", "SoftBody.ESBPatchActor", "other");
                 Generic("animated", "SBase.SAnimatedMesh", "other");
                 Generic("tutorials", "SBase.SZoneTips", "other");
                 Meshes();
@@ -2560,6 +2633,12 @@ namespace Mcp::Spec
                     light.properties["NearPlaneRatio"] = "0.05";
                 }
                 else light.properties["LightEffect"] = preset == "spot" ? "LE_Spotlight" : preset == "sun" ? "LE_Sunlight" : "LE_None";
+                // LightCone shapes LE_Spotlight's beam only; without cone it keeps the class default.
+                if (item.contains("cone"))
+                {
+                    if (preset == "spot") light.properties["LightCone"] = std::to_string(item.at("cone").get<long long>());
+                    else Diag("warning", "light.cone", Child(pointer, "cone"), "cone (LightCone) shapes the spot preset's LE_Spotlight beam only, so it is not written for a " + preset + " light.", "lighting");
+                }
                 if (preset == "sun") Diag("info", "light.sun", pointer, "LE_Sunlight shines from a Fake Backdrop surface; the zone needs one.", "lighting");
                 if (item.value("corona", false)) light.properties["bCorona"] = "True";
                 Props(light, item);
@@ -2713,14 +2792,24 @@ namespace Mcp::Spec
                     objectIds.insert(Fold(object.id));
                 }
             }
-            // A class written without its package: Engine's own actors, Echelon's
-            // E classes, SBase for the rest (the live schema corrects a guess).
-            static std::string FullClass(const std::string& cls)
+            // A class written without its package: Engine's own actors, the
+            // SoftBody package's ESB classes (SoftBody.ESBPatchActor, as the
+            // engine names it), Echelon's other E classes, SBase for the rest
+            // (the live schema corrects a guess). The wiki's ESBStripeDoorActor
+            // is the engine's ESBStripDoorActor, and an ESB class is never in
+            // Echelon, which earlier builds guessed.
+            static std::string FullClass(const std::string& given)
             {
-                if (cls.find('.') != std::string::npos) return cls;
+                const auto dot = given.find_last_of('.');
+                std::string package = dot == std::string::npos ? std::string() : given.substr(0, dot), cls = given.substr(dot == std::string::npos ? 0 : dot + 1);
+                const auto shortName = Fold(cls);
+                if (shortName == "esbstripedooractor") cls = "ESBStripDoorActor";
+                const bool softBody = shortName.rfind("esb", 0) == 0;
+                if (softBody && (package.empty() || Fold(package) == "echelon")) return "SoftBody." + cls;
+                if (!package.empty()) return package + "." + cls;
                 static const std::set<std::string> engine{"actor", "staticmeshactor", "mover", "light", "playerstart", "volume", "blockingvolume", "zoneinfo", "ambientsound",
                                                           "soundtrigger", "musictrigger", "note", "brush", "emitter", "trigger"};
-                if (engine.count(Fold(cls))) return "Engine." + cls;
+                if (engine.count(shortName)) return "Engine." + cls;
                 if (cls.size() > 1 && cls[0] == 'E' && std::isupper(static_cast<unsigned char>(cls[1]))) return "Echelon." + cls;
                 return "SBase." + cls;
             }
@@ -2734,9 +2823,10 @@ namespace Mcp::Spec
                     const auto pointer = Child(std::string("/environment/") + section, i);
                     if (!item.contains("at")) { Diag("error", "actor.at", pointer, "needs at."); continue; }
                     const auto type = FullClass(item.value("class", std::string(cls)));
-                    if (kind == "softbody" && Fold(type.substr(type.find_last_of('.') + 1)) == "esoftbodyactor")
+                    const auto shortType = Fold(type.substr(type.find_last_of('.') + 1));
+                    if (kind == "softbody" && shortType == "esoftbodyactor")
                     {
-                        Diag("error", "softbody.class", Child(pointer, "class"), "ESoftBodyActor is the SoftBody base class and cannot be placed; use ESBPatchActor (the usual cloth), ESBStripeDoorActor, ESBRopeActor or ESBChainActor.", "softbody-actors");
+                        Diag("error", "softbody.class", Child(pointer, "class"), "ESoftBodyActor is the SoftBody base class and cannot be placed; use ESBPatchActor (the usual cloth), ESBStripDoorActor (the wiki's ESBStripeDoorActor), ESBRopeActor or ESBChainActor.", "softbody-actors");
                         continue;
                     }
                     const auto at = Locate(item.at("at"), Child(pointer, "at"), Floor(0)).at;
@@ -2747,9 +2837,15 @@ namespace Mcp::Spec
                         const auto given = Fold(mesh.substr(0, mesh.find('\'')));
                         if (kind == "softbody")
                         {
-                            // A SoftBody draws its own cloth (DT_SoftBody); a mesh is a chain's links.
-                            actor.properties["LinkMesh"] = Asset("StaticMesh", mesh);
-                            Package(Asset("StaticMesh", mesh));
+                            // A SoftBody draws its own cloth (DT_SoftBody); a mesh is a
+                            // chain's links, and only ESBChainActor has LinkMesh.
+                            if (shortType == "esbpatchactor" || shortType == "esbstripdooractor" || shortType == "esbropeactor")
+                                Diag("error", "softbody.mesh", Child(pointer, "mesh"), type + " has no mesh: it draws its cloth with the texture in properties.Texture. Only ESBChainActor takes a mesh (LinkMesh, its links).", "softbody-actors");
+                            else
+                            {
+                                actor.properties["LinkMesh"] = Asset("StaticMesh", mesh);
+                                Package(Asset("StaticMesh", mesh));
+                            }
                         }
                         else if ((kind == "animated" || kind == "fish") && (mesh.find('\'') == std::string::npos || given != "staticmesh"))
                         {
@@ -2995,18 +3091,50 @@ namespace Mcp::Spec
                 Json changes = Json::object();
                 if (level.contains("song")) changes["Song"] = level.at("song");
                 if (level.contains("deathPawnHeight")) changes["fDeathPawnHeight"] = Num(L(level.at("deathPawnHeight")));
+                // The Level Properties sheet's headings (Audio, Death, Events,
+                // MapSnapshotInfo, MotionTrackingTweak) are categories, not
+                // properties: Motion Tracking Vision is MTVOffset and MTVSlope.
                 if (level.contains("motionTracking"))
                 {
                     const bool enhanced = level.at("motionTracking") == "enhanced";
-                    changes["MotionTrackingTweak"] = {{"MTVOffset", enhanced ? "8" : "52"}, {"MTVSlope", enhanced ? "8" : "85"}};
+                    changes["MTVOffset"] = enhanced ? "8" : "52";
+                    changes["MTVSlope"] = enhanced ? "8" : "85";
                 }
                 if (level.contains("geActivationMask")) changes["GEActivationMask"] = std::to_string(level.at("geActivationMask").get<long long>());
-                Json names = Json::array(), times = Json::array();
+                // A LevelInfo sends one Event (Actor's), at SendAtTime: an int,
+                // seconds counted back from the end of the match when negative
+                // (the stock tests/maps/OffsE saves both at the LevelInfo's top
+                // level). Several level events go through one SMagicEvent sent at
+                // the earliest time, each delayed by how much later it is due.
+                struct LevelEvent { std::string tag; double at; };
+                std::vector<LevelEvent> events;
                 const Json levelEvents = level.is_object() ? List(level.value("events", Json::array())) : Json::array();
-                for (const auto* list : {&levelEvents, &List(Section({"events", "level"}))})
-                    for (const auto& item : *list) { names.push_back(item.at("event")); times.push_back(Num(item.at("sendAtTime").get<double>())); }
-                for (const auto& t : times) if (std::stod(t.get<std::string>()) >= 0) Diag("warning", "level.send-at-time", "/level/events", "SendAtTime counts back from the end of the match: a time of 0 or more never fires. Use a negative time.", "level-properties");
-                if (!names.empty()) { changes["Events"] = names; changes["SendAtTime"] = times; }
+                const std::pair<const Json*, const char*> sources[] = {{&levelEvents, "/level/events"}, {&List(Section({"events", "level"})), "/events/level"}};
+                for (const auto& [source, base] : sources)
+                    for (size_t i = 0; i < source->size(); ++i)
+                    {
+                        const auto& item = (*source)[i];
+                        const auto where = Child(base, i);
+                        const double given = item.at("sendAtTime").get<double>(), at = std::round(given);
+                        if (at >= 0) Diag("warning", "level.send-at-time", Child(where, "sendAtTime"), "SendAtTime counts back from the end of the match: a time of 0 or more never fires. Use a negative time.", "level-properties");
+                        if (at != given) Diag("warning", "level.send-at-time", Child(where, "sendAtTime"), "SendAtTime is a whole number of seconds; " + Num(given) + " is written as " + Num(at) + ".", "level-properties");
+                        events.push_back({TagOf(item.at("event").get<std::string>(), Child(where, "event"), false), at});
+                    }
+                if (events.size() == 1) { changes["Event"] = events[0].tag; changes["SendAtTime"] = Num(events[0].at); }
+                else if (events.size() > 1)
+                {
+                    double first = events[0].at;
+                    for (const auto& e : events) first = std::min(first, e.at);
+                    Json entries = Json::array();
+                    for (const auto& e : events) entries.push_back({{"Delay", Workflow::Magic::Seconds(e.at - first)}, {"Event", e.tag}, {"Type", "EVT_Trigger"}, {"ValidOn", "EVT_Trigger"}});
+                    const auto fan = NewId("LevelEvents");
+                    auto& event = Add(fan, "SBase.SMagicEvent", "other", levelEvents.empty() ? "/events/level" : "/level/events", Fallback(176), 0, false);
+                    event.label = "level events";
+                    event.properties["Groups"] = Json::array({{{"EventGroup", entries}, {"Repeat", "0"}, {"Sequence", "False"}, {"SequenceIndex", "0"}}});
+                    magicIds.insert(Fold(fan));
+                    changes["Event"] = fan;
+                    changes["SendAtTime"] = Num(first);
+                }
                 for (auto it = changes.begin(); it != changes.end(); ++it)
                     if (const auto* schema = PropertySchema("Engine.LevelInfo", it.key())) it.value() = Complete(it.value(), *schema, "LevelInfo." + it.key(), "/level");
                 low.settings = changes;

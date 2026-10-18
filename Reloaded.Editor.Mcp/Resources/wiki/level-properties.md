@@ -60,8 +60,11 @@ Tip: the UnrealEd viewport can switch to Motion Tracking Vision, so you can prev
 
 - `map_settings` with `level` (the spec's `level` section: `song`, `deathPawnHeight`, `motionTracking: standard|enhanced`, `events[{event, sendAtTime}]`, `geActivationMask`) writes these through the bridge op `settings.edit`.
   - `settings.edit` checks the LevelInfo snapshot first.
-  - It writes non-editable fields (`MapSnapshotInfo`, `MotionTrackingTweak`, `GEActivationMask`, `Events`, `SendAtTime`, `fDeathPawnHeight`, `Song`) through ImportText.
-- `motionTracking: "standard"` writes 52/85, and `"enhanced"` writes 8/8.
+  - **The headings above (`Audio`, `Death`, `Events`, `MapSnapshotInfo`, `MotionTrackingTweak`) are property-sheet categories, not properties.** The properties are written by their own names: `Song`, `fDeathPawnHeight`, `Event`, `SendAtTime`, `SnapshotCamera`, `MapFloors`, `MTVOffset`, `MTVSlope` and `GEActivationMask`, through ImportText where the sheet does not offer one.
+- `motionTracking: "standard"` writes `MTVOffset` 52 and `MTVSlope` 85, and `"enhanced"` writes 8 and 8.
+- Level events: a LevelInfo has **one** `Event` and one `SendAtTime`, a whole number of seconds (an int property; a fraction is rounded, with a warning).
+  - One level event is written as that `Event` and `SendAtTime`.
+  - Several go through one `SMagicEvent` (`LevelEvents`): the LevelInfo sends it at the earliest time, and it sends each event delayed by how much later that one is due.
 - `map_query what:"level"` reads the current values.
 - `map_settings` with `minimap` (bridge op `minimap.apply`) fills `MapSnapshotInfo` from the RE+ minimap tool.
 - `map_validate` warns on a `SendAtTime` of 0 or more. It errors when anything players need lies below `fDeathPawnHeight`.

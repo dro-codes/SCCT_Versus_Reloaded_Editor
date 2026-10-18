@@ -1613,33 +1613,17 @@ namespace Mcp::Rules
                         Add("level.death-height", std::to_string(below.size()) + " start(s) or objective(s) sit below fDeathPawnHeight " + Round(*death) + ", where players die instantly.", Paths(below),
                             Fix("map_settings", {{"level", {{"deathPawnHeight", 0}}}}, "Lower fDeathPawnHeight below everything players use, or 0 to turn it off."));
                 }
-                // Level events: {Event, SendAtTime} structs, parallel arrays, or the spec's {event, sendAtTime}.
+                // Level events: the LevelInfo's one Event (Actor's, in the Events
+                // category) sent at its SendAtTime, or the spec's {event, sendAtTime} list.
                 std::vector<std::pair<std::string, double>> events;
-                const Json* list = Field(v, "Events");
-                if (!list) list = Field(v, "events");
-                const Json* times = Field(v, "SendAtTime");
-                if (list && list->is_array())
-                    for (size_t i = 0; i < list->size(); ++i)
+                if (const Json* name = Field(v, "Event"); name && !IsNone(Text(*name)))
+                    if (const auto at = Number(Field(v, "SendAtTime"))) events.push_back({Text(*name), *at});
+                if (const Json* list = Field(v, "events"); list && list->is_array())
+                    for (const auto& item : *list)
                     {
-                        const auto& item = (*list)[i];
-                        std::string name;
-                        std::optional<double> at;
-                        if (item.is_object())
-                        {
-                            const Json* n = Field(item, "Event");
-                            if (!n) n = Field(item, "event");
-                            if (n) name = Text(*n);
-                            const Json* t = Field(item, "SendAtTime");
-                            if (!t) t = Field(item, "sendAtTime");
-                            at = Number(t);
-                        }
-                        else
-                        {
-                            name = Text(item);
-                            if (times && times->is_array() && i < times->size()) at = Number(&(*times)[i]);
-                            else if (times && !times->is_array()) at = Number(times);
-                        }
-                        if (!IsNone(name) && at) events.push_back({name, *at});
+                        const Json* name = Field(item, "event");
+                        const auto at = Number(Field(item, "sendAtTime"));
+                        if (name && !IsNone(Text(*name)) && at) events.push_back({Text(*name), *at});
                     }
                 for (const auto& [name, at] : events)
                 {
@@ -1648,13 +1632,12 @@ namespace Mcp::Rules
                             Fix("map_settings", {{"level", {{"events", Json::array({{{"event", name}, {"sendAtTime", -180}}})}}}}));
                     if (!index.Tagged(name)) Add("events.dangling", "Level event " + name + " names a Tag nothing in the map has.", {});
                 }
-                if (const auto* tweak = Field(v, "MotionTrackingTweak"); tweak && tweak->is_object())
-                {
-                    const auto offset = Number(Field(*tweak, "MTVOffset")), slope = Number(Field(*tweak, "MTVSlope"));
-                    if (offset && slope && !((*offset == 52 && *slope == 85) || (*offset == 8 && *slope == 8)))
-                        Add("level.motion-tracking", "MotionTrackingTweak is MTVOffset " + Round(*offset) + " / MTVSlope " + Round(*slope) + "; most maps use 52 / 85, Enhanced maps 8 / 8.", {},
-                            Fix("map_settings", {{"level", {{"motionTracking", "standard"}}}}));
-                }
+                // MTVOffset and MTVSlope are LevelInfo properties of their own;
+                // MotionTrackingTweak is only their property-sheet category.
+                const auto offset = number({"MTVOffset"}), slope = number({"MTVSlope"});
+                if (offset && slope && !((*offset == 52 && *slope == 85) || (*offset == 8 && *slope == 8)))
+                    Add("level.motion-tracking", "Motion Tracking Vision is MTVOffset " + Round(*offset) + " / MTVSlope " + Round(*slope) + "; most maps use 52 / 85, Enhanced maps 8 / 8.", {},
+                        Fix("map_settings", {{"level", {{"motionTracking", "standard"}}}}));
             }
 
             // -------------------------------------------------- documents

@@ -2,6 +2,7 @@
 // op, and console commands. The intent tools and level_build cover most
 // work; these reach what they do not.
 #include "Common.h"
+#include "../../Reloaded.Editor/McpSafetyModel.h"
 #include <set>
 
 namespace Mcp
@@ -228,8 +229,8 @@ namespace
         const auto op = RequireString(a, "op");
         const auto args = Object(a, "args");
         const auto* policy = Bridge::FindPolicy(op);
-        if (!policy) return Fail("The bridge has no op \"" + op + "\". Its op list is in editor_status (bridge.ops count) and McpBridgeModel.h.");
-        if (policy->policy == Bridge::Policy::Blocked) return Fail(op + " is not available over MCP: it opens editor windows, undoes blindly or skips the staleness checks.");
+        if (!policy) return Fail("The bridge has no op \"" + op + "\". scct://docs/ops lists every op with its policy and arguments.");
+        if (policy->policy == Bridge::Policy::Blocked) return Fail(op + " is not available over MCP: it opens editor windows, undoes blindly or skips the staleness checks (scct://docs/ops).");
         if (policy->policy == Bridge::Policy::Raw) return Fail("Console commands go through editor_exec.");
         const bool dry = DryRun(a);
         const auto label = Label(a, "workflow_request " + op);
@@ -268,25 +269,26 @@ void RegisterEscapeTools(Registry& registry)
             "- set {properties: {Prop: value}}: values in Map JSON form (every leaf a string; strings JSON-quoted, such as \"\\\"Door\\\"\"; enums bare; "
             "bools \"True\"/\"False\"; structs complete, such as Location {\"X\":\"0\",\"Y\":\"0\",\"Z\":\"48\"}; references Class'MyLevel.Name'). The current values "
             "are read first and the edit is refused if the actor changes before it applies.\n"
-            "- move {delta:[x,y,z]}, turn {rotation:[pitch,yaw,roll]} (absolute, Unreal units, 65536 per turn), drop {surface, align} (onto what is below), "
-            "copy {offsets:[[dx,dy,dz]...], yaw?, pivot?} (one copy per offset).\n"
+            "- move {delta:[x,y,z]}, turn {rotation:[pitch,yaw,roll]} (absolute, Unreal units, 65536 per turn), drop {surface (0: the first hit), align} (onto "
+            "what is below), copy {offsets:[[dx,dy,dz]...], yaw?, pivot?} (one copy per offset; yaw in Unreal units about pivot).\n"
             "- delete (needs allowDeletes: true; references to it are left dangling, see map_query wiring).\n"
             "- copy_properties {from, only?:[names]}: paste another actor's editable properties.\n"
-            "- rename_tag {tag}: renames the Tag and every Event or event group that named it.\n"
+            "- rename_tag {tag}: renames the Tag (letters, digits, underscore; unique) and every Event or event group that named it.\n"
             "Follow the wiki's values (scct://wiki/*); for new gameplay prefer the intent tools or level_build, which apply the wiki defaults.";
-        Json edit = S::Object({{"action", S::Enum({"set", "move", "turn", "copy", "drop", "delete", "copy_properties", "rename_tag"}, "What to do.")},
-                               {"actor", S::Actor("The actor to change.")},
-                               {"properties", S::Free("set: {Property: value} in Map JSON form.")},
-                               {"delta", S::Vector3("move: [dx, dy, dz] in Unreal units.")},
-                               {"rotation", S::Vector3("turn: [pitch, yaw, roll], absolute, 65536 per turn.")},
-                               {"offsets", S::Array(S::Vector3("Offset of one copy."), "copy: one offset per copy.", 1000)},
-                               {"yaw", S::Integer("copy: turn each copy by this yaw (Unreal units) around pivot.", -65536, 65536)},
-                               {"pivot", S::Vector3("copy: centre of the turn.")},
-                               {"from", S::Actor("copy_properties: the actor to copy from.")},
-                               {"only", S::Array({{"type", "string"}}, "copy_properties: only these properties.")},
-                               {"surface", S::Integer("drop: which surface below (0 = the first hit).", 0, 64)},
-                               {"align", S::Boolean("drop: align to the surface's slope.")},
-                               {"tag", S::String("rename_tag: the new Tag (letters, digits, underscore; unique).")}},
+        // The description says what each action's fields mean.
+        Json edit = S::Object({{"action", {{"type", "string"}, {"enum", {"set", "move", "turn", "copy", "drop", "delete", "copy_properties", "rename_tag"}}}},
+                               {"actor", S::Actor({})},
+                               {"properties", {{"type", "object"}}},
+                               {"delta", S::Vector3({})},
+                               {"rotation", S::Vector3({})},
+                               {"offsets", {{"type", "array"}, {"items", S::Vector3({})}, {"maxItems", 1000}}},
+                               {"yaw", {{"type", "integer"}, {"minimum", -65536}, {"maximum", 65536}}},
+                               {"pivot", S::Vector3({})},
+                               {"from", S::Actor({})},
+                               {"only", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                               {"surface", {{"type", "integer"}, {"minimum", 0}, {"maximum", 64}}},
+                               {"align", {{"type", "boolean"}}},
+                               {"tag", {{"type", "string"}}}},
                               {"action", "actor"});
         t.inputSchema = S::Mutating(S::Input({{"edits", S::Array(edit, "The edits, applied together.", 1000)},
                                               {"allowDeletes", S::Boolean("Required for any delete. Default false.")}},
@@ -319,7 +321,7 @@ void RegisterEscapeTools(Registry& registry)
         t.name = "workflow_request";
         t.title = "Call a bridge op";
         t.description =
-            "Runs one RE+ workflow op by name, {op, args}, for what no other tool covers (op names and arguments: docs/Mcp.md and the hello op list). The "
+            "Runs one RE+ workflow op by name, {op, args}, for what no other tool covers. scct://docs/ops lists every op with its policy and arguments. The "
             "bridge's op policies still apply: blocked ops (UI windows, light.set, blind undo) are refused, console commands go through editor_exec, edits "
             "are one Undo step and honour approval and dryRun, and mcp.plan plans are checked for order first. Results come back unchanged.";
         t.inputSchema = S::Mutating(S::Input({{"op", S::String("The op, such as security.actors or camera.order.")}, {"args", S::Free("The op's arguments.")}}, {"op"}));
@@ -331,10 +333,13 @@ void RegisterEscapeTools(Registry& registry)
         Tool t;
         t.name = "editor_exec";
         t.title = "Run a console command";
+        // The editor's own deny list (McpSafetyModel.h), so this never drifts from what it refuses.
+        std::string denied;
+        for (const auto* command : Safety::DeniedCommands()) denied += (denied.empty() ? "" : ", ") + std::string(command);
         t.description =
-            "Runs one editor console command and returns its output. Off unless the user sets [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini. QUIT, EXIT, "
-            "MAP NEW/LOAD/SAVE/IMPORT, OBJ SAVEPACKAGE, TRANSACTION and AUDIO are refused (use map_file, editor_undo and the other tools). Console commands "
-            "bypass the staleness checks and may not be undoable: a last resort.";
+            "Runs one editor console command and returns its output. Off unless the user sets [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini. Refused: " + denied +
+            " (use map_file, editor_undo and the other tools), FILE= outside the work folder and [Mcp] WriteRoots, and PACKAGE= other than the map's own. "
+            "Console commands bypass the staleness checks and may not be undoable: a last resort.";
         t.inputSchema = S::Mutating(S::Input({{"command", S::String("The console command, one line.")}}, {"command"}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;

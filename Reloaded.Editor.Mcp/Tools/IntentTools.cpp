@@ -24,7 +24,7 @@ namespace
     {
         std::string name;
         std::vector<std::string> path;
-        std::string description;
+        std::string note;   // the schema's line, when the description's field list does not say it
         std::string key = "id";
         bool place = true, list = false;
     };
@@ -54,72 +54,58 @@ namespace
     }
 
     // ---------------------------------------------------------- schemas
-    // The spec's shared definitions in short: the server checks only an
-    // argument's outline here, and the merged spec is checked in full
-    // (Spec::Parse) with the JSON pointer of any problem.
-    Json Short(const std::string& name)
+    // An argument's outline: its type, and an item's id where a list
+    // matches by id, with a line saying what it is. The tool's description
+    // lists the fields; the merged spec is checked in full (Spec::Parse)
+    // with the JSON pointer of any problem, and scct://schema/level-spec has
+    // every field, so tools/list stays small.
+    const Json& Resolved(const Json& schema)
     {
-        if (name == "id") return {{"type", "string"}};
-        if (name == "ids") return {{"type", "array"}, {"items", {{"type", "string"}}}};
-        if (name == "height") return {{"type", "string"}, {"description", "\"floor+N\" or \"ceiling-N\""}};
-        if (name == "coordinate") return {{"type", Json::array({"number", "string"})}};
-        if (name == "vec2" || name == "vec3") return {{"type", "array"}, {"items", {{"type", "number"}}}};
-        if (name == "point") return {{"type", "array"}, {"description", "[x, y] or [x, y, z]"}};
-        if (name == "position") return {{"type", Json::array({"array", "object"})}, {"description", "[x, y, z] | {in, u, v, h} | {near, offset} | {doorway}"}};
-        if (name == "inPosition") return {{"type", "object"}, {"description", "{in: pieceId, u, v, h}"}};
-        if (name == "target") return {{"type", Json::array({"string", "array", "object"})}, {"description", "An id or a position."}};
-        if (name == "facing") return {{"type", Json::array({"number", "object"})}, {"description", "Yaw in degrees, {yaw} or {toward: id | position}."}};
-        if (name == "props") return {{"type", "object"}, {"description", "Raw property values: leaves are strings, structs objects, {\"$ref\": id} for actors."}};
-        if (name == "generic") return {{"type", "object"}, {"description", "{id, class, mesh, at, yaw, scale, properties}"}};
-        if (name == "mission") return {{"type", "object"}, {"description", "{id, name, description (the Spy text), descriptionDef (the Merc text), minimumObjectives, chained, atResetEvent, at, props}"}};
-        return Json::object();
+        if (!schema.is_object() || !schema.contains("$ref") || !schema.at("$ref").is_string()) return schema;
+        const auto ref = schema.at("$ref").get<std::string>();
+        const auto& defs = Spec::Schema().at("$defs");
+        const auto name = ref.substr(ref.find_last_of('/') + 1);
+        return defs.contains(name) ? defs.at(name) : schema;
     }
-    // The spec's own schema, its references in short, with "required"
-    // loosened to the id where an item has one: an argument may change one
-    // field of an item it names.
-    Json Loose(Json schema)
-    {
-        if (schema.is_array()) { for (auto& item : schema) item = Loose(item); return schema; }
-        if (!schema.is_object()) return schema;
-        if (schema.contains("$ref") && schema.at("$ref").is_string())
-        {
-            const auto ref = schema.at("$ref").get<std::string>();
-            auto out = Short(ref.substr(ref.find_last_of('/') + 1));
-            for (auto it = schema.begin(); it != schema.end(); ++it) if (it.key() != "$ref") out[it.key()] = it.value();
-            return out;
-        }
-        if (schema.contains("required") && schema.at("required").is_array() && schema.contains("properties") && schema.at("properties").is_object() && schema.at("properties").contains("id"))
-        {
-            const auto& required = schema.at("required");
-            if (std::find(required.begin(), required.end(), Json("id")) != required.end()) schema["required"] = Json::array({"id"});
-        }
-        for (auto it = schema.begin(); it != schema.end(); ++it)
-            if (it.key() != "required" && it.key() != "enum") it.value() = Loose(it.value());
-        return schema;
-    }
-    Json Part(const std::vector<std::string>& path, const std::string& description)
+    Json Outline(const std::vector<std::string>& path, const std::string& description)
     {
         const Json* at = &Spec::Schema().at("properties").at(path.front());
-        for (size_t i = 1; i < path.size(); ++i) at = &at->at("properties").at(path[i]);
-        auto schema = Loose(*at);
-        schema["description"] = description;
-        return schema;
+        for (size_t i = 1; i < path.size(); ++i) at = &Resolved(*at).at("properties").at(path[i]);
+        const auto& schema = Resolved(*at);
+        Json out = Json::object();
+        if (schema.contains("type")) out["type"] = schema.at("type");
+        if (schema.contains("items"))
+        {
+            const auto& items = Resolved(schema.at("items"));
+            Json item = Json::object();
+            if (items.contains("type")) item["type"] = items.at("type");
+            if (items.contains("enum")) item["enum"] = items.at("enum");
+            const auto required = items.value("required", Json::array());
+            if (std::find(required.begin(), required.end(), Json("id")) != required.end()) item["required"] = Json::array({"id"});
+            out["items"] = item;
+        }
+        // The description lists the fields; a line here only where it says more.
+        if (!description.empty()) out["description"] = description;
+        return out;
     }
     Json InputSchema(const Intent& t)
     {
         Json properties = Json::object();
-        for (const auto& f : t.fields) properties[f.name] = Part(f.path, f.description);
+        for (const auto& f : t.fields) properties[f.name] = Outline(f.path, f.note);
         for (auto it = t.extra.begin(); it != t.extra.end(); ++it) properties[it.key()] = it.value();
-        if (t.brushMode) properties["brushMode"] = S::Enum({"pieces", "polygons"}, "Map Design pieces (default, or what the map was built with) or plain polygon brushes.");
-        properties["mode"] = S::Enum({"apply", "preview"}, "apply (default), or preview (also dryRun:true), which changes nothing.");
-        properties["remove"] = S::Array({{"type", "string"}}, "Ids of this part's items to delete.");
-        properties["existing"] = Part({"existing"}, "Live actors to refer to by id: {refs: {id: {path, class} | {tag}}}.");
-        properties["build"] = S::Enum({"auto", "geometry", "all", "none"}, "auto (default: geometry when brushes changed), geometry, all (with lighting) or none.");
-        properties["screenshot"] = S::Boolean("A top-view screenshot afterwards. Default: when it builds.");
-        properties["save"] = S::String("Save the map to this path afterwards (Packages\\MapsEd\\<Name>D.sdc).");
-        properties["force"] = S::Boolean("Apply despite errors the change brings.");
-        if (!properties.contains("mapName")) properties["mapName"] = S::String("For a map with no level spec yet: the new spec's name (capitals). Default: the map file's.");
-        return S::Mutating(S::Input(properties));
+        // The common arguments, which the description's last paragraph explains.
+        if (t.brushMode) properties["brushMode"] = {{"type", "string"}, {"enum", {"pieces", "polygons"}}};
+        properties["mode"] = {{"type", "string"}, {"enum", {"apply", "preview"}}};
+        properties["remove"] = {{"type", "array"}, {"items", {{"type", "string"}}}};
+        properties["existing"] = S::Free("{refs: {id: {path, class} | {tag}}}: live actors named by id.");
+        properties["build"] = {{"type", "string"}, {"enum", {"auto", "geometry", "all", "none"}}};
+        properties["screenshot"] = {{"type", "boolean"}};
+        properties["save"] = {{"type", "string"}};
+        properties["force"] = {{"type", "boolean"}};
+        if (!properties.contains("mapName")) properties["mapName"] = {{"type", "string"}};
+        properties["dryRun"] = {{"type", "boolean"}};
+        properties["label"] = {{"type", "string"}};
+        return S::Input(properties);
     }
 
     // ------------------------------------------------------------ merging
@@ -379,15 +365,9 @@ namespace
 
     // ------------------------------------------------------- descriptions
     const char* const kHow =
-        "\nHow it works: the arguments are laid over the level spec the map was last built from (map_query what:\"spec\"; a map without one starts a new "
-        "spec). List items match by id (vision by target, links by from and to, level events by event, Map Settings modes by mode): a match is updated "
-        "field by field, the rest are added. remove [ids] takes items out. Then only what changed is built, as level_build sync:\"incremental\" does, in "
-        "ONE Undo step. mode apply (default), or preview (also dryRun:true): the editor's preview rows and a plan PNG, no change. Errors the change brings "
-        "block apply unless force:true; errors the spec already had are listed as standing. The result has created, changed and removed by id (with the "
-        "actor paths), validation (this part's findings: JSON pointer into the spec, wikiPage for scct://wiki/<page>, fix), undo and next.\n"
-        "Positions: [x, y, z] (z may be \"floor+N\"), {in: pieceId, u, v (-0.5..0.5), h: \"floor+N\" | \"ceiling-N\"}, {near: id, offset} or {doorway: "
-        "id}. Lengths are in the spec's units (Unreal units by default), yaw in degrees (east 0, north 90), +X east, +Y north, Z up. Each id "
-        "([A-Za-z_][A-Za-z0-9_]{0,62}, unique ignoring case) becomes the actor's Tag; existing.refs names live actors the spec did not make.";
+        "\n"
+        "Merged into the map's stored level spec (lists by id) and built as ONE Undo step; preview or dryRun changes nothing (scct://docs/tools: positions, "
+        "merging, remove, existing, force). Every field and the wiki defaults: scct://docs/tool-reference#";
 
     std::vector<Intent> Intents()
     {
@@ -397,31 +377,25 @@ namespace
             t.name = "blockout";
             t.title = "Lay out rooms and corridors";
             t.description =
-                "Lays out the level's spaces as Map Design pieces, the RE+ blockout the Map Design panel can keep editing (scct://docs/map-design): rooms, corridors, "
-                "vents, crawlways, doorways, stairs, ramps and platforms, plus polygon brushes, per-face textures and static meshes.\n"
-                "- pieces [{id, kind: Room|Corridor|Vent|Crawlway|Doorway|Platform|Stairs|Stairs L|Stairs U|Spiral|Ramp, size: [width (local X), length (local Y), "
-                "height], at: [x, y] (the centre; z from storey), storey, yaw (multiples of 90 keep walls on the compass), name, material (Package.Group.Name), "
-                "attach: {to, side: north|south|east|west, offset} (flush against another piece's wall, running away from it), steps}]. The world is solid: rooms "
-                "are carved out of it (construction Carve, walls defaults.thickness, 16), corridors cut through the walls they join, vents are crouch height (125) "
-                "and crawlways 105. Additive stairs, ramps and platforms belong inside carved space.\n"
-                "- doorways [{id, between: [a, b] | host + side + offset, size: [width, height], sill, portal}]: openings cut from a wall's inside face; portal puts "
-                "a zone portal in it (default true, or only where two zones meet when zones are given). 96 x 128 fits a standing player (180 tall).\n"
-                "- storeys [{id, z}] and vertical [{kind: stairs|lift, from: storeyId, to, at: {in, u, v}, shape}] join floors.\n"
-                "- brushes [{id, csg: CSG_Add|CSG_Subtract, polyFlags, at, polygons: [{vertices: [[x, y, z]...], texture}]}]: polygon brushes. surfaces "
-                "[{brush, faces: [floor|ceiling|+X|-X|+Y|-Y], texture}] texture a piece's faces after the build; a face is named by where its normal points, so a "
-                "carved room's east wall is -X. meshes [{id, mesh: StaticMesh'Pkg.Group.Name', at, yaw, scale, fit: floor}] place StaticMeshActors.\n"
-                "- defaults {construction, thickness, material, lights: rooms (a ceiling light in each room) | none, startsPerTeam}.\n"
-                "The Map Design checks run on the result (validation): steps at most 35 high, slopes at most 45 degrees, standing clearance 96 x 180, crouch 125, "
-                "rooms reachable through doorways. brushMode pieces (default) or polygons. The geometry is rebuilt afterwards. Spawns, objectives and the rest "
-                "go in through gameplay, security, mechanisms, events and environment, which place things {in: pieceId}.";
-            t.fields = {{"pieces", {"geometry", "pieces"}, "Blockout pieces, matched by id."},
-                        {"doorways", {"geometry", "doorways"}, "Openings between pieces, matched by id."},
-                        {"vertical", {"geometry", "vertical"}, "Stairs or lifts between storeys."},
-                        {"brushes", {"geometry", "brushes"}, "Polygon brushes, matched by id."},
-                        {"surfaces", {"geometry", "surfaces"}, "Per-face textures on pieces, applied after the build.", ""},
-                        {"meshes", {"geometry", "meshes"}, "StaticMeshActors, matched by id."},
-                        {"storeys", {"storeys"}, "Floors: [{id, z, name}], matched by id."},
-                        {"defaults", {"defaults"}, "Spec defaults: construction, thickness, material, lights, startsPerTeam."}};
+                "Lays out the level's spaces as Map Design pieces (scct://docs/map-design): rooms carved out of the solid world, corridors, vents, crawlways, doorways, "
+                "stairs, ramps and platforms, plus polygon brushes, per-face textures and static meshes (scct://wiki/static-meshes). The Map Design checks run on the result and the geometry is "
+                "rebuilt.\n"
+                "- pieces [{id, kind: Room|Corridor|Vent|Crawlway|Doorway|Platform|Stairs|Stairs L|Stairs U|Spiral|Ramp, size: [width, length, height], at: [x, y], "
+                "storey, yaw (90s), name, material, construction, thickness, ceiling, steps, portal, attach: {to, side: north|south|east|west, offset}}]\n"
+                "- doorways [{id, between: [a, b] | host + side + offset, size: [width, height] (96 x 128 fits a player), sill, depth, portal, name}]\n"
+                "- storeys [{id, z, name}]; vertical [{kind: stairs|lift, from, to, at: {in, u, v}, shape, width}]\n"
+                "- brushes [{id, csg: CSG_Add|CSG_Subtract, polyFlags, class, at, polygons: [{vertices, texture}]}]; surfaces [{brush, faces: "
+                "[floor|ceiling|+X|-X|+Y|-Y], texture}] (named by where the face's normal points: a carved room's east wall is -X); meshes [{id, mesh, at, yaw, scale, "
+                "fit: floor}]\n"
+                "- defaults {construction, thickness, material, lights: rooms|none, startsPerTeam}";
+            t.fields = {{"pieces", {"geometry", "pieces"}, ""},
+                        {"doorways", {"geometry", "doorways"}, ""},
+                        {"vertical", {"geometry", "vertical"}, ""},
+                        {"brushes", {"geometry", "brushes"}, ""},
+                        {"surfaces", {"geometry", "surfaces"}, "Applied after the build.", ""},
+                        {"meshes", {"geometry", "meshes"}, ""},
+                        {"storeys", {"storeys"}, ""},
+                        {"defaults", {"defaults"}, ""}};
             t.sections = {"/geometry", "/storeys", "/defaults"};
             t.rules = {"geometry.", "design.", "layout.", "position.", "mapcheck."};
             t.brushMode = true;
@@ -432,36 +406,25 @@ namespace
             t.name = "gameplay";
             t.title = "Set spawns and game modes";
             t.description =
-                "Who spawns where and what each mode plays (scct://wiki/spawn-points, scct://wiki/game-modes).\n"
-                "- spawns {spy, merc: {in: roomId | [roomIds], count (default defaults.startsPerTeam, 4), facing: {toward: id | position}, spacing} | [{id, at, "
-                "yaw | facing}], toggles: [{id, team: spy|merc, in | at, enabledBy (an event Tag)}]}: PlayerStarts with TeamNumber 0 (spy) and 1 (merc) on a "
-                "128-unit lattice at floor+48; the wiki wants at least 3 per team (an error in release). toggles are STriggerPlayerStarts whose Tag is the "
-                "toggling event.\n"
-                "- modes [story, diskhunt, deathmatch] add to the modes the level plays (giving a mode's section adds it too); removeModes drops modes together "
-                "with their sections.\n"
-                "- story {mission {id, name, description (the Spy text), descriptionDef (the Merc text), minimumObjectives, chained, atResetEvent}, objectives "
-                "[{id, name, description, descriptionDef, visibilityZone (a zone id), at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime "
-                "(terminal), dropZones [{at}] 1-5 and resetTime (flag), captureTime (bomb), triggerName}]}], sectors [{id, name, brief, briefDefend, objectives "
-                "[ids], required, actions [{kind: open|light|sound|announce|trigger, target, ...}]}]}: an SMission with GameMode GM_Multi listing its SObjectives by "
-                "exact name, each SObjective listing its Triggers; a terminal is an SComputerObjectiveTrigger at floor+78 using DominationCaptureTime "
-                "(CaptureTime on a terminal warns); a flag is an SFlag with 1-5 SFlagDropZones; a bomb target an SBombTargetObjectiveTrigger with CaptureTime. "
-                "Sectors chain under a GM_Multi mission with bChained True, each sector mission GM_Undefined with bChained False, with Zone<N>_Complete "
-                "SMagicEvents and Zone<N>_Announce SAlarms.\n"
-                "- diskhunt {disks: {in: [roomIds], count} | [{id, at, group}], resetTime, mission}: an SMission GM_DiskHunt listing every SDisk, Group cycling "
-                "1/2/3, disks kept clear of geometry; the Map Settings ScoreLimit (map_settings) must not exceed the disks placed.\n"
-                "- deathmatch {disableSecurity, mission}: an SMission GM_DeathMatch whose AtResetEvent fires an SMagicEvent that switches the security off.\n"
-                "- playerCounts [{objective, min, max, open}] (matched by objective) and targets {mission, sizes: [8 counts, 1v1 to 8v8]}: objective player "
-                "limits.\n"
-                "Placement is checked too: spy starts not within 512 units of an objective, the teams not within 768 of each other, every objective within 4096 "
-                "of a merc start, objectives reachable from the spawns.";
-            t.fields = {{"spawns", {"spawns"}, "Player starts per team and toggled starts."},
-                        {"modes", {"gameplay", "modes"}, "Modes to add to those the level plays.", "id", false},
-                        {"story", {"gameplay", "story"}, "Story mode: mission, objectives with their triggers, sectors."},
-                        {"diskhunt", {"gameplay", "diskhunt"}, "Disk Hunt: disks, resetTime, mission."},
-                        {"deathmatch", {"gameplay", "deathmatch"}, "Deathmatch: disableSecurity, mission."},
-                        {"playerCounts", {"gameplay", "playerCounts"}, "Objective player limits, matched by objective.", "objective"},
-                        {"targets", {"gameplay", "targets"}, "Objectives to win per lobby size, matched by mission.", "mission", true, true}};
-            t.extra["removeModes"] = S::Array(S::Enum({"story", "diskhunt", "deathmatch"}, "A mode."), "Modes the level stops playing; their sections go too.");
+                "Spawns and game modes (scct://wiki/spawn-points, scct://wiki/game-modes): PlayerStarts (TeamNumber 0 spy, 1 merc; at least 3 per team), the Story "
+                "mission with its objectives and their triggers, sectors, Disk Hunt and Deathmatch. Placement against the objectives is checked.\n"
+                "- spawns {spy, merc: {in: roomId | [roomIds], count (4), facing: {toward}, spacing} | [{id, at, yaw | facing}], toggles: [{id, team: spy|merc, in | "
+                "at, enabledBy}]}\n"
+                "- modes [story|diskhunt|deathmatch] are added; removeModes drops modes with their sections\n"
+                "- story {mission {id, name, description (Spy), descriptionDef (Merc), minimumObjectives, chained, atResetEvent}, objectives [{id, name, description, "
+                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime, dropZones [{id, at} | {ref}] (1-5), resetTime, "
+                "captureTime, triggerName}]}], sectors [{id, name, brief, briefDefend, objectives, required, actions [{kind: open|light|sound|announce|trigger, target, "
+                "hold, ...}]}]}\n"
+                "- diskhunt {disks: {in: [roomIds], count} | [{id, at, group}], resetTime, mission}; deathmatch {disableSecurity, mission}\n"
+                "- playerCounts [{objective, min, max, open}] (by objective); targets {mission, sizes: [8 counts, 1v1 to 8v8]}";
+            t.fields = {{"spawns", {"spawns"}, ""},
+                        {"modes", {"gameplay", "modes"}, "", "id", false},
+                        {"story", {"gameplay", "story"}, ""},
+                        {"diskhunt", {"gameplay", "diskhunt"}, ""},
+                        {"deathmatch", {"gameplay", "deathmatch"}, ""},
+                        {"playerCounts", {"gameplay", "playerCounts"}, "", "objective"},
+                        {"targets", {"gameplay", "targets"}, "", "mission", true, true}};
+            t.extra["removeModes"] = {{"type", "array"}, {"items", {{"type", "string"}, {"enum", {"story", "diskhunt", "deathmatch"}}}}};
             t.sections = {"/spawns", "/gameplay"};
             t.rules = {"spawns.", "story.", "modes.", "objectives.", "diskhunt.", "deathmatch.", "objectiveplayers.", "players.", "info.travel", "layout.unreachable"};
             t.adjust = GameplayModes;
@@ -472,24 +435,17 @@ namespace
             t.name = "security";
             t.title = "Add alarms, detectors and cameras";
             t.description =
-                "Alarms, detectors and the camera network (scct://wiki/alarms, scct://wiki/level-ingredients).\n"
-                "- alarms [{id, name, description (the Merc HUD text), descriptionSpy, duration, priority 0-5 (5 when it locks something, 2-4 otherwise), outputs "
-                "[ids or Tags it triggers: doors, lights, events], lockMovers [{mover: a door id, action}], lockObjectives [objective trigger ids]}]: SAlarms. "
-                "outputs fill Events, lockMovers the complete MoversToLock structs (ActionBeforeLock default ActionBeforeLock_None), lockObjectives "
-                "ObjectiveTriggersToLock; a bomb target (SBombTargetObjectiveTrigger) is never locked.\n"
-                "- devices [{id, kind: laser|camera|motion|presence|mine, at | in | box, facing, alarm (an alarm id), detected: spy|merc|both, length, radius, "
-                "height, coneAngle, maxDistance, patrolAngle, rotationVelocity, detectionDelay, hideLaser, spawnPercent, props}]: each detector's Event is its "
-                "alarm's Tag; detected sets DetectedClass (SPawnAttaque, SPawnDefense, SBasePawn). A motion sensor is an SVolumetricSensor plus its detection "
-                "Volume, a polygon brush sized to box ({min, max} or {in: roomId, height}). Lasers and presence detectors sit 48 units above the floor, cameras "
-                "at 200.\n"
-                "- camnet [{id, camName, at, yaw | facing, first, constraints {pitch: [min, max], yaw: [min, max]}}]: SCamNetwork cameras wired NextCam/PrevCam "
-                "as one closed loop in list order (new cameras join the end of the loop), exactly one bFirstCam (first, else the first listed), bBlockActors and "
-                "bBlockPlayers True. A Versus map needs at least one, or the Mercs softlock.\n"
-                "Checked: detectors wired to an alarm, alarms fed and doing something, motion sensors with a volume, MessagePriority 0-5, no SAlarmZoneInfo (RE+ "
-                "never makes one), the CamNet loop. Doors to lock come from mechanisms.";
-            t.fields = {{"alarms", {"security", "alarms"}, "SAlarms, matched by id."},
-                        {"devices", {"security", "devices"}, "Detectors (laser, camera, motion, presence, mine), matched by id."},
-                        {"camnet", {"security", "camnet"}, "CamNet cameras in loop order, matched by id."}};
+                "Alarms, detectors and the camera network (scct://wiki/alarms, scct://wiki/level-ingredients). Each detector's Event is its alarm's Tag; the cameras "
+                "form one closed NextCam/PrevCam loop in list order with one bFirstCam (a Versus map needs one, or the Mercs softlock). Doors to lock come from "
+                "mechanisms.\n"
+                "- alarms [{id, name, description (Merc HUD text), descriptionSpy, duration, priority 0-5, outputs [ids or Tags], lockMovers [{mover, action}], "
+                "lockObjectives [ids], at}]\n"
+                "- devices [{id, kind: laser|camera|motion|presence|mine, at | in | box, facing, alarm, detected: spy|merc|both, length, radius, height, coneAngle, "
+                "maxDistance, patrolAngle, rotationVelocity, detectionDelay, hideLaser, spawnPercent}]\n"
+                "- camnet [{id, camName, at, yaw | facing, first, constraints {pitch: [min, max], yaw: [min, max]}}]";
+            t.fields = {{"alarms", {"security", "alarms"}, ""},
+                        {"devices", {"security", "devices"}, ""},
+                        {"camnet", {"security", "camnet"}, ""}};
             t.sections = {"/security"};
             t.rules = {"security.", "camnet.", "alarm.", "volume.alarm-zone", "zones.alarm-zone"};
             out.push_back(std::move(t));
@@ -500,24 +456,18 @@ namespace
             t.title = "Add doors, lifts and buttons";
             t.description =
                 "Doors, movers, elevators, buttons and hacking panels (scct://wiki/movers, scct://wiki/elevators, scct://wiki/buttons-and-hacking-panels).\n"
-                "- doors [{id, mesh: StaticMesh'Pkg.Group.Name', at: {doorway: id} | position, yaw, open: {offset: [x, y, z]} | {yaw: degrees}, moveTime, stayOpen, "
-                "trigger: {kind: button|panel|presence|event, hackTime, usableBy: spy|merc|both, at, radius, text}}]: static-mesh Movers, Key 0 closed and Key 1 "
-                "open (KeyPos/KeyRot), NumKeys 2, InitialState TriggerOpenTimed, MoverEncroachType ME_WaitAndRetryWhenEncroach, left at Key 0. A presence "
-                "trigger is an SPresenceTrigger whose Event is the door's Tag; button and panel make an SInterrupteur; event leaves it to a Tag.\n"
-                "- movers [{id, class, mesh, at, yaw, keys [{offset, yaw, pitch, roll}], moveTime, stayOpen, initialState, encroach}]: other static-mesh movers "
-                "(brush movers are not supported).\n"
-                "- lifts [{id, shaft: pieceId, storeys: [storeyIds], start, mesh, moveTime, switches}]: with a mesh an SLift with one key per storey (start first) "
-                "and a TriggerToggle call switch per floor in DoorsAndSwitches; without a mesh a two-storey Map Design lift platform. Lift doors are not made: add "
-                "them as doors (external doors Key 0 open, Key 1 closed).\n"
-                "- buttons [{id, kind: button|panel, at, yaw | facing, targets: [ids or Tags], hackTime, usableBy, text, mesh}]: an SInterrupteur with "
-                "fInteractionHeight 120, fInteractionRadius 60, bInteractInFront, UseRelativeLocation 55,0,0 (button) or 39.5,3,0 (panel) and UseRelativeRotation "
-                "yaw 32768; its Event is the target's Tag, several targets fan out through an SMagicEvent; usableBy spy U_SPAWNOFFENSE, merc U_SPAWNDEFENSE, both "
-                "U_BOTH (a merc panel with a hack time warns: the wiki calls it unsupported).\n"
-                "Alarms lock doors with security alarms[].lockMovers.";
-            t.fields = {{"doors", {"mechanisms", "doors"}, "Doors, matched by id."},
-                        {"movers", {"mechanisms", "movers"}, "Other static-mesh movers, matched by id."},
-                        {"lifts", {"mechanisms", "lifts"}, "Elevators, matched by id."},
-                        {"buttons", {"mechanisms", "buttons"}, "Buttons and hacking panels, matched by id."}};
+                "- doors [{id, mesh, at: {doorway} | position, yaw, open: {offset} | {yaw}, moveTime, stayOpen, trigger: {kind: button|panel|presence|event, hackTime, "
+                "usableBy: spy|merc|both, at, radius, text}}]: Movers, Key 0 closed, TriggerOpenTimed\n"
+                "- movers [{id, class, mesh, at, yaw, keys [{offset, yaw, pitch, roll}], moveTime, stayOpen, initialState, encroach}]\n"
+                "- lifts [{id, shaft, storeys, start, mesh, moveTime, doorMesh, carDoorMesh, doorOpen: {offset} | {yaw}, doorMoveTime, doors: [{storey, doorway | at, "
+                "yaw, mesh}], switches, carSwitch}]: an SLift. With doorMesh each storey's opening gets an external door (Key 0 open, Key 1 closed) and the car an "
+                "SLiftDoor, which the SLift runs with a call switch per storey and one in the car. Never make lift doors with doors: those open on proximity, over an "
+                "empty shaft.\n"
+                "- buttons [{id, kind: button|panel, at, yaw | facing, targets, hackTime, usableBy, text, mesh}]: SInterrupteurs whose Event is the target's Tag";
+            t.fields = {{"doors", {"mechanisms", "doors"}, ""},
+                        {"movers", {"mechanisms", "movers"}, ""},
+                        {"lifts", {"mechanisms", "lifts"}, ""},
+                        {"buttons", {"mechanisms", "buttons"}, ""}};
             t.sections = {"/mechanisms"};
             t.rules = {"door.", "mover.", "movers.", "elevator.", "button.", "lift.", "ingredients.interaction"};
             out.push_back(std::move(t));
@@ -527,23 +477,20 @@ namespace
             t.name = "events";
             t.title = "Wire events";
             t.description =
-                "Wiring between things, and timed and scripted events (scct://wiki/events, scct://wiki/level-properties).\n"
-                "- links [{from, to, delay, untrigger}] (matched by from and to): from's Event becomes to's Tag; a delay goes through an SMagicEvent action.\n"
-                "- magic [{id, document, at}]: SMagicEvents from scct.smagic-event documents (scct://schema/smagic-event, the SMagicEvent Workbench format).\n"
-                "- messages [{id, spy, merc, time, priority, at}]: SMessageTriggers, HUD text per team.\n"
-                "- shakers and noises [{id, class, at, properties}]: SShaker and SNotifyNoise.\n"
-                "- level [{event, sendAtTime}] (matched by event): events the LevelInfo sends at a time counted back from the end of the match; use a negative "
-                "time, since 0 or more never fires.\n"
-                "- triggerLights [{light (an environment light id), object (an SGamePlayObject id), initiallyOn}] (matched by light): the light becomes an "
-                "STriggerLight in the object's ObjectLights.\n"
-                "Ids are Tags, so links stay consistent; map_query what:\"wiring\" lists the live links and the unresolved ones.";
-            t.fields = {{"links", {"events", "links"}, "Event links, matched by from and to.", "from+to"},
-                        {"magic", {"events", "magic"}, "SMagicEvents, matched by id."},
-                        {"messages", {"events", "messages"}, "SMessageTriggers, matched by id."},
-                        {"shakers", {"events", "shakers"}, "SShakers, matched by id."},
-                        {"noises", {"events", "noises"}, "SNotifyNoises, matched by id."},
-                        {"level", {"events", "level"}, "Level events {event, sendAtTime}, matched by event.", "event"},
-                        {"triggerLights", {"events", "triggerLights"}, "Switchable lights, matched by light.", "light"}};
+                "Wiring between things, and timed and scripted events (scct://wiki/events, scct://wiki/level-properties). map_query what:\"wiring\" shows the live "
+                "links.\n"
+                "- links [{from, to, delay, untrigger}] (by from and to): from's Event becomes to's Tag\n"
+                "- magic [{id, document (scct://schema/smagic-event), at}]; messages [{id, spy, merc, time, priority, at}]; shakers and noises [{id, class, at, "
+                "properties}]\n"
+                "- level [{event, sendAtTime}] (by event): sent by the LevelInfo; sendAtTime is negative, counted back from the end\n"
+                "- triggerLights [{light, object, initiallyOn}] (by light)";
+            t.fields = {{"links", {"events", "links"}, "", "from+to"},
+                        {"magic", {"events", "magic"}, ""},
+                        {"messages", {"events", "messages"}, ""},
+                        {"shakers", {"events", "shakers"}, ""},
+                        {"noises", {"events", "noises"}, ""},
+                        {"level", {"events", "level"}, "", "event"},
+                        {"triggerLights", {"events", "triggerLights"}, "", "light"}};
             t.sections = {"/events"};
             t.rules = {"events.", "level.send-at-time"};
             out.push_back(std::move(t));
@@ -553,40 +500,29 @@ namespace
             t.name = "environment";
             t.title = "Add lights, sound, zones and props";
             t.description =
-                "Lights, sound, zones, volumes and what dresses a level (scct://wiki/lighting, sound-actors, zones-and-volumes, level-ingredients, "
-                "gameplay-objects, vision-mode-properties, static-meshes, fish, softbody-actors, animated-meshes, map-tutorials).\n"
-                "- lights [{id, preset: ceiling (LE_None) | spot (LE_Spotlight) | sun (LE_Sunlight; needs a Fake Backdrop in the zone) | echelon-spot "
-                "(LE_ESpotShadow, EchelonNormalInfluence 0.9), in | at, radius, brightness, hue, saturation (0-255), corona, switchable (an STriggerLight events "
-                "can switch), yaw, pitch}]. Static lights only use LE_None, LE_Spotlight or LE_Sunlight; they bake with map_build what:\"all\".\n"
-                "- sounds [{id, class (SoundTrigger, MusicTrigger, SAmbientSoundTrigger, AmbientSound), sound: Sound'Pkg.Group.Name' (already loaded), at, radius, "
-                "volume 0-255}].\n"
-                "- zones [{id, locationName, spaces: [pieceIds], portals}]: a ZoneInfo with LocationName in each zone and zone portals in the doorways where zones "
-                "meet; put every spawn room in a zone.\n"
-                "- volumes [{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box: {min, max} | {in, height}, locationName, priority}]: polygon brushes "
-                "sized to the box.\n"
-                "- ingredients [{id, kind: ammo (SAmmoStock, interaction 60 high / 120 radius) | infirmary (SInfirmary, blocking, 120 / 60) | glass (SVitre) | "
-                "extinguisher | projector | sprinkler (hidden) | puddle | balltrap, in | at, yaw}].\n"
-                "- objects [{id, mesh, at, yaw, damageable, hitPoints}]: SGamePlayObjects, never bPickable. meshes [{id, mesh, at, yaw, scale, fit: floor}]: "
-                "StaticMeshActors.\n"
-                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity (0-1), properties}] (matched by target): thermal and EMF "
-                "vision values on a spec or existing actor.\n"
-                "- props, fish (SFish: bPilote on the leader, Pilot on followers), softbody (always set class: ESBPatchActor, ESBStripeDoorActor, ESBRopeActor or "
-                "ESBChainActor; never copy one), animated (SAnimatedMesh) and tutorials (SZoneTips, SHelpPath, SEndZoneTip): [{id, class, mesh, at, yaw, scale, "
-                "properties}] with raw property values (leaves are strings, structs objects, {\"$ref\": id} for actors).\n"
-                "Zones and volumes change brushes, so the geometry is rebuilt (build auto).";
-            t.fields = {{"lights", {"environment", "lights"}, "Lights, matched by id."},
-                        {"sounds", {"environment", "sounds"}, "Sound actors, matched by id."},
-                        {"zones", {"zones"}, "Zones: [{id, locationName, spaces}], matched by id."},
-                        {"volumes", {"environment", "volumes"}, "Volumes, matched by id."},
-                        {"ingredients", {"environment", "ingredients"}, "Level ingredients; matched by id when they have one, else added."},
-                        {"objects", {"environment", "objects"}, "SGamePlayObjects, matched by id."},
-                        {"meshes", {"geometry", "meshes"}, "StaticMeshActors, matched by id."},
-                        {"vision", {"environment", "vision"}, "Vision values on actors, matched by target.", "target"},
-                        {"props", {"environment", "props"}, "Other actors {id, class, at, properties}, matched by id."},
-                        {"fish", {"environment", "fish"}, "Fish, matched by id."},
-                        {"softbody", {"environment", "softbody"}, "SoftBody actors, matched by id."},
-                        {"animated", {"environment", "animated"}, "Animated meshes, matched by id."},
-                        {"tutorials", {"environment", "tutorials"}, "Tutorial actors, matched by id."}};
+                "Lights, sound, zones, volumes and what dresses a level (scct://wiki/lighting, sound-actors, zones-and-volumes, level-ingredients, gameplay-objects, "
+                "vision-mode-properties, softbody-actors and the others). Zones and volumes change brushes, so the geometry is rebuilt.\n"
+                "- lights [{id, preset: ceiling|spot|sun|echelon-spot, in | at, radius, brightness, hue, saturation, cone, corona, switchable, yaw, pitch}]\n"
+                "- sounds [{id, class, sound, at, radius, volume}]; zones [{id, locationName, spaces: [pieceIds], portals}]\n"
+                "- volumes [{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box: {min, max} | {in, height}, locationName, priority}]\n"
+                "- ingredients [{id, kind: ammo|infirmary|glass|extinguisher|projector|sprinkler|puddle|balltrap, in | at, yaw}]; objects [{id, mesh, at, yaw, "
+                "damageable, hitPoints}]; meshes [{id, mesh, at, yaw, scale, fit}]\n"
+                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, properties}] (by target)\n"
+                "- props, fish, softbody (class ESBPatchActor, ESBStripDoorActor, ESBRopeActor or ESBChainActor; never copied), animated, tutorials: [{id, class, mesh, "
+                "at, yaw, scale, properties}]";
+            t.fields = {{"lights", {"environment", "lights"}, ""},
+                        {"sounds", {"environment", "sounds"}, ""},
+                        {"zones", {"zones"}, ""},
+                        {"volumes", {"environment", "volumes"}, ""},
+                        {"ingredients", {"environment", "ingredients"}, "Matched by id when they have one, else added."},
+                        {"objects", {"environment", "objects"}, ""},
+                        {"meshes", {"geometry", "meshes"}, ""},
+                        {"vision", {"environment", "vision"}, "", "target"},
+                        {"props", {"environment", "props"}, ""},
+                        {"fish", {"environment", "fish"}, ""},
+                        {"softbody", {"environment", "softbody"}, ""},
+                        {"animated", {"environment", "animated"}, ""},
+                        {"tutorials", {"environment", "tutorials"}, ""}};
             t.sections = {"/environment", "/zones", "/geometry/meshes"};
             t.rules = {"light.", "lighting.", "sound.", "volume.", "ingredient.", "ingredients.", "object.", "objects.", "softbody.", "fish.", "tutorials.", "zones."};
             out.push_back(std::move(t));
@@ -596,22 +532,13 @@ namespace
             t.name = "geometric_events";
             t.title = "Add ledges, pipes, ladders and wires";
             t.description =
-                "Geometric events, the ledges, pipes and wires players climb (scct://wiki/geometric-events).\n"
-                "- ges [{id, kind: ledge|hoh|pipe|ladder|zipline|fence|pole, points}]: each runs the editor's GE ADD (ledge LG, hoh HOH, pipe PIPE, ladder LADDER, "
-                "zipline ZL, fence FENCE, pole POLE). Two points along the edge for ledge, hoh, zipline, fence and pole; three for pipe and ladder: bottom, top, "
-                "then the side the player climbs from. Pipes and ladders are put low end first with the side point at that height, as the game needs. New GEs are "
-                "added to the spec's list (one with an id updates that GE). The bridge cannot delete GEs: one taken out of the spec stays in the map until it is "
-                "deleted in GE mode.\n"
-                "- geTriggers [{id, toggle, geMask, at}]: SGETriggers that switch GE groups; the starting mask is map_settings level.geActivationMask. GE IDs are "
-                "set by hand in the editor (Set GE ID).\n"
-                "The wiki's measurements are checked (validation): ledge grab 208-320 standing, 448 running, 512 co-op, obstacles 115, pull-up 64, a ledge at "
-                "least 32 long; fences 88-128 high (96 best) with a bClimbable texture; hand-over-hand 216 clearance; ladders an even number of bars, at least 8 "
-                "(32 units a bar); ziplines at most 384 up with 198 clearance; pipes and ladders from the low end. map_validate measures them again on the built "
-                "map.\n"
-                "Called with no ges, geTriggers or remove, it only lists the GEs: those Map Design or this server added (ge.list; the editor keeps no list of "
-                "others) and the spec's. After a change the result has geList too.";
-            t.fields = {{"ges", {"ges"}, "GEs to add (or update, by id).", "id", false},
-                        {"geTriggers", {"geTriggers"}, "SGETriggers, matched by id."}};
+                "Geometric events, the ledges, pipes and wires players climb (scct://wiki/geometric-events), checked against the wiki's measurements. With no ges, "
+                "geTriggers or remove it only lists the GEs.\n"
+                "- ges [{id, kind: ledge|hoh|pipe|ladder|zipline|fence|pole, points}]: two points along the edge; three for pipe and ladder (bottom, top, the side "
+                "climbed from). They are added to the spec's list; the bridge cannot delete a GE (delete it in GE mode).\n"
+                "- geTriggers [{id, toggle, geMask, at}]: SGETriggers";
+            t.fields = {{"ges", {"ges"}, "", "id", false},
+                        {"geTriggers", {"geTriggers"}, ""}};
             t.sections = {"/ges", "/geTriggers"};
             t.rules = {"ge.", "incremental.ge"};
             t.adjust = AddGes;
@@ -624,46 +551,34 @@ namespace
             t.name = "map_settings";
             t.title = "Set Map Settings and Level Properties";
             t.description =
-                "Level Properties, Map Settings, interface textures and the in-game minimap (scct://wiki/level-properties, scct://wiki/map-settings).\n"
-                "- level {song, deathPawnHeight (fDeathPawnHeight: below everything players use, or 0 for off), motionTracking: standard (MTV 52/85) | enhanced "
-                "(8/8), events [{event, sendAtTime (negative: seconds before the end)}] (replaces the list), geActivationMask (the starting GE mask)}: the "
-                "LevelInfo, written with settings.edit inside the Undo step.\n"
-                "- Map Settings (SMapSettings): mapName (in capitals), briefSpy and briefMerc (shared by every mode), legend (date, place and a one-line story; | "
-                "breaks lines), legendInBrief (the numbered minimap zones), modes [{mode: story|diskhunt|deathmatch, respawn 5-15, timeLimit 0-20 minutes, "
-                "spiesLives and sentriesLives 0-10 (0 is unlimited), scoreLimit, handicap, numDisksMax (Disk Hunt; at most the disks placed), strings "
-                "{explicationSpy, explicationMerc, briefSpy, briefMerc, legendSpy, legendMerc}}] matched by mode (removeModes drops one); or all of it as one "
-                "object in mapSettings (also called settings). Modes[] and ModesStrings[] are written index-aligned with GameModeId GM_Multi, GM_DiskHunt or "
-                "GM_DeathMatch, and LegendModeInBrief* defaults to the Ubisoft text.\n"
-                "  SMapSettings exist only once a new map is saved, closed and opened again: map_file action save_as, editor_restart, then this tool. This editor "
-                "build may not be able to write them over the bridge: then the result's mapSettings says applied false and gives the checklist of values and the "
-                "manual steps (right-click empty viewport space > Map Settings), and the values stay in the spec for the next try.\n"
-                "- interface {menu, briefing (256 x 256, DXT5 with alpha), loadingAtt, loadingDef (512 x 512, DXT1)}: image files on this machine (full paths, or "
-                "relative to the work directory) imported into the map's <Map>-i package (interface.texture; PNG, BMP, JPEG, GIF and TIFF are resized, TGA must "
-                "already be the right size; image_convert prepares them).\n"
-                "- minimap true or {floors: [z...], framing: gameplay|everything|current, style, objectives, spawns, meshes, briefing, briefingFloor}: draws the "
-                "in-game (F7) map from the built geometry into MapSnapshotInfo (minimap.apply).\n"
-                "Checked: MapName in capitals, the ranges above, one Modes and ModesStrings entry per mode, Disk Hunt ScoreLimit and Handicap against the disks, "
-                "SendAtTime negative, interface texture formats. Save the map afterwards (map_file action save).";
+                "Level Properties, Map Settings, interface textures and the in-game minimap (scct://wiki/level-properties, scct://wiki/map-settings). Map Settings "
+                "exist only once a new map is saved, closed and reopened (map_file save_as, editor_restart); when the bridge cannot write them, the result's "
+                "mapSettings has the checklist and manual steps. Save the map afterwards.\n"
+                "- level {song, deathPawnHeight, motionTracking: standard|enhanced, events [{event, sendAtTime}], geActivationMask}\n"
+                "- mapName (capitals), briefSpy, briefMerc, legend, legendInBrief; modes [{mode: story|diskhunt|deathmatch, respawn, timeLimit, spiesLives, "
+                "sentriesLives, scoreLimit, handicap, numDisksMax, strings {explicationSpy, explicationMerc, briefSpy, briefMerc, legendSpy, legendMerc}}] (by mode; "
+                "removeModes); or all of it as mapSettings\n"
+                "- interface {menu, briefing, loadingAtt, loadingDef}: image files on this machine\n"
+                "- minimap true | {floors, framing, style, objectives, spawns, meshes, briefing, briefingFloor}";
             const auto& settings = Spec::Schema().at("properties").at("settings").at("properties");
-            t.fields = {{"level", {"level"}, "Level Properties, merged field by field."},
-                        {"interface", {"interface"}, "Interface images by slot: menu, briefing, loadingAtt, loadingDef."},
-                        {"mapSettings", {"settings"}, "All the Map Settings as one object (the spec's settings section).", "id", false},
+            t.fields = {{"level", {"level"}, ""},
+                        {"interface", {"interface"}, ""},
+                        {"mapSettings", {"settings"}, "", "id", false},
                         {"settings", {"settings"}, "The same as mapSettings.", "id", false},
-                        {"modes", {"settings", "modes"}, "Map Settings per mode, matched by mode.", "mode", false}};
+                        {"modes", {"settings", "modes"}, "", "mode", false}};
             for (const auto& [key, text] : std::vector<std::pair<std::string, std::string>>{
-                     {"mapName", "Map Settings MapName, in capitals (it also names a new spec)."},
-                     {"briefSpy", "Map Settings ExpliMapInBriefSpy: the Spy brief, shared by every mode."},
-                     {"briefMerc", "Map Settings ExpliMapInBriefSentry: the Merc brief, shared by every mode."},
-                     {"legend", "Map Settings LegendMap: date, place and a one-line story; | breaks lines."},
-                     {"legendInBrief", "Map Settings LegendMapInBrief: the numbered minimap zones; | breaks lines."}})
+                     {"mapName", "Map Settings MapName, in capitals (also a new spec's name)."},
+                     {"briefSpy", "ExpliMapInBriefSpy, all modes."},
+                     {"briefMerc", "ExpliMapInBriefSentry, all modes."},
+                     {"legend", "LegendMap; | breaks lines."},
+                     {"legendInBrief", "LegendMapInBrief; | breaks lines."}})
             {
                 auto schema = settings.at(key);
                 schema["description"] = text;
                 t.extra[key] = schema;
             }
-            t.extra["removeModes"] = S::Array(S::Enum({"story", "diskhunt", "deathmatch"}, "A mode."), "Map Settings modes to drop.");
-            t.extra["minimap"] = {{"anyOf", Json::array({{{"type", "boolean"}}, S::Free("minimap.apply options.")})},
-                                  {"description", "Set the in-game minimap from the built geometry: true, or {floors, framing, style, objectives, spawns, meshes, briefing, briefingFloor}."}};
+            t.extra["removeModes"] = {{"type", "array"}, {"items", {{"type", "string"}, {"enum", {"story", "diskhunt", "deathmatch"}}}}};
+            t.extra["minimap"] = {{"type", Json::array({"boolean", "object"})}};
             t.sections = {"/settings", "/level", "/interface"};
             t.rules = {"settings.", "level.", "interface.", "release."};
             t.adjust = MapSettings;
@@ -681,7 +596,7 @@ void RegisterIntentTools(Registry& registry)
         Tool t;
         t.name = intent.name;
         t.title = intent.title;
-        t.description = intent.description + kHow;
+        t.description = intent.description + kHow + intent.name + ".";
         t.inputSchema = InputSchema(intent);
         t.outputSchema = S::MutationOutput();
         t.destructive = true;

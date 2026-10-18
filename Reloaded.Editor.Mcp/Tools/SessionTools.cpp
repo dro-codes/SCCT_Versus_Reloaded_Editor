@@ -15,7 +15,6 @@ namespace
     namespace S = Tools::Schema;
     using Clock = std::chrono::steady_clock;
 
-    void Pause(unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
     double Elapsed(Clock::time_point since) { return std::chrono::duration<double>(Clock::now() - since).count(); }
     std::filesystem::path EditorExe(const ToolContext& c) { return c.systemDir / "Reloaded_Editor.exe"; }
     std::filesystem::path EditorIni(const ToolContext& c) { return c.systemDir / "Reloaded_Editor.ini"; }
@@ -108,7 +107,11 @@ namespace
             {
                 c.bridge.Select(pid);
                 try { hello = c.bridge.Hello(); break; }
-                catch (const Bridge::Error& e) { last = e.what(); }
+                catch (const Bridge::Error& e)
+                {
+                    if (e.code == Bridge::Code::Cancelled) throw;
+                    last = e.what();
+                }
             }
             else if (pid && !Process().running(pid))
                 throw std::runtime_error("The editor (process " + std::to_string(pid) + ") exited while starting. Ask the user to start Reloaded_Editor.exe and look for an error.");
@@ -131,7 +134,13 @@ namespace
                 throw Bridge::Error(Bridge::Code::Timeout, why + " A window may be waiting for the user (an update offer, crash recovery, a missing package): ask the user to answer it, then call editor_status." +
                                     (last.empty() ? "" : " Last error: " + last), "startup", Json{{"pid", pid}, {"launcher", launcher}});
             }
-            Pause(500);
+            Pause(500, "editor_launch");
+        }
+        // The new editor numbers its calls from 1: the old ones cannot be undone by number.
+        {
+            auto& memory = Memory();
+            std::lock_guard<std::mutex> guard(memory.lock);
+            memory.Reset();
         }
         Json out{{"pid", pid}, {"launcher", launcher}, {"hello", hello}, {"seconds", std::round(Elapsed(started) * 10) / 10}};
         try { out["state"] = State(c); } catch (const std::exception& e) { out["stateError"] = e.what(); }
@@ -161,7 +170,7 @@ namespace
             result["connected"] = true;
             result["bridge"] = {{"dll", hello.value("dll", std::string())}, {"pid", hello.value("pid", 0ul)}, {"protocol", hello.value("protocol", Json())},
                                 {"approval", hello.value("approval", false)}, {"enabled", hello.value("enabled", true)}, {"limits", hello.value("limits", Json())},
-                                {"ops", hello.contains("ops") ? hello.at("ops").size() : 0}};
+                                {"ops", hello.contains("ops") ? hello.at("ops").size() : 0}, {"opsDoc", "scct://docs/ops"}};
             result["state"] = state;
             summary = "Connected to RE+ " + hello.value("dll", std::string("?")) + " (process " + std::to_string(hello.value("pid", 0ul)) + "): " + MapText(state) +
                       ". Approval of changes is " + (hello.value("approval", false) ? "on: the user reviews each change in the editor." : "off.");
@@ -255,7 +264,7 @@ namespace
             if (Elapsed(closing) > 90)
                 return Fail("The editor (process " + std::to_string(pid) + ") did not close within 90 s. A dialog may be asking the user something; ask the user to look at the editor, then call editor_status.",
                             {{"pid", pid}});
-            Pause(250);
+            Pause(250, "editor_restart");
         }
         c.progress(2, 4, "Starting the editor");
         auto launched = Launch(c, waitSeconds, true);
@@ -277,12 +286,21 @@ namespace
         const bool redo = Bool(a, "redo");
         const bool hasSteps = Has(a, "steps");
         const auto steps = Integer(a, "steps", 1, 1, 100);
+        if (redo && Has(a, "call")) return Fail("redo takes steps, not call: it redoes the newest undone Undo steps.");
         unsigned call = Has(a, "call") ? static_cast<unsigned>(Integer(a, "call", 0, 1, 0xffffffffLL)) : 0;
+        // No arguments: this server's newest call that still has Undo steps,
+        // never a blind undo, which could take back something the user did.
         if (!call && !redo && !hasSteps)
         {
-            auto& memory = Memory();
-            std::lock_guard<std::mutex> guard(memory.lock);
-            call = memory.lastCall;
+            {
+                auto& memory = Memory();
+                std::lock_guard<std::mutex> guard(memory.lock);
+                if (!memory.calls.empty()) call = memory.calls.back().call;
+            }
+            if (!call)
+                return Fail("This server has made no change it can still undo in this editor, so nothing was undone (with no arguments editor_undo only takes back this "
+                            "server's own calls). Pass call (undo.call in a tool result) for a given MCP call, or steps to undo the newest Undo steps whoever made them.",
+                            {{"next", Json::array({Next("map_query", "See what the map holds now.", {{"what", "summary"}})})}});
         }
         std::string op = "undo.steps";
         Json args{{"count", steps}};
@@ -297,13 +315,42 @@ namespace
             o.extra = {{"op", op}, {"args", args}, {"state", before}};
             return Done(c, o, false);
         }
-        const auto result = Call(c, op, args, label);
+        Json result;
+        try { result = Call(c, op, args, label); }
+        catch (const Bridge::Error& e)
+        {
+            // Undone already, or out of the buffer: nothing left to take back.
+            if (op == "undo.call" && (e.reason == "gone" || e.reason == "already_undone"))
+            {
+                auto& memory = Memory();
+                std::lock_guard<std::mutex> guard(memory.lock);
+                memory.Forget(call);
+            }
+            throw;
+        }
         const auto after = State(c);
-        if (op == "undo.call")
         {
             auto& memory = Memory();
             std::lock_guard<std::mutex> guard(memory.lock);
-            if (memory.lastCall == call) memory.lastCall = 0;
+            if (op == "undo.call")
+            {
+                Session::Made made{call, 1, "MCP call"};
+                for (const auto& m : memory.calls) if (m.call == call) made = m;
+                if (result.is_object() && result.contains("steps") && result.at("steps").is_number_integer()) made.steps = result.at("steps").get<int>();
+                memory.Forget(call);
+                memory.undone.push_back(made);
+            }
+            else if (op == "redo.steps")
+            {
+                // Redone steps bring back the calls they undid, newest undone first.
+                int left = result.is_object() && result.contains("done") && result.at("done").is_number_integer() ? result.at("done").get<int>() : static_cast<int>(steps);
+                while (!memory.undone.empty() && memory.undone.back().steps <= left)
+                {
+                    left -= memory.undone.back().steps;
+                    memory.calls.push_back(memory.undone.back());
+                    memory.undone.pop_back();
+                }
+            }
         }
         Outcome o;
         o.summary = "Did " + what + ". Revision " + std::to_string(before.value("revision", 0)) + " -> " + std::to_string(after.value("revision", 0)) + "; " + MapText(after) + ".";
@@ -350,7 +397,7 @@ namespace
                     {
                         auto& memory = Memory();
                         std::lock_guard<std::mutex> guard(memory.lock);
-                        memory.lastCall = call;
+                        memory.Push(call, undo.value("steps", 0), "approved change");
                     }
                     o.extra["undo"] = {{"call", call}, {"steps", undo.value("steps", 0)}, {"how", "editor_undo with call " + std::to_string(call) + " reverts this whole call while it is the newest change"}};
                 }
@@ -360,7 +407,7 @@ namespace
             if (waited >= timeout)
                 return Ok({{"ticket", ticket}, {"pending", true}, {"status", status}},
                           "Still waiting for the user's approval (ticket " + ticket + "). Call approval_wait again, or ask the user to answer the review window in the editor.");
-            if (left > 1000) Pause(1000);
+            if (left > 1000) Pause(1000, "approval_wait");
         }
     }
 
@@ -566,14 +613,13 @@ void RegisterSessionTools(Registry& registry)
         t.name = "editor_launch";
         t.title = "Start the editor";
         t.description =
-            "Starts Reloaded_Editor.exe from the game's System folder with -reMcp (it starts ChaosTheory_Editor.exe with RE+ and exits) and waits (default 180 s) "
-            "until the new editor's MCP pipe answers, reporting progress; the result's pid is the editor's. "
-            "Needs [Mcp] Enabled=1 in System\\Reloaded_Editor.ini, which only the user sets (RE+ Tools > MCP > Enable MCP server); refuses otherwise unless force. "
-            "Does nothing when an editor is already running (use editor_status). Optional map opens a .sdc once started (a bare name such as \"AquaD\" is looked "
-            "up in Packages\\MapsEd). If the editor shows a startup window (update offer, crash recovery) the wait times out: ask the user to answer it. Windows only.";
-        t.inputSchema = S::Mutating(S::Input({{"waitSeconds", S::Integer("How long to wait for the pipe, 10-600 s. Default 180.", 10, 600)},
-                                              {"map", S::String("A map to open once started: a file in Packages\\MapsEd (\"AquaD\") or a full path to a .sdc.")},
-                                              {"force", S::Boolean("Start even when the INI says the MCP server is off or another editor is running. Default false.")}}));
+            "Starts Reloaded_Editor.exe from the game's System folder with -reMcp and waits (default 180 s) until the new editor's MCP pipe answers; the result's "
+            "pid is the editor's. Needs [Mcp] Enabled=1 in System\\Reloaded_Editor.ini, which only the user sets (RE+ Tools > MCP > Enable MCP server); refused "
+            "otherwise unless force. Does nothing when an editor is already running (editor_status). map opens a .sdc once started. A startup window (update offer, "
+            "crash recovery) makes the wait time out: ask the user to answer it. Windows only.";
+        t.inputSchema = S::Mutating(S::Input({{"waitSeconds", S::Integer("Seconds to wait for the pipe. Default 180.", 10, 600)},
+                                              {"map", S::String("A map to open once started (\"AquaD\" or a .sdc path).")},
+                                              {"force", S::Boolean("Start even when the INI says the server is off or an editor runs.")}}));
         t.outputSchema = S::MutationOutput();
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return EditorLaunch(a, c); }); };
         registry.Add(std::move(t));
@@ -587,8 +633,8 @@ void RegisterSessionTools(Registry& registry)
             "after a new map is first saved: Map Settings (SMapSettings) cannot be opened until the saved map has been reopened in a fresh editor. "
             "save: false closes without saving and loses unsaved changes. A map that was never saved is refused (save it with map_file save_as first). "
             "Takes about as long as an editor start; progress is reported.";
-        t.inputSchema = S::Mutating(S::Input({{"save", S::Boolean("Save unsaved changes before closing. Default true; false discards them.")},
-                                              {"waitSeconds", S::Integer("How long to wait for the new editor's pipe, 10-600 s. Default 180.", 10, 600)}}));
+        t.inputSchema = S::Mutating(S::Input({{"save", S::Boolean("Save unsaved changes first. Default true; false discards them.")},
+                                              {"waitSeconds", S::Integer("Seconds to wait for the new editor. Default 180.", 10, 600)}}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return EditorRestart(a, c); }); };
@@ -599,13 +645,13 @@ void RegisterSessionTools(Registry& registry)
         t.name = "editor_undo";
         t.title = "Undo or redo";
         t.description =
-            "Undoes changes. Every MCP change is one Undo step labelled \"MCP <n>: <label>\" in Undo History. With no arguments it undoes the last MCP call this "
-            "server made (by its call number, so it refuses rather than undo something newer the user did); call undoes a given MCP call (each mutating "
-            "tool's result has undo.call) while its steps are still the newest; steps undoes that many Undo steps whatever made them; redo with steps "
-            "redoes. Returns the editor state before and after.";
-        t.inputSchema = S::Mutating(S::Input({{"call", S::Integer("An MCP call number (undo.call in a tool result) to undo as a whole.", 1, 0xffffffffLL)},
-                                              {"steps", S::Integer("Undo (or with redo, redo) this many steps, 1-100.", 1, 100)},
-                                              {"redo", S::Boolean("Redo instead of undo. Default false.")}}));
+            "Undoes changes. Every MCP change is one Undo step labelled \"MCP <n>: <label>\" in Undo History. With no arguments it undoes this server's newest "
+            "call that is still undoable (called again, the one before it), by call number, so it is refused rather than undo something newer the user did, "
+            "and does nothing when this server has made no change; call undoes a given MCP call (undo.call in each mutating tool's result) while its steps "
+            "are the newest; steps undoes that many Undo steps whatever made them; redo with steps redoes. Returns the editor state before and after.";
+        t.inputSchema = S::Mutating(S::Input({{"call", S::Integer("An MCP call (undo.call in a tool result) to undo as a whole.", 1, 0xffffffffLL)},
+                                              {"steps", S::Integer("Undo (with redo: redo) this many steps.", 1, 100)},
+                                              {"redo", S::Boolean("Redo instead of undo.")}}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return EditorUndo(a, c); }); };
@@ -620,8 +666,8 @@ void RegisterSessionTools(Registry& registry)
             "without an answer fails with code timeout, reason awaiting_approval and a ticket; call this with that ticket to keep waiting (default 50 s, "
             "progress is reported). Returns the change's result once approved, an error once declined (denied) or when the map changed meanwhile (stale), "
             "or pending: true when there is still no answer.";
-        t.inputSchema = S::Input({{"ticket", S::String("The ticket from the awaiting_approval error's details.")},
-                                  {"timeoutSeconds", S::Integer("How long to wait this time, 1-600 s. Default 50.", 1, 600)}},
+        t.inputSchema = S::Input({{"ticket", S::String("The awaiting_approval error's ticket.")},
+                                  {"timeoutSeconds", S::Integer("How long to wait this time. Default 50.", 1, 600)}},
                                  {"ticket"});
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return ApprovalWait(a, c); }); };
         registry.Add(std::move(t));
@@ -634,11 +680,11 @@ void RegisterSessionTools(Registry& registry)
             "The editor's log (the last 2,000 lines the engine and RE+ wrote), newest last. Filter by level (warning includes errors) or contains; since "
             "returns only lines after that sequence number, and newOnly continues where the previous editor_log stopped. Useful after a build, a failed "
             "change or a dialog. Read-only.";
-        t.inputSchema = S::Input({{"since", S::Integer("Only lines after this sequence number (last in a previous result).", 0, 0x7fffffffffffffffLL)},
-                                  {"newOnly", S::Boolean("Continue after the last line a previous editor_log returned.")},
-                                  {"max", S::Integer("At most this many lines, the newest, 1-2000. Default 100.", 1, 2000)},
+        t.inputSchema = S::Input({{"since", S::Integer("Only lines after this sequence number (a result's last).", 0, 0x7fffffffffffffffLL)},
+                                  {"newOnly", S::Boolean("Continue after the previous editor_log.")},
+                                  {"max", S::Integer("At most this many lines, the newest. Default 100.", 1, 2000)},
                                   {"level", S::Enum({"all", "warning", "error"}, "Minimum level. Default all.")},
-                                  {"contains", S::String("Only lines containing this text (case-insensitive).")}});
+                                  {"contains", S::String("Only lines containing this text (any case).")}});
         t.readOnly = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return EditorLog(a, c); }); };
         registry.Add(std::move(t));
@@ -648,17 +694,16 @@ void RegisterSessionTools(Registry& registry)
         t.name = "map_file";
         t.title = "New, open or save a map";
         t.description =
-            "Map files. action new starts an empty map; open loads a .sdc (a bare name such as \"AquaD\" is looked up in Packages\\MapsEd); save writes the "
-            "current file; save_as names it. Maps are saved in Packages\\MapsEd as ASCII names without spaces; the wiki (map-packaging) names the file after "
-            "the first four letters of the map name plus D (Aquarius -> AquaD), which save_as does from mapName unless path is given. new and open refuse "
-            "to drop unsaved changes unless discardUnsaved is true; save_as refuses to replace another map's file unless overwrite. Saves keep a backup of "
-            "the replaced file. After the first save of a new map, the wiki requires editor_restart before Map Settings can be edited. Files are not undoable.";
+            "Map files. action new starts an empty map; open loads a .sdc (a bare name such as \"AquaD\" is looked up in Packages\\MapsEd); save writes the current "
+            "file; save_as names it: Packages\\MapsEd, ASCII without spaces, by the wiki (map-packaging) the first four letters of the map name plus D (Aquarius -> "
+            "AquaD), which save_as makes from mapName. new and open refuse to drop unsaved changes unless discardUnsaved; save_as refuses to replace another map's "
+            "file unless overwrite. After the first save of a new map, editor_restart comes before Map Settings. Files are not undoable.";
         t.inputSchema = S::Mutating(S::Input(
             {{"action", S::Enum({"new", "open", "save", "save_as"}, "What to do.")},
-             {"path", S::String("open: the map to open. save_as: the file name (\"AquaD\" or \"AquaD.sdc\", in Packages\\MapsEd) or a full path in Packages\\MapsEd.")},
-             {"mapName", S::String("save_as without path: the map's display name (as in Map Settings, CAPS); the file is named after its first four letters plus D.")},
-             {"discardUnsaved", S::Boolean("new/open: drop the open map's unsaved changes. Default false.")},
-             {"overwrite", S::Boolean("save_as: replace an existing file of another map. Default false.")}},
+             {"path", S::String("open: the map. save_as: the file name (\"AquaD\") or a full path in Packages\\MapsEd.")},
+             {"mapName", S::String("save_as without path: the map's display name (CAPS), which names the file.")},
+             {"discardUnsaved", S::Boolean("new, open: drop the open map's unsaved changes.")},
+             {"overwrite", S::Boolean("save_as: replace another map's file.")}},
             {"action"}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;
@@ -673,7 +718,7 @@ void RegisterSessionTools(Registry& registry)
             "Rebuilds the map, then runs Map Check. what geometry (default) rebuilds BSP after brushes or blockout pieces change, as Build Geometry does; "
             "all runs the editor's full build (geometry, lighting, paths) without the Lighting Budget prompt, which can take minutes on a large map. "
             "Returns the build log's tail and the Map Check rows (errors first). Builds are not Undo steps. Follow with map_validate.";
-        t.inputSchema = S::Mutating(S::Input({{"what", S::Enum({"geometry", "all"}, "geometry (default) or all.")},
+        t.inputSchema = S::Mutating(S::Input({{"what", S::Enum({"geometry", "all"}, "Default geometry.")},
                                               {"check", S::Boolean("Run Map Check afterwards. Default true.")}}));
         t.outputSchema = S::MutationOutput();
         t.idempotent = true;

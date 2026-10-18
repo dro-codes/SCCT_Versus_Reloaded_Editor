@@ -1104,10 +1104,8 @@
   {
    "args": {
     "changes": {
-     "MotionTrackingTweak": {
-      "MTVOffset": "52",
-      "MTVSlope": "85"
-     }
+     "MTVOffset": "52",
+     "MTVSlope": "85"
     },
     "snapshot": {
      "$bind": {

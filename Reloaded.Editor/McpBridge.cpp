@@ -5,6 +5,7 @@
 #include "McpBridgeModel.h"
 #include "McpGuardModel.h"
 #include "McpPlanModel.h"
+#include "McpSafetyModel.h"
 #include "McpOps.h"
 #include "McpEditor.h"
 #include "WorkflowEditor.h"
@@ -31,6 +32,7 @@
 #include <random>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
 
@@ -48,6 +50,7 @@ namespace
     namespace Bridge = Mcp::Bridge;
     namespace Guard = Mcp::Guard;
     namespace Plan = Mcp::Plan;
+    namespace Safety = Mcp::Safety;
     namespace Editor = Workflow::Editor;
     namespace fs = std::filesystem;
     using Json = Workflow::Json;
@@ -107,6 +110,14 @@ namespace
         return fs::path(exe).parent_path();
     }
     std::wstring IniPath() { return (SystemDirectory() / L"Reloaded_Editor.ini").wstring(); }
+    // Where Reloaded.Editor.Mcp.exe keeps its files without [Mcp] WorkDir.
+    fs::path DefaultWorkDir()
+    {
+        std::wstring data(32768, L'\0');
+        const DWORD size = GetEnvironmentVariableW(L"ProgramData", data.data(), static_cast<DWORD>(data.size()));
+        if (size && size < data.size()) return fs::path(data.substr(0, size)) / L"REPlusMcp";
+        return SystemDirectory() / L"ReloadedEditor" / L"Mcp" / L"work";
+    }
 
     // [Mcp] in Reloaded_Editor.ini, read by both threads.
     std::mutex settingsLock;
@@ -122,6 +133,15 @@ namespace
         loaded.allowPlay = flag(L"AllowPlay");
         const int megabytes = static_cast<int>(GetPrivateProfileIntW(L"Mcp", L"HistoryMaxMB", 200, ini.c_str()));
         loaded.historyMaxMB = static_cast<unsigned>(std::clamp(megabytes, 1, 100000));
+        auto text = [&](const wchar_t* key)
+        {
+            std::wstring value(32768, L'\0');
+            value.resize(GetPrivateProfileStringW(L"Mcp", key, L"", value.data(), static_cast<DWORD>(value.size()), ini.c_str()));
+            return value;
+        };
+        const auto work = text(L"WorkDir");
+        loaded.workDir = work.empty() ? DefaultWorkDir() : fs::path(work);
+        for (const auto& root : Safety::SplitRoots(Narrow(text(L"WriteRoots")))) loaded.writeRoots.push_back(fs::path(Wide(root)));
         return loaded;
     }
     void Store(const McpBridge::Settings& next) { std::lock_guard lock(settingsLock); settings = next; }
@@ -129,7 +149,8 @@ namespace
     // The keys are written once, off, so the user can find the ones only the
     // INI sets (AllowRawExec, AllowPlay, HistoryMaxMB, and Ffmpeg and
     // WriteRoots, which Reloaded.Editor.Mcp.exe reads: the ffmpeg to use and
-    // the folders besides its work folder it may write in, empty for none).
+    // the folders besides its work folder it may write in, empty for none;
+    // the bridge holds release copies and exec's files to the same folders).
     void WriteMissingDefaults()
     {
         static const std::pair<const wchar_t*, const wchar_t*> defaults[] = {
@@ -863,40 +884,18 @@ namespace
         EnumWindows(FindStartupWindow, reinterpret_cast<LPARAM>(&found));
         return Narrow(found);
     }
-    Guard::Inputs GuardInputs()
-    {
-        Guard::Inputs in;
-        in.depth = depth;
-        in.approvalPending = reviewing;
-        const HWND owner = Frame();
-        in.frameDisabled = owner && !IsWindowEnabled(owner);
-        in.minimised = owner && IsIconic(owner);
-        GUITHREADINFO info{};
-        info.cbSize = sizeof(info);
-        if (GetGUIThreadInfo(GetCurrentThreadId(), &info))
-        {
-            in.menuMode = (info.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE)) != 0;
-            in.moveSize = (info.flags & GUI_INMOVESIZE) != 0;
-        }
-        in.captured = GetCapture() != nullptr;
-        try { in.transactionOpen = Editor::UndoRecords().open; }
-        catch (const std::exception&) { /* No engine yet: no transaction either. */ }
-        in.rebuilding = RebuildAllMaps::Running();
-        in.slowTask = SlowTask();
-        in.startupDialog = StartupDialog();
-        return in;
-    }
-
     // The dialog watchdog: a #32770 dialog that opens during a call is
     // answered, so the call never waits on a question nobody sees. A known
     // notice gets its button; anything else the most cautious one, and the
     // call fails as dialog_blocked. Only windows the call created count (the
     // RE+ tool panels are dialogs too), and never a progress window: its
     // Cancel would stop a build.
-    struct KnownDialog { const wchar_t* text; const wchar_t* button; };
+    struct KnownDialog { const wchar_t* text; int button; };
     const KnownDialog kKnownDialogs[] = {
-        {L"was damaged by an older version of the editor", L"ok"}, // LightmapFix's notice when no damage sink is set
+        {L"was damaged by an older version of the editor", IDOK}, // LightmapFix's notice when no damage sink is set
     };
+    static_assert(IDOK == Safety::Id::Ok && IDCANCEL == Safety::Id::Cancel && IDABORT == Safety::Id::Abort && IDNO == Safety::Id::No && IDCLOSE == Safety::Id::Close,
+                  "McpSafetyModel.h's dialog ids are winuser.h's");
     struct Watch { Json dialogs = Json::array(); bool blocked = false; std::set<HWND> created, seen; };
     Watch* watch = nullptr;
     HHOOK cbtHook = nullptr;
@@ -907,15 +906,6 @@ namespace
         std::wstring text(static_cast<size_t>(std::max(GetWindowTextLengthW(window), 0)) + 1, L'\0');
         text.resize(static_cast<size_t>(std::max(GetWindowTextW(window, text.data(), static_cast<int>(text.size())), 0)));
         return text;
-    }
-    // "&Cancel" -> "cancel".
-    std::wstring Plain(std::wstring label)
-    {
-        label.erase(std::remove(label.begin(), label.end(), L'&'), label.end());
-        for (auto& c : label) if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c - L'A' + L'a');
-        while (!label.empty() && label.back() == L' ') label.pop_back();
-        while (!label.empty() && label.front() == L' ') label.erase(label.begin());
-        return label;
     }
     BOOL CALLBACK CollectControl(HWND child, LPARAM parameter)
     {
@@ -946,23 +936,32 @@ namespace
         Controls controls;
         EnumChildWindows(dialog, CollectControl, reinterpret_cast<LPARAM>(&controls));
         if (controls.progress) return;
-        auto button = [&](const wchar_t* label) -> const Control*
-        {
-            for (const auto& b : controls.buttons) if (Plain(b.label) == label) return &b;
-            return nullptr;
-        };
         const Control* chosen = nullptr;
         bool known = false;
         for (const auto& entry : kKnownDialogs)
-            if (controls.text.find(entry.text) != std::wstring::npos && (chosen = button(entry.button))) { known = true; break; }
-        for (const wchar_t* label : {L"cancel", L"no", L"close", L"ok"})
-            if (!chosen) chosen = button(label);
-        for (const auto& b : controls.buttons) if (!chosen && b.id == IDCANCEL) chosen = &b;
-        if (!chosen && !controls.buttons.empty()) chosen = &controls.buttons.front();
+            if (!chosen && controls.text.find(entry.text) != std::wstring::npos)
+                for (const auto& b : controls.buttons)
+                    if (!chosen && b.id == entry.button) { chosen = &b; known = true; }
+        // Any other question gets its most cautious answer, chosen by id, as
+        // a message box's labels are in the user's language; never just the
+        // first button, which in a Yes/No box is Yes.
+        if (!chosen)
+        {
+            std::vector<Safety::Button> buttons;
+            for (const auto& b : controls.buttons) buttons.push_back({b.id, b.label});
+            const int pick = Safety::CautiousButton(buttons);
+            if (pick >= 0) chosen = &controls.buttons[static_cast<size_t>(pick)];
+        }
         if (chosen) PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(chosen->id, BN_CLICKED), reinterpret_cast<LPARAM>(chosen->window));
-        else PostMessageW(dialog, WM_CLOSE, 0, 0);
-        const auto title = Narrow(WindowText(dialog)), text = Narrow(controls.text), pressed = chosen ? Narrow(Plain(chosen->label)) : std::string("(closed)");
-        watch->dialogs.push_back({{"title", title}, {"text", text.substr(0, 2000)}, {"button", pressed}, {"known", known}});
+        else
+        {
+            // No button is safe to press: closed as Escape closes it (a box
+            // whose Close is disabled ignores WM_CLOSE).
+            PostMessageW(dialog, WM_CLOSE, 0, 0);
+            PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+        }
+        const auto title = Narrow(WindowText(dialog)), text = Narrow(controls.text), pressed = chosen ? Narrow(Safety::PlainLabel(chosen->label)) : std::string("(closed)");
+        watch->dialogs.push_back({{"title", title}, {"text", text.substr(0, 2000)}, {"button", pressed}, {"buttonId", chosen ? chosen->id : 0}, {"known", known}});
         if (!known) watch->blocked = true;
         Logger::log("MCP: answered the dialog \"" + title + "\" with " + pressed + (known ? "" : " (unknown dialog: the call fails)"));
     }
@@ -994,6 +993,101 @@ namespace
         Watchdog(const Watchdog&) = delete;
         Watchdog& operator=(const Watchdog&) = delete;
     };
+    // Modal loops the bridge did not open. A call posted to the bridge's
+    // window is run by whichever message loop is pumping the frame's thread,
+    // a message box's or a dialog's too, while the code that opened it (an
+    // engine command and its hooks, an RE+ handler) waits on the stack below:
+    // a call run there acts in the middle of that code. The message filter
+    // hook says which modal loop a call came through, and the open windows
+    // say whether one is up.
+    HHOOK filterHook = nullptr;
+    int callLoop = -1; // the MSGF_ code of the modal loop the waiting kRun came through; -1 none
+    LRESULT CALLBACK FilterProc(int code, WPARAM w, LPARAM l)
+    {
+        if (code >= 0 && l)
+        {
+            const auto* msg = reinterpret_cast<const MSG*>(l);
+            if (msg->message == kRun && msg->hwnd && msg->hwnd == bridgeWindow.load()) callLoop = code;
+        }
+        return CallNextHookEx(nullptr, code, w, l);
+    }
+    // A message box's controls: statics, its text the one with id 0xFFFF,
+    // and push buttons.
+    struct BoxShape { bool text = false, other = false; };
+    BOOL CALLBACK BoxPart(HWND child, LPARAM parameter)
+    {
+        auto& shape = *reinterpret_cast<BoxShape*>(parameter);
+        wchar_t type[32] = L"";
+        GetClassNameW(child, type, 32);
+        if (!_wcsicmp(type, L"Static")) { if (GetDlgCtrlID(child) == 0xFFFF) shape.text = true; }
+        else if (_wcsicmp(type, L"Button")) shape.other = true;
+        return TRUE;
+    }
+    struct ModalSearch { int loop = -1; HWND active = nullptr, found = nullptr; };
+    BOOL CALLBACK FindModal(HWND window, LPARAM parameter)
+    {
+        auto& search = *reinterpret_cast<ModalSearch*>(parameter);
+        wchar_t type[16] = L"";
+        GetClassNameW(window, type, 16);
+        if (wcscmp(type, L"#32770") || !IsWindowVisible(window) || !IsWindowEnabled(window) || (watch && watch->created.count(window))) return TRUE;
+        // DialogBox disables the window it is opened over. Without one, only a
+        // message box, or the active dialog of the loop the call came
+        // through: the RE+ and engine panels are dialogs too, open for hours.
+        bool modal = false;
+        if (const HWND owner = GetWindow(window, GW_OWNER)) modal = !IsWindowEnabled(owner);
+        else
+        {
+            BoxShape shape;
+            EnumChildWindows(window, BoxPart, reinterpret_cast<LPARAM>(&shape));
+            modal = (shape.text && !shape.other) || (search.loop == MSGF_DIALOGBOX && window == search.active);
+        }
+        if (!modal) return TRUE;
+        search.found = window;
+        return FALSE;
+    }
+    // The title of a modal dialog or message box the bridge did not open, up
+    // on the frame's thread, or "" for none.
+    std::string ForeignModal(int loop)
+    {
+        ModalSearch search;
+        search.loop = loop;
+        search.active = GetActiveWindow();
+        EnumThreadWindows(GetCurrentThreadId(), FindModal, reinterpret_cast<LPARAM>(&search));
+        if (search.found)
+        {
+            const auto title = Narrow(WindowText(search.found));
+            return title.empty() ? std::string("an untitled dialog") : title;
+        }
+        return loop == MSGF_MESSAGEBOX ? std::string("a message box") : std::string();
+    }
+    Guard::Inputs GuardInputs(int loop, std::string& modal)
+    {
+        Guard::Inputs in;
+        in.depth = depth;
+        in.approvalPending = reviewing;
+        const HWND owner = Frame();
+        in.frameDisabled = owner && !IsWindowEnabled(owner);
+        // A modal loop that leaves the frame enabled: an ownerless message box
+        // (LightmapFix's notice inside File > Open's MAP LOAD), or one owned by
+        // a tool window.
+        if (!in.frameDisabled) in.frameDisabled = !(modal = ForeignModal(loop)).empty();
+        in.minimised = owner && IsIconic(owner);
+        GUITHREADINFO info{};
+        info.cbSize = sizeof(info);
+        if (GetGUIThreadInfo(GetCurrentThreadId(), &info))
+        {
+            in.menuMode = (info.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE)) != 0;
+            in.moveSize = (info.flags & GUI_INMOVESIZE) != 0;
+        }
+        in.captured = GetCapture() != nullptr;
+        try { in.transactionOpen = Editor::UndoRecords().open; }
+        catch (const std::exception&) { /* No engine yet: no transaction either. */ }
+        in.rebuilding = RebuildAllMaps::Running();
+        in.slowTask = SlowTask();
+        in.startupDialog = StartupDialog();
+        return in;
+    }
+
     struct TransactionPrefix
     {
         explicit TransactionPrefix(const std::string& prefix) { Editor::SetTransactionPrefix(prefix); }
@@ -1286,12 +1380,80 @@ namespace
         catch (const std::exception& e) { Logger::log(std::string("MCP: could not write the call history: ") + e.what()); }
     }
 
-    // One call, start to reply, on the frame's thread.
-    Json RunCall(PendingCall& call)
+    std::string Join(const std::vector<std::string>& items)
+    {
+        std::string text;
+        for (size_t i = 0; i < items.size(); ++i) text += (i ? (i + 1 == items.size() ? " and " : ", ") : "") + items[i];
+        return text;
+    }
+    // dialog_blocked, said as it happened: the question and its answer, how
+    // far a plan got, what it wrote that Undo does not reach, and whether the
+    // call's map changes were taken back. plan is the plan's result or its
+    // failure's details (failedStep, ran, wrote, rolledBack).
+    Failure Blocked(const PendingCall& call, unsigned n, const Watch& watched, const Json& plan, size_t undone, unsigned steps)
+    {
+        Json first = watched.dialogs.front();
+        for (const auto& dialog : watched.dialogs) if (!Flag(dialog, "known")) { first = dialog; break; }
+        const auto button = Text(first, "button");
+        std::string message = "The editor asked \"" + Text(first, "title") + "\" during " + call.op + ": " + Text(first, "text") +
+                              (button == "(closed)" ? std::string(" No button was safe to press, so it was closed as Escape closes it.") : " It was answered \"" + button + "\".");
+        const bool planned = plan.is_object(), scopeUndone = planned && Flag(plan, "rolledBack");
+        // rolledBack: whether the call's map changes were taken back (by the
+        // plan's own rollback, or undoneSteps Undo steps); undoSteps: the
+        // call's Undo steps still in the buffer.
+        Json details{{"dialogs", watched.dialogs}, {"rolledBack", scopeUndone || undone > 0}, {"undoneSteps", undone}, {"undoSteps", steps}};
+        const auto stopped = planned ? Text(plan, "failedStep") : std::string();
+        if (!stopped.empty())
+        {
+            details["stoppedAt"] = {{"step", stopped}, {"op", Text(plan, "op")}, {"section", Text(plan, "section")}};
+            if (!Wrapped(call))
+            {
+                std::vector<std::string> ran;
+                if (plan.contains("ran") && plan.at("ran").is_array())
+                    for (const auto& id : plan.at("ran")) if (id.is_string() && id.get<std::string>() != stopped) ran.push_back("\"" + id.get<std::string>() + "\"");
+                message += " The plan stopped at step \"" + stopped + "\" (" + Text(plan, "op") + ", in " + Text(plan, "section") + ")" +
+                           (ran.empty() ? std::string(", the first to run.") : ", after " + Join(ran) + ".") + " No step after it ran.";
+            }
+        }
+        for (const char* key : {"ran", "built"})
+            if (planned && plan.contains(key)) details[key] = plan.at(key);
+        std::vector<std::string> wrote;
+        if (planned && plan.contains("wrote") && plan.at("wrote").is_array())
+        {
+            details["wrote"] = plan.at("wrote");
+            for (const auto& w : plan.at("wrote"))
+                wrote.push_back(Text(w, "op") + (Wrapped(call) ? std::string() : " (step \"" + Text(w, "step") + "\")") + (Text(w, "file").empty() ? std::string() : " to " + Text(w, "file")));
+        }
+        if (scopeUndone || undone)
+        {
+            message += " The call's map changes were undone.";
+            if (planned && plan.contains("built") && plan.at("built").is_array() && !plan.at("built").empty())
+                message += " The geometry its build made stays until the map is built again (design.build or build.all).";
+        }
+        if (!wrote.empty())
+        {
+            message += " " + std::string(scopeUndone || undone ? "But " : "Nothing was undone: ") + Join(wrote) +
+                       " had already run, and Undo does not take back files or packages written, or a map opened";
+            message += steps ? ", so the map changes stay in place. undo.call {\"call\": " + std::to_string(n) + "} takes them back if they are not wanted." : ".";
+        }
+        else if (!scopeUndone && !undone)
+        {
+            if (!Bridge::Mutates(call.policy->policy)) message += " It changes nothing.";
+            else if (call.policy->policy != Bridge::Policy::Undoable) message += " Nothing was undone. " + PolicyNote(*call.policy);
+            else if (!steps) message += " It left no Undo step, so nothing was undone.";
+            else message += " Its map changes could not be undone; undo.call {\"call\": " + std::to_string(n) + "} may take them back.";
+        }
+        return {Bridge::Code::DialogBlocked, message, "unknown_dialog", details};
+    }
+
+    // One call, start to reply, on the frame's thread. loop: the modal loop
+    // that dispatched it (FilterProc), -1 for the editor's own.
+    Json RunCall(PendingCall& call, int loop)
     {
         const auto& policy = *call.policy;
         const bool mutating = Bridge::Mutates(policy.policy);
-        const auto busy = Guard::BusyReason(GuardInputs(), policy, call.op == "view.screenshot");
+        std::string modal;
+        const auto busy = Guard::BusyReason(GuardInputs(loop, modal), policy, call.op == "view.screenshot");
         // The state is a few reads of memory: it answers even while the
         // editor is busy, saying with what.
         if (call.op == "editor.state")
@@ -1300,7 +1462,11 @@ namespace
             if (!busy.empty()) state["busy"] = busy;
             return Bridge::ResultMessage(call.id, state, state);
         }
-        if (!busy.empty()) return Bridge::ErrorMessage(call.id, Bridge::ErrorBody(Bridge::Code::Busy, Guard::BusyHint(busy), busy), CachedState(busy));
+        if (!busy.empty())
+        {
+            const auto hint = busy == "modal" && !modal.empty() ? "A dialog is open in the editor (\"" + Utf8(modal) + "\"); ask the user to close it." : Guard::BusyHint(busy);
+            return Bridge::ErrorMessage(call.id, Bridge::ErrorBody(Bridge::Code::Busy, hint, busy), CachedState(busy));
+        }
 
         struct Depth { Depth() { ++depth; } ~Depth() { --depth; } } inside;
         const unsigned n = ++callCounter;
@@ -1314,6 +1480,7 @@ namespace
         std::string ticket;
         unsigned markFrom = Mark(), markTo = markFrom, steps = 0;
         std::optional<Json> result;
+        Json planned; // a plan's own result, before a one-step plan is unwrapped
         Failure failure;
         try
         {
@@ -1334,6 +1501,7 @@ namespace
                     value = {{"dryRun", true}, {"preview", SyntheticRows(call)}, {"note", "Runs on apply; nothing was changed."}};
                 else value = WorkflowTools::Request(BuildRequest(call, label, call.dryRun));
             }
+            if (Planned(call)) planned = value;
             // A one-step plan answers as the op itself would.
             if (Wrapped(call) && !call.dryRun && value.is_object() && value.contains("steps") && value.at("steps").is_object() && value.at("steps").contains("s1"))
                 value = Json(value.at("steps").at("s1"));
@@ -1344,20 +1512,19 @@ namespace
         steps = StepsSince(markFrom, markTo);
         if (watched.blocked)
         {
-            // Whatever the dialog's answer let the call do is taken back.
+            // What the dialog's answer let the call do in the map is taken
+            // back, unless a step had written files or packages after it:
+            // the map file would then hold changes the editor no longer shows.
+            const Json& plan = result ? planned : failure.details;
+            const bool wrote = plan.is_object() && plan.contains("wrote") && plan.at("wrote").is_array() && !plan.at("wrote").empty();
             size_t undone = 0;
-            if (policy.policy == Bridge::Policy::Undoable && steps)
+            if (policy.policy == Bridge::Policy::Undoable && steps && !wrote)
                 try { undone = Editor::UndoBackTo(markFrom); }
                 catch (const std::exception& e) { Logger::log(std::string("MCP: could not undo the call after its dialog: ") + e.what()); }
             if (undone) { markTo = Mark(); steps = StepsSince(markFrom, markTo); }
-            Json details{{"dialogs", watched.dialogs}, {"rolledBack", undone}};
-            if (!result) details["cause"] = {{"code", failure.code}, {"message", failure.message}};
-            Json first = watched.dialogs.front();
-            for (const auto& dialog : watched.dialogs) if (!Flag(dialog, "known")) { first = dialog; break; }
-            failure = {Bridge::Code::DialogBlocked,
-                       "The editor asked \"" + Text(first, "title") + "\" during " + call.op + ": " + Text(first, "text") + " It was answered \"" + Text(first, "button") + "\"" +
-                           (undone ? " and the call's changes were undone." : "."),
-                       "unknown_dialog", details};
+            auto blocked = Blocked(call, n, watched, plan, undone, steps);
+            if (!result) blocked.details["cause"] = {{"code", failure.code}, {"message", failure.message}};
+            failure = std::move(blocked);
             result.reset();
         }
         if (steps)
@@ -1391,7 +1558,7 @@ namespace
     }
 
     // kRun: the call in the slot, unless its client has gone.
-    void RunQueued()
+    void RunQueued(int loop)
     {
         std::shared_ptr<PendingCall> call;
         {
@@ -1402,7 +1569,7 @@ namespace
             call->stage = Stage::Running;
         }
         Json reply;
-        try { reply = RunCall(*call); }
+        try { reply = RunCall(*call, loop); }
         catch (...)
         {
             const auto failure = Classify(call->op);
@@ -1427,7 +1594,7 @@ namespace
     }
     LRESULT CALLBACK BridgeProc(HWND window, UINT message, WPARAM w, LPARAM l)
     {
-        if (message == kRun) { RunQueued(); return 0; }
+        if (message == kRun) { RunQueued(std::exchange(callLoop, -1)); return 0; }
         if (message == kCancelReview) { if (reviewing) MapAuthoringDialog::CancelReview(); return 0; }
         if (message == kClientChanged) { ClientChanged(); return 0; }
         return DefWindowProcW(window, message, w, l);
@@ -1514,6 +1681,7 @@ void McpBridge::AttachUiThread(HWND frame)
     HWND window = CreateWindowExW(0, type.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, type.hInstance, nullptr);
     if (!window) { Logger::log("MCP: cannot create the bridge's message window, error " + std::to_string(GetLastError())); return; }
     bridgeWindow = window;
+    if (!filterHook) filterHook = SetWindowsHookExW(WH_MSGFILTER, FilterProc, nullptr, GetCurrentThreadId());
     EngineLog::AddListener(OnEngineLog);
     WriteMissingDefaults();
     if (Current().enabled) StartServer();
@@ -1523,6 +1691,7 @@ void McpBridge::Shutdown()
 {
     StopServer();
     EngineLog::RemoveListener(OnEngineLog);
+    if (filterHook) { UnhookWindowsHookEx(filterHook); filterHook = nullptr; }
     if (HWND window = bridgeWindow.exchange(nullptr)) DestroyWindow(window);
 }
 
@@ -1609,6 +1778,25 @@ McpBridge::Settings McpBridge::Current()
 bool McpBridge::Connected() { return activeClient.load() != 0; }
 
 std::filesystem::path McpBridge::Directory() { return SystemDirectory() / "ReloadedEditor" / "Mcp"; }
+
+std::vector<std::filesystem::path> McpBridge::WriteRoots()
+{
+    const auto current = Current();
+    std::vector<fs::path> roots;
+    // A relative root has nothing to be relative to; it is left out.
+    auto add = [&](const fs::path& root)
+    {
+        if (root.empty() || root.is_relative()) return;
+        std::error_code error;
+        const auto canonical = fs::weakly_canonical(root, error);
+        roots.push_back(error ? root.lexically_normal() : canonical);
+    };
+    add(current.workDir);
+    for (const auto& root : current.writeRoots) add(root);
+    return roots;
+}
+
+bool McpBridge::DialogBlocked() { return watch && watch->blocked; }
 
 std::vector<McpBridge::CallRecord> McpBridge::Records()
 {

@@ -38,11 +38,21 @@ namespace McpBridge
     {
         bool enabled = false, requireApproval = false, allowRawExec = false, allowPlay = false;
         unsigned historyMaxMB = 200;
+        // The server's work folder ([Mcp] WorkDir, else %ProgramData%\REPlusMcp)
+        // and [Mcp] WriteRoots, as Reloaded.Editor.Mcp.exe reads them.
+        std::filesystem::path workDir;
+        std::vector<std::filesystem::path> writeRoots;
     };
     Settings Current();
     bool Connected();
     // <System>\ReloadedEditor\Mcp: blobs\, history\.
     std::filesystem::path Directory();
+    // The folders a bridge call may write in besides the map's own files and
+    // packages: the work folder and [Mcp] WriteRoots, canonical.
+    std::vector<std::filesystem::path> WriteRoots();
+    // Whether the dialog watchdog answered a question it did not know during
+    // the call running now: mcp.plan runs no further step once it has.
+    bool DialogBlocked();
 
     // The bridge calls that changed the map, newest last: undo.call checks a
     // call's transactions are still the newest undoable ones before undoing.

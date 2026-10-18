@@ -16,7 +16,7 @@ arguments:
     description: Anything to add on top, such as "a second floor", "a bomb objective" or "more security".
 wiki: [index, spawn-points, game-modes, level-ingredients, alarms, map-settings]
 docs: [map-design]
-rules: true
+rules: false
 ---
 # Versus starter map: {{mapName}}
 
@@ -40,6 +40,8 @@ Parameters:
 - **Corridor length:** {{corridorLength}}
 {{#extras}}- **Extras:** {{extras}}
 {{/extras}}
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
+
 ## Recipe
 
 1. **Connect.** Call `editor_status`. If the open map has unsaved work, ask the user, then call `map_file` with `action:"new"`.

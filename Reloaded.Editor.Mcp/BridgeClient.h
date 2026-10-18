@@ -2,7 +2,9 @@
 // The editor over its named pipe (\\.\pipe\ReloadedEditor.Mcp.<pid>), with the
 // frames and messages of McpBridgeModel.h. Connects on first use and says
 // hello; a busy editor is retried with backoff (250 ms doubling to 4 s) until
-// the call's timeout; a pipe that broke since the last call is reconnected
+// the call's timeout, except while a change waits in the review window or
+// another client holds the editor (busy approval_pending, another_client),
+// which fail at once; a pipe that broke since the last call is reconnected
 // once. Off Windows every call throws Bridge::Error(not_connected), so the
 // server and its tests still build there.
 //
@@ -53,8 +55,9 @@ namespace Mcp
         void Disconnect() override;
         // Stops waiting for the call in flight (any thread): the editor is
         // asked to cancel it and the call throws Bridge::Error(cancelled), as
-        // does every later call until Resume(), so a cancelled tool stops at
-        // its next editor call. The server resumes before each request.
+        // does every later Call, Hello and Editors until Resume(), so a
+        // cancelled tool stops at its next editor call. The server resumes
+        // before each request.
         void Cancel();
         void Resume();
         // Process ids of editors with a bridge pipe, from the pipe namespace.

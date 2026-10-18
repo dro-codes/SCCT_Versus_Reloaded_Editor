@@ -17,7 +17,7 @@ arguments:
     description: What to keep, simplify or invent (gameplay, missing floors, areas off camera).
 wiki: [index, spawn-points, game-modes, level-ingredients, geometric-events]
 docs: [tools]
-rules: true
+rules: false
 ---
 # Create an SCCT Versus level from media
 
@@ -36,6 +36,8 @@ rules: true
 - `plan_render` and `view_screenshot` let you compare your result with the source.
 
 Every judgement is yours: what a room is, where walls and doors are, how big things are. Record these judgements in the spec's `provenance`.
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

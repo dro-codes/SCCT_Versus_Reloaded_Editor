@@ -12,12 +12,14 @@ arguments:
     description: Briefing and legend text, or "write it" to have you draft it from the map.
     default: write it
 wiki: [map-settings, sound-browser, map-packaging, level-properties]
-rules: true
+rules: false
 ---
 # Prepare {{mapName}} for release
 
 {{#images}}**Interface images:** {{images}}
 {{/images}}**Briefing text:** {{briefing}}
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

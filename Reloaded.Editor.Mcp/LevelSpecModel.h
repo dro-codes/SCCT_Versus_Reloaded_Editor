@@ -161,7 +161,7 @@ namespace Mcp::Spec
             const auto brush = Obj({{"id", Ref("id")}, {"class", Str()}, {"csg", Enum({"CSG_Add", "CSG_Subtract"})}, {"polyFlags", Int()}, {"at", Ref("point")},
                                     {"polygons", Arr(polygon, 1, 16384)}, {"props", Ref("props")}},
                                    {"id", "polygons"});
-            const auto surface = Obj({{"brush", Ref("id")}, {"faces", Arr(Enum({"floor", "ceiling", "+X", "-X", "+Y", "-Y"}), 1, 6)}, {"texture", Str()}},
+            const auto surface = Obj({{"brush", Ref("id")}, {"faces", Arr(Enum({"floor", "ceiling", "+X", "-X", "+Y", "-Y"}), 1, 6, "Faces by the way their surface faces: a carved room's east wall faces west (-X).")}, {"texture", Str()}},
                                      {"brush", "faces", "texture"});
             const auto mesh = Obj({{"id", Ref("id")}, {"mesh", Str()}, {"at", Ref("position")}, {"yaw", Num()}, {"scale", Any({Num(), Ref("vec3")})},
                                    {"fit", Enum({"floor", "none"})}, {"props", Ref("props")}},
@@ -178,7 +178,9 @@ namespace Mcp::Spec
                                     {"id", "team"});
             const auto spawns = Obj({{"spy", team}, {"merc", team}, {"toggles", Arr(toggle)}});
 
-            const auto dropZone = Obj({{"id", Ref("id")}, {"at", Ref("position")}}, {"at"});
+            const auto dropZone = Any({Obj({{"id", Ref("id")}, {"at", Ref("position")}}, {"at"}, "{id, at}: a new SFlagDropZone; give it an id to share it."),
+                                       Obj({{"ref", Ref("id")}}, {"ref"}, "{ref: id}: the drop zone another flag's entry made, shared.")},
+                                      "{id, at} for a new SFlagDropZone, or {ref: id} to share one another flag made (flags may share drop zones).");
             const auto trigger = Obj({{"id", Ref("id")}, {"kind", Enum({"terminal", "flag", "bomb"})}, {"at", Ref("position")}, {"yaw", Num()}, {"facing", Ref("facing")},
                                       {"dominationCaptureTime", Num("Terminal capture time.")}, {"captureTime", Num("Bomb fuse.")}, {"resetTime", Num("Flag reset.")},
                                       {"dropZones", Arr(dropZone, 1, 5)}, {"triggerName", Str()}, {"props", Ref("props")}},
@@ -258,7 +260,8 @@ namespace Mcp::Spec
 
             const auto light = Obj({{"id", Ref("id")}, {"preset", Enum({"ceiling", "spot", "sun", "echelon-spot"})}, {"in", Ref("id")}, {"at", Ref("position")},
                                     {"radius", Num()}, {"brightness", Range(Num(), 0, 255)}, {"hue", Range(Num(), 0, 255)}, {"saturation", Range(Num(), 0, 255)},
-                                    {"corona", Bool()}, {"switchable", Bool("An STriggerLight events can switch.")}, {"yaw", Num()}, {"pitch", Num()}, {"props", Ref("props")}},
+                                    {"corona", Bool()}, {"switchable", Bool("An STriggerLight events can switch.")}, {"yaw", Num()}, {"pitch", Num()},
+                                    {"cone", Range(Int("LightCone of the spot preset: the beam's width, larger is wider. Default: the class's."), 0, 255)}, {"props", Ref("props")}},
                                    {"id"});
             const auto sound = Obj({{"id", Ref("id")}, {"class", Str()}, {"sound", Str("Sound'Package.Group.Name'")}, {"at", Ref("position")}, {"radius", Num()},
                                     {"volume", Range(Num(), 0, 255)}, {"props", Ref("props")}},
@@ -324,12 +327,45 @@ namespace Mcp::Spec
     // --- Checking against the schema -------------------------------------------
     namespace Check
     {
-        inline const std::regex& Pattern(const std::string& text)
+        // A schema pattern, compiled once. MS STL's ^ and $ also match beside
+        // every '\n' (libstdc++'s only at the ends), so a pattern anchored at
+        // both ends is matched against the whole string without its anchors:
+        // regex_match anchors alike on both, and "Room1\nX" is no id anywhere.
+        // A | outside any group or set ("^a|b$") anchors each side alone, so
+        // such a pattern is searched as written.
+        struct Compiled { std::regex regex; bool whole = false; };
+        inline bool Anchored(const std::string& text)
         {
-            thread_local std::map<std::string, std::regex> cache;
+            if (text.size() < 2 || text.front() != '^' || text.back() != '$' || text[text.size() - 2] == '\\') return false;
+            int depth = 0;
+            bool inSet = false;
+            for (size_t i = 1; i + 1 < text.size(); ++i)
+            {
+                const char c = text[i];
+                if (c == '\\') { ++i; continue; }
+                if (inSet) { inSet = c != ']'; continue; }
+                if (c == '[') inSet = true;
+                else if (c == '(') ++depth;
+                else if (c == ')') --depth;
+                else if (c == '|' && depth == 0) return false;
+            }
+            return true;
+        }
+        inline const Compiled& Pattern(const std::string& text)
+        {
+            thread_local std::map<std::string, Compiled> cache;
             auto found = cache.find(text);
-            if (found == cache.end()) found = cache.emplace(text, std::regex(text)).first;
+            if (found == cache.end())
+            {
+                const bool whole = Anchored(text);
+                found = cache.emplace(text, Compiled{std::regex(whole ? "(?:" + text.substr(1, text.size() - 2) + ")" : text), whole}).first;
+            }
             return found->second;
+        }
+        inline bool Matches(const std::string& value, const std::string& pattern)
+        {
+            const auto& compiled = Pattern(pattern);
+            return compiled.whole ? std::regex_match(value, compiled.regex) : std::regex_search(value, compiled.regex);
         }
         inline std::string Name(const Json& value)
         {
@@ -449,7 +485,7 @@ namespace Mcp::Spec
                 if (schema.contains("items"))
                     for (size_t i = 0; i < value.size(); ++i) Value(value[i], schema.at("items"), Child(at, i), root);
             }
-            if (value.is_string() && schema.contains("pattern") && !std::regex_search(value.get<std::string>(), Pattern(schema.at("pattern").get<std::string>())))
+            if (value.is_string() && schema.contains("pattern") && !Matches(value.get<std::string>(), schema.at("pattern").get<std::string>()))
                 throw SpecError(at, Name(value) + (schema.contains("description") ? " does not fit: " + schema.at("description").get<std::string>() : " has the wrong form."));
             if (value.is_number())
             {

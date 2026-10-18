@@ -1,5 +1,6 @@
 // Reading the map: map_query, view_screenshot, plan_render.
 #include "Common.h"
+#include "../Embedded.h"
 #include <set>
 #if !defined(RE_MCP_STANDALONE) && __has_include("../PlanRender.h")
 #include "../PlanRender.h"
@@ -364,11 +365,11 @@ namespace
     {
         Json scene, diagnostics = Json::array();
         std::string source = "live map";
-        if (Has(a, "spec"))
+        if (Has(a, "spec") || Has(a, "path"))
         {
 #ifdef RE_MCP_SPEC
-            const auto& spec = a.at("spec");
-            if (!spec.is_object()) return Fail("spec must be a scct.level-spec object.");
+            std::string from;
+            const auto spec = LoadSpec(a, c, from, EmbeddedFiles());
             try
             {
                 Spec::CompileOptions options;
@@ -390,7 +391,7 @@ namespace
                     diagnostics.push_back({{"severity", d.severity}, {"rule", d.rule}, {"pointer", d.pointer}, {"message", d.message}, {"wikiPage", d.wikiPage}});
             }
             catch (const Spec::SpecError& e) { return Fail(std::string("The spec does not parse: ") + e.what(), {{"pointer", e.pointer}}); }
-            source = "spec";
+            source = from == "spec" ? std::string("spec") : "spec " + from;
 #else
             return Fail("This build has no level-spec compiler (LevelSpecCompiler.h), so plan_render can only draw the live map: omit spec.");
 #endif
@@ -504,33 +505,30 @@ void RegisterQueryTools(Registry& registry)
         t.title = "Read the map";
         t.description =
             "Reads the open map without changing it. what:\n"
-            "- summary: file, unsaved state, revision, actor counts by class, spawns per team, missions, objectives, security, CamNet cameras, quick notes.\n"
-            "- actors: live actors filtered by classes (IsA, any of), tags, names (object names or paths), near {at:[x,y,z], radius}, box {min, max}, selected; "
-            "fields [\"Prop\", ...] or \"all\" adds their values; paged by limit (default 200, max 5000) and cursor (the previous result's next).\n"
-            "- actor: one actor (actor: path, name or {path, class}) with every editable value, its links, and with includeSchema its property schema. "
-            "These values are the before that actors_edit and map-changes updates must match.\n"
-            "- level: the LevelInfo (Level Properties). schema: property schemas, enum choices and writability for classes. "
-            "assets: loaded assets of kind (staticmesh, material, texture, sound, class) matching query.\n"
-            "- wiring: Tag/Event links and references (all, or touching actor), with unresolved ones. spawns, missions, security, cameras, lights, stages "
-            "(story sectors), design (blockout brushes with bounds), ges (geometric events), spec (the level spec last applied).\n"
-            "Units are Unreal units, Z up, +X east, +Y north; rotations are 65536 per turn.";
+            "- summary: file, unsaved state, revision, actor counts by class, spawns per team, missions, objectives, security, cameras, quick notes.\n"
+            "- actors: live actors filtered by classes (IsA, any of), tags, names, near {at, radius}, box {min, max}, selected; fields [names] or \"all\" adds their "
+            "values; paged by limit (default 200) and cursor (the previous result's next).\n"
+            "- actor: one actor (path, name or {path, class}) with every editable value and its links (includeSchema: its property schema); these values are the "
+            "before that actors_edit and map-changes updates must match.\n"
+            "- level (Level Properties), schema (property schemas, enum choices, writability of classes), assets (loaded assets of kind matching query), wiring "
+            "(Tag/Event links, with the unresolved ones), spawns, missions, security, cameras, lights, stages (story sectors), design (blockout brushes with "
+            "bounds), ges, spec (the level spec last applied).";
         t.inputSchema = S::Input(
             {{"what", S::Enum({"summary", "actors", "actor", "level", "schema", "assets", "wiring", "spawns", "missions", "security", "cameras", "lights", "stages", "design", "ges", "spec"},
                               "What to read.")},
-             {"classes", S::Array({{"type", "string"}}, "actors: class names or paths (IsA, any of), such as Engine.Light. schema: classes to describe.")},
-             {"tags", S::Array({{"type", "string"}}, "actors: Tags (any of).")},
-             {"names", S::Array({{"type", "string"}}, "actors: object names or paths (any of).")},
-             {"near", S::Object({{"at", S::Vector3("Centre [x, y, z].")}, {"radius", S::Number("Distance in Unreal units.")}}, {"at", "radius"}, "actors: within radius of at.")},
-             {"box", S::Object({{"min", S::Vector3("Low corner.")}, {"max", S::Vector3("High corner.")}}, {"min", "max"}, "actors: inside this box.")},
-             {"selected", S::Boolean("actors: only selected (true) or unselected (false) actors.")},
-             {"fields", {{"anyOf", Json::array({{{"type", "array"}, {"items", {{"type", "string"}}}}, {{"type", "string"}, {"enum", {"all"}}}})},
-                         {"description", "actors: property names to include as values, or \"all\" for every editable one."}}},
-             {"limit", S::Integer("Most items to return, 1-5000.", 1, 5000)},
-             {"cursor", S::Integer("actors: the next value of the previous page.", 0, 100000000)},
-             {"actor", S::Actor("actor and wiring: the actor, by path (MyLevel.Light12), object name or {path, class}.")},
-             {"includeSchema", S::Boolean("actor, level, cameras: include each property's schema (kind, enum choices). Default false.")},
-             {"kind", S::Enum({"staticmesh", "material", "texture", "sound", "class"}, "assets: what kind. Default staticmesh.")},
-             {"query", S::String("assets: text the asset path contains (case-insensitive).")}},
+             {"classes", S::Array({{"type", "string"}}, "actors: class names or paths (IsA). schema: the classes.")},
+             {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+             {"names", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+             {"near", S::Object({{"at", S::Vector3({})}, {"radius", {{"type", "number"}}}}, {"at", "radius"})},
+             {"box", S::Object({{"min", S::Vector3({})}, {"max", S::Vector3({})}}, {"min", "max"})},
+             {"selected", {{"type", "boolean"}}},
+             {"fields", {{"anyOf", Json::array({{{"type", "array"}, {"items", {{"type", "string"}}}}, {{"type", "string"}, {"enum", {"all"}}}})}}},
+             {"limit", S::Integer("Most items to return.", 1, 5000)},
+             {"cursor", {{"type", "integer"}, {"minimum", 0}}},
+             {"actor", S::Actor("actor, wiring: the actor.")},
+             {"includeSchema", {{"type", "boolean"}}},
+             {"kind", S::Enum({"staticmesh", "material", "texture", "sound", "class"}, "assets: default staticmesh.")},
+             {"query", S::String("assets: text in the asset path.")}},
             {"what"});
         t.readOnly = true;
         t.idempotent = true;
@@ -546,11 +544,10 @@ void RegisterQueryTools(Registry& registry)
             "camera {location:[x,y,z], rotation:[pitch,yaw,roll]} places the viewport camera for the shot; frame [actors] points it at those actors; presets: "
             "overview (the top view), spawn:spy, spawn:merc (that team's player starts), objective:<name, Tag or path> (an objective and its devices). The "
             "camera is put back afterwards. Compare with the source images when building a level from media. Needs the editor window restored, not minimised.";
-        t.inputSchema = S::Input({{"viewport", S::Enum({"perspective", "top"}, "Which viewport. Default perspective (top for overview).")},
-                                  {"maxEdge", S::Integer("Longer side in pixels, 64-2048. Default 1024.", 64, 2048)},
-                                  {"camera", S::Object({{"location", S::Vector3("Camera position.")}, {"rotation", S::Vector3("Pitch, yaw, roll in Unreal units (65536 per turn).")}}, {},
-                                                       "Where to put the viewport camera.")},
-                                  {"frame", S::Array(S::Actor("An actor."), "Actors to frame (paths, names or identities).", 2000)},
+        t.inputSchema = S::Input({{"viewport", S::Enum({"perspective", "top"}, "Default perspective (top for overview).")},
+                                  {"maxEdge", S::Integer("Longer side in pixels. Default 1024.", 64, 2048)},
+                                  {"camera", S::Object({{"location", S::Vector3({})}, {"rotation", S::Vector3("Pitch, yaw, roll: 65536 per turn.")}})},
+                                  {"frame", S::Array(S::Actor({}), "Actors to frame.", 2000)},
                                   {"preset", S::String("overview, spawn:spy, spawn:merc or objective:<name>.")}});
         t.readOnly = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Screenshot(a, c); }); };
@@ -561,14 +558,14 @@ void RegisterQueryTools(Registry& registry)
         t.name = "plan_render";
         t.title = "Draw a top-down plan";
         t.description =
-            "A top-down PNG plan, north up: of a scct.level-spec (spec; works offline, without the editor: its pieces, polygon brushes and volumes, "
-            "actors, wiring and zones) or of the live map (no spec: brushes as their outlines, spawns in team colours, objectives, cameras, security, lights, "
-            "Event links and zone names). Use it to check a spec against the source drawing or video frames before level_build, "
-            "and the built map against the spec. For a spec, the compiler's diagnostics come back too. options are passed to the renderer (see its "
-            "documentation: storey filter, labels, grid).";
-        t.inputSchema = S::Input({{"spec", S::Free("A scct.level-spec document to draw (scct://schema/level-spec). Omit to draw the live map.")},
+            "A top-down PNG plan, north up: of a scct.level-spec (spec, or path to a .level.json or scct://examples/<name>; works offline: its pieces, polygon "
+            "brushes and volumes, actors, wiring and zones) or of the live map (neither: brushes as their outlines, spawns in team colours, objectives, cameras, "
+            "security, lights, Event links and zone names). Use it to check a spec against the source drawing or video frames before level_build, and the built map "
+            "against the spec. For a spec, the compiler's diagnostics come back too.";
+        t.inputSchema = S::Input({{"spec", S::Free("A scct.level-spec document to draw (scct://schema/level-spec). Omit spec and path to draw the live map.")},
+                                  {"path", S::String("Instead of spec: a .level.json file on this machine (absolute, or relative to the work directory), or scct://examples/<name>.")},
                                   {"maxEdge", S::Integer("Longer side in pixels, 64-4096. Default 1024.", 64, 4096)},
-                                  {"options", S::Free("Renderer options (PlanRender.h).")}});
+                                  {"options", S::Free("Renderer options: storey (an id: draw that storey only), labels, grid, legend, actorLabels, cones (camera and laser cones), title.")}});
         t.readOnly = true;
         t.idempotent = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return RenderPlan(a, c); }); };

@@ -444,6 +444,23 @@ void OptimiseAndPackage()
     Check(h.Error({{"action","optimise"},{"packs",{"StockTex"}},{"destination","package"}}).find("_STM.usx exists")!=std::string::npos,"the default name is not taken over an existing file");
     r=h.Ok({{"action","optimise"},{"packs",{"StockTex"}},{"destination","package"},{"assetPackage","AquaD_Pack"},{"overwrite",true},{"folder",folder.string()}});
     Check(sent.at("assetPackage")=="AquaD_Pack" && sent.at("overwrite")==true && sent.at("folder")==folder.string(),"the asset package, overwrite and folder are passed on");
+    // The release copy goes only where the editor writes it: <Game>\Releases,
+    // the work folder or [Mcp] WriteRoots; anything else is refused before
+    // the editor is asked (it would delete and rewrite the map's files there).
+    const auto calls=h.fake.Count("optimise.release");
+    const auto elsewhere=h.game.At("OtherInstall");
+    auto refused=h.Call({{"action","optimise"},{"packs",{"StockTex"}},{"overwrite",true},{"folder",elsewhere.string()}});
+    Check(refused.isError && refused.structured.value("code",std::string())=="refused" && refused.structured.value("reason",std::string())=="outside_write_roots" &&
+          refused.structured.value("error",std::string()).find("WriteRoots")!=std::string::npos && h.fake.Count("optimise.release")==calls,"a folder outside the roots is refused first");
+    Check(h.Error({{"action","optimise"},{"packs",{"StockTex"}},{"folder",(h.game.At("Releases")/".."/"OtherInstall").string()}}).find("WriteRoots")!=std::string::npos,"\"..\" does not climb out");
+    Check(h.Error({{"action","optimise"},{"packs",{"StockTex"}},{"folder","Releases/AquaD"}}).find("full path")!=std::string::npos,"a relative folder is refused");
+    Check(h.Error({{"action","package"},{"packs",{"StockTex"}},{"folder",elsewhere.string()}}).find("WriteRoots")!=std::string::npos,"package's release copy too");
+    h.game.Text("System/Reloaded_Editor.ini","[Mcp]\r\nWriteRoots=C:\\nowhere; \""+elsewhere.string()+"\"\r\n");
+    h.Ok({{"action","optimise"},{"packs",{"StockTex"}},{"folder",(elsewhere/"AquaD").string()}});
+    Check(h.fake.Count("optimise.release")==calls+1 && sent.at("folder")==(elsewhere/"AquaD").string(),"a WriteRoots folder is allowed");
+    h.Ok({{"action","optimise"},{"packs",{"StockTex"}},{"folder",(h.game.At("work")/"rel").string()}});
+    Check(h.fake.Count("optimise.release")==calls+2,"so is the work folder");
+    fs::remove(h.game.At("System/Reloaded_Editor.ini"));
 
     // package: the layout from the release copy.
     r=h.Ok({{"action","package"},{"packs",{"StockTex"}}});
@@ -496,8 +513,15 @@ void Schema()
     Check(registry.tools.size()==1,"one tool");
     const auto& t=registry.tools.front();
     Check(t.name=="release" && !t.readOnly && t.destructive,"annotations");
-    for(const char* text:{"scct://wiki/map-packaging","Amb_<Map>.uax","<Map>-i.utc","256x256 DXT5","512x512 DXT1","Interface","5.0","AquaD","-i.utx","base"})
+    for(const char* text:{"scct://wiki/map-packaging","scct://docs/tool-reference#release","Amb_<Map>","<Map>-i.utc","Interface","5.0","base","folder"})
         Check(t.description.find(text)!=std::string::npos,std::string("the description cites ")+text);
+    // The details moved to the tool reference, so tools/list stays small.
+    std::ifstream file(fs::path(__FILE__).parent_path().parent_path()/"Reloaded.Editor.Mcp"/"Resources"/"docs"/"tool-reference.md",std::ios::binary);
+    const std::string reference((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
+    const auto section=reference.substr(reference.find("## release"));
+    for(const char* text:{"Amb_<Map>.uax","256x256 DXT5","512x512 DXT1","AquaD","-i.utx","[Mcp] WriteRoots"})
+        Check(section.find(text)!=std::string::npos,std::string("the tool reference's release section cites ")+text);
+    Check(Protocol::ToolJson(t,"2025-06-18").dump().size()<5000,"release stays under 5 KB in tools/list");
     const auto protocol=Protocol::ToolJson(t,"2025-06-18");
     Check(protocol.at("inputSchema").at("properties").contains("dryRun") && protocol.contains("outputSchema"),"the published tool");
     Check(!Protocol::CheckArguments(t.inputSchema,{{"action","check"},{"bogus",1}}).empty(),"the schema is closed");

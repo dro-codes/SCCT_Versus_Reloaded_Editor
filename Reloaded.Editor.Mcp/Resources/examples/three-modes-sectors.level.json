@@ -16,7 +16,9 @@
     ],
     "doorways": [
       {"id": "DocksGate", "between": ["Docks", "Warehouse"], "size": [192, 192]},
-      {"id": "ControlGate", "between": ["Warehouse", "Control"], "size": [192, 192]}
+      {"id": "ControlGate", "between": ["Warehouse", "Control"], "size": [192, 192]},
+      {"id": "DocksHatch", "between": ["Docks", "Warehouse"], "offset": 256, "size": [96, 192]},
+      {"id": "ControlHatch", "between": ["Warehouse", "Control"], "offset": 256, "size": [96, 192]}
     ]
   },
   "zones": [
@@ -37,8 +39,10 @@
   },
   "mechanisms": {
     "doors": [
-      {"id": "DocksShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "DocksGate"}, "moveTime": 1.5, "stayOpen": 4, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 160}},
-      {"id": "ControlShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "ControlGate"}, "moveTime": 1.5, "stayOpen": 4, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 160}}
+      {"id": "DocksShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "DocksGate"}, "moveTime": 1.5, "trigger": {"kind": "event"}},
+      {"id": "ControlShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "ControlGate"}, "moveTime": 1.5, "trigger": {"kind": "event"}},
+      {"id": "DocksHatch_Door", "mesh": "HarbD_STM.Doors.Hatch96", "at": {"doorway": "DocksHatch"}, "stayOpen": 3, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 96}},
+      {"id": "ControlHatch_Door", "mesh": "HarbD_STM.Doors.Hatch96", "at": {"doorway": "ControlHatch"}, "stayOpen": 3, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 96}}
     ]
   },
   "gameplay": {
@@ -124,5 +128,5 @@
       {"mode": "deathmatch", "respawn": 6, "timeLimit": 10}
     ]
   },
-  "provenance": {"source": "Hand-written example", "notes": ["Sector missions follow the Zones window: a chained GM_Multi mission holding one GM_Undefined mission per sector.", "Door meshes are placeholders in the map's own HarbD_STM package; import real ones first."]}
+  "provenance": {"source": "Hand-written example", "notes": ["Sector missions follow the Zones window: a chained GM_Multi mission holding one GM_Undefined mission per sector.", "Each shutter opens only from its sector (trigger kind event), so held open it stays open; a merc presence trigger on it would toggle it shut again. The mercs pass through the hatches beside the shutters.", "Door meshes are placeholders in the map's own HarbD_STM package; import real ones first."]}
 }

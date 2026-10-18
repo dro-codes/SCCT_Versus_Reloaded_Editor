@@ -28,69 +28,10 @@ namespace
         if (!object.is_object() || !object.contains(key) || !object.at(key).is_string()) return {};
         return object.at(key).get<std::string>();
     }
-    std::filesystem::path Utf8Path(const std::string& text) { return std::filesystem::path(std::u8string(text.begin(), text.end())); }
     int Rank(const std::string& severity) { return severity == "error" ? 0 : severity == "warning" ? 1 : 2; }
 
     // ------------------------------------------------------------ the spec
-    std::vector<std::string> ExampleUris()
-    {
-        std::vector<std::string> out;
-        for (const auto& file : EmbeddedFiles())
-        {
-            std::string path = file.path;
-            if (path.rfind("examples/", 0) != 0) continue;
-            for (const char* suffix : {".level.json", ".json"})
-                if (path.size() > std::strlen(suffix) && path.compare(path.size() - std::strlen(suffix), std::string::npos, suffix) == 0) { path.resize(path.size() - std::strlen(suffix)); break; }
-            out.push_back("scct://" + path);
-        }
-        return out;
-    }
-    // spec as given, or read from path: a .level.json on this machine (a
-    // relative path is looked for in the work directory first) or an
-    // embedded example, scct://examples/<name>.
-    Json LoadSpec(const Json& a, ToolContext& c, std::string& source)
-    {
-        if (Has(a, "spec"))
-        {
-            if (Has(a, "path")) throw std::runtime_error("Give spec or path, not both.");
-            if (!a.at("spec").is_object()) throw std::runtime_error("spec must be a scct.level-spec object (scct://schema/level-spec).");
-            source = "spec";
-            return a.at("spec");
-        }
-        const auto path = String(a, "path");
-        if (path.empty()) throw std::runtime_error("Give spec (a scct.level-spec document) or path (a .level.json file, or scct://examples/<name>).");
-        source = path;
-        std::string text;
-        if (path.rfind("scct://", 0) == 0)
-        {
-            const auto wanted = path.substr(7);
-            bool found = false;
-            for (const auto& file : EmbeddedFiles())
-            {
-                const std::string name = file.path;
-                if (name != wanted && name != wanted + ".level.json" && name != wanted + ".json") continue;
-                text.assign(reinterpret_cast<const char*>(file.data), file.size);
-                found = true;
-                break;
-            }
-            if (!found) throw std::runtime_error("No embedded spec " + path + ". The examples are " + Join(ExampleUris()) + ".");
-        }
-        else
-        {
-            auto file = Utf8Path(path);
-            std::error_code error;
-            if (file.is_relative() && !c.workDir.empty() && std::filesystem::exists(c.workDir / file, error)) file = c.workDir / file;
-            std::ifstream in(file, std::ios::binary);
-            if (!in) throw std::runtime_error("Cannot open " + path + ". Give a full path, or one relative to the work directory " + PathText(c.workDir) + ".");
-            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-            if (text.size() > Bridge::kMaxDocument) throw std::runtime_error(path + " is larger than a level spec can be (128 MiB).");
-        }
-        Json spec;
-        try { spec = Json::parse(text); }
-        catch (const Json::parse_error& e) { throw std::runtime_error(path + " is not JSON: " + e.what()); }
-        if (!spec.is_object()) throw std::runtime_error(path + " does not hold a scct.level-spec object.");
-        return spec;
-    }
+    Json LoadSpec(const Json& a, ToolContext& c, std::string& source) { return Tools::LoadSpec(a, c, source, EmbeddedFiles()); }
 
     // The id of the nearest item on the way down a JSON pointer, so a
     // finding about /security/devices/3/at also names the device.
@@ -113,7 +54,10 @@ namespace
         }
         return id;
     }
-    Json DiagnosticJson(const Spec::Diagnostic& d, const Json& spec)
+    // offline: the spec is checked as a document (level_spec_validate,
+    // level_build's own spec), so fixes are edits of it (Tools::SpecFix);
+    // an intent tool's findings keep the tool calls that change the map.
+    Json DiagnosticJson(const Spec::Diagnostic& d, const Json& spec, bool offline = false)
     {
         Json out{{"severity", d.severity}, {"rule", d.rule}, {"message", d.message}, {"wikiPage", d.wikiPage}};
         if (!d.pointer.empty())
@@ -122,15 +66,15 @@ namespace
             const auto id = IdAt(spec, d.pointer);
             if (!id.empty()) out["id"] = id;
         }
-        if (!d.fix.is_null()) out["fix"] = d.fix;
+        if (!d.fix.is_null()) out["fix"] = offline ? SpecFix(d.fix) : d.fix;
         return out;
     }
     // Findings, errors first; counts has every one, the list up to limit.
-    Json Findings(const std::vector<Spec::Diagnostic>& diagnostics, const Json& spec, Json& counts)
+    Json Findings(const std::vector<Spec::Diagnostic>& diagnostics, const Json& spec, Json& counts, bool offline = false)
     {
         std::vector<Json> list;
         size_t n[3] = {0, 0, 0};
-        for (const auto& d : diagnostics) { list.push_back(DiagnosticJson(d, spec)); ++n[Rank(d.severity)]; }
+        for (const auto& d : diagnostics) { list.push_back(DiagnosticJson(d, spec, offline)); ++n[Rank(d.severity)]; }
         std::stable_sort(list.begin(), list.end(), [](const Json& x, const Json& y) { return Rank(Text(x, "severity")) < Rank(Text(y, "severity")); });
         counts = {{"errors", n[0]}, {"warnings", n[1]}, {"info", n[2]}};
         return Json(list);
@@ -186,13 +130,14 @@ namespace
             // A spec with the wrong shape is a finding, not a failure of the check.
             const Json finding{{"severity", "error"}, {"rule", "spec.shape"}, {"pointer", e.pointer.empty() ? std::string("/") : e.pointer}, {"message", e.what()}, {"wikiPage", ""}};
             Json result{{"valid", false}, {"source", source}, {"summary", {{"errors", 1}, {"warnings", 0}, {"info", 0}}}, {"diagnostics", Json::array({finding})},
-                        {"next", Json::array({Next("level_spec_validate", "Fix the spec at " + finding.at("pointer").get<std::string>() + " (scct://schema/level-spec has every field) and check it again.")})}};
+                        {"next", Json::array({Next("level_spec_validate", "Fix the spec at " + finding.at("pointer").get<std::string>() + " (scct://schema/level-spec has every field) and check it again.",
+                                                   source == "spec" ? Json() : Json{{"path", source}})})}};
             return Ok(result, "The spec does not have the scct.level-spec shape at " + finding.at("pointer").get<std::string>() + ": " + e.what() +
                                   " Nothing past the first shape error is checked.");
         }
         const auto normalised = compiled.sidecar.value("spec", Json::object());
         Json counts;
-        const auto findings = Findings(compiled.diagnostics, normalised, counts);
+        const auto findings = Findings(compiled.diagnostics, normalised, counts, true);
         const size_t errors = counts.at("errors").get<size_t>(), warnings = counts.at("warnings").get<size_t>();
         const auto& summary = compiled.summary;
         Json overview{{"errors", errors}, {"warnings", warnings}, {"info", counts.at("info")}, {"profile", normalised.value("profile", std::string("draft"))},
@@ -200,15 +145,13 @@ namespace
                       {"pieces", summary.value("pieces", 0)}, {"doorways", summary.value("doorways", 0)}, {"actors", summary.value("actors", 0)},
                       {"lifts", summary.value("lifts", 0)}, {"ges", summary.value("ges", 0)}, {"modes", summary.value("modes", Json::array())},
                       {"byKind", summary.value("byKind", Json::object())}, {"packages", summary.value("packages", Json::array())}, {"shown", std::min(limit, findings.size())}};
+        // Fixes are edits of this spec: the intent tools would change the
+        // open map instead, so they are not suggested here.
         Json next = Json::array();
-        std::set<std::string> tools;
-        for (const auto& f : findings)
-        {
-            if (Text(f, "severity") != "error" || next.size() >= 3) break;
-            const auto tool = f.contains("fix") && f.at("fix").is_object() ? Text(f.at("fix"), "tool") : std::string();
-            if (!tool.empty() && tools.insert(tool).second) next.push_back(Next(tool, "Fixes " + Text(f, "rule") + " (see that finding's fix)."));
-        }
-        if (errors) next.push_back(Next("level_spec_validate", "Check again after fixing the errors (each pointer is where in the spec)."));
+        const Json again = source == "spec" ? Json() : Json{{"path", source}};
+        if (errors)
+            next.push_back(Next("level_spec_validate", "Fix the errors in the spec (each diagnostic's pointer says where; fix.spec lists the edits, merged at their pointer "
+                                                       "as scct://docs/tools describes), then check it again.", again));
         else
         {
             next.push_back(Next("level_build", "Preview the build in the editor: preview rows and the plan.", {{"mode", "preview"}}));
@@ -768,7 +711,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
     const auto mapName = compiled.summary.value("map", std::string());
 
     Json counts;
-    const auto all = Findings(compiled.diagnostics, normalised, counts);
+    const auto all = Findings(compiled.diagnostics, normalised, counts, tool == "level_build");
     const size_t errors = counts.at("errors").get<size_t>(), specWarnings = counts.at("warnings").get<size_t>();
     // An intent tool builds a level a part at a time, so errors the spec
     // already had (no CamNet yet while the blockout goes in) are listed as
@@ -808,7 +751,30 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
                                                                     {"deletes", summary.value("deletes", 0)}, {"newPieces", summary.value("newPieces", 0)}, {"replacedPieces", summary.value("replacedPieces", 0)}}},
                 {"plan", PlanOutline(compiled.plan)}};
     Json next = Json::array();
-    if (elsewhere) next.push_back(Next("level_spec_validate", Count(elsewhere, "more finding") + " about other parts of the spec; this checks the whole spec offline.", {{"path", "scct://map/spec"}}));
+    // The spec as built here (an intent tool's is the stored spec with its
+    // change), saved so level_spec_validate can show every finding in it.
+    std::string specFile;
+    auto checkSpec = [&](const std::string& why)
+    {
+        if (specFile.empty() && !c.workDir.empty())
+            try
+            {
+                static std::atomic<unsigned> serial{0};
+                const auto stamp = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(++serial);
+                const auto folder = c.workDir / "specs";
+                std::filesystem::create_directories(folder);
+                const auto file = folder / (tool + "-" + stamp + ".level.json");
+                std::ofstream out(file, std::ios::binary);
+                out << input.dump(1);
+                if (out) specFile = PathText(file);
+            }
+            catch (const std::exception&) {}
+        if (!specFile.empty()) report["specFile"] = specFile;
+        Json step = Next("level_spec_validate", why + (specFile.empty() ? std::string(" (validation has this part's findings; give level_spec_validate the spec to see the rest)") : std::string()),
+                         specFile.empty() ? Json() : Json{{"path", specFile}});
+        if (std::none_of(next.begin(), next.end(), [](const Json& n) { return Text(n, "tool") == "level_spec_validate"; })) next.insert(next.begin(), step);
+    };
+    if (elsewhere) checkSpec(Count(elsewhere, "more finding") + " about other parts of the spec: this checks the whole spec offline.");
     std::string findingText = Count(errors, "error") + ", " + Count(specWarnings, "warning") + " in the spec";
     if (held) findingText += " (" + std::to_string(held) + " of the errors were there before this change: listed as standing, they do not block it)";
     if (errors) findingText += "; validation has each with its pointer and wiki page";
@@ -858,7 +824,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
         text += " The image is the plan, north up.";
         if (blocking && !Bool(request, "force")) text += " " + Count(blocking, "error") + (blocking == 1 ? " blocks" : " block") + " apply; fix " + (blocking == 1 ? "it" : "them") + " first, or pass force:true.";
         else text += " Run again with mode \"apply\" to build it (one Undo step).";
-        if (blocking) next.insert(next.begin(), Next("level_spec_validate", "See every error with its pointer; fix them before applying.", {{"path", "scct://map/spec"}}));
+        if (blocking) checkSpec("See every error with its pointer; fix them before applying.");
         else next.push_back(Next(tool, "Build it.", {{"mode", "apply"}}));
         report["summary"] = text;
         Lists(report, effect);
@@ -873,7 +839,7 @@ Json Tools::LevelBuild(ToolContext& c, const Json& context, const Json& spec, co
         report["error"] = "The level spec has " + Count(blocking, "error") + (blocking == 1 ? " that blocks" : " that block") +
                           " this build; nothing was built. Fix " + (blocking == 1 ? "it" : "them") + " (validation lists each error with its JSON pointer and wiki page), or pass force:true to build anyway.";
         report["warnings"] = warnings;
-        next.insert(next.begin(), Next("level_spec_validate", "Check the whole spec offline."));
+        checkSpec("Check the whole spec offline: every error with its pointer.");
         report["next"] = next;
         return report;
     }
@@ -961,37 +927,26 @@ ToolResult Tools::BuildResult(ToolContext& c, const Json& report, const std::vec
 
 void RegisterSpecTools(Registry& registry)
 {
-    const std::string conventions =
-        "Spec conventions (scct://schema/level-spec): lengths in units.unit (uu, Unreal units, by default; m and ft use uuPerMetre, default 100), yaw in degrees "
-        "(east 0, north 90), Z up, east +X, north +Y. Every id matches [A-Za-z_][A-Za-z0-9_]{0,62}, is unique across the spec ignoring case, and becomes the "
-        "actor's create id and its Tag, so alarms, targets, links and {\"$ref\": id} name things by id. Positions: [x, y, z] (z may be \"floor+N\" or "
-        "\"ceiling-N\" of the room under the point; a missing z takes the usual height for the thing), {in: pieceId, u, v (-0.5..0.5 across and along the "
-        "piece), h: \"floor+N\" | \"ceiling-N\"}, {near: id, offset: [dx, dy, dz]} or {doorway: id}. existing.refs names live actors the spec did not make.";
     {
         Tool t;
         t.name = "level_spec_validate";
         t.title = "Check a level spec offline";
         t.description =
-            "Checks a scct.level-spec without the editor: it parses the spec (an unknown field or a wrong shape is an error at its JSON pointer), compiles it "
-            "exactly as level_build would (layout, positions, wiki defaults, the mcp.plan) and runs every wiki rule on the result (scct://rules lists them), then "
-            "draws the top-down plan as a PNG, north up, to compare with the source drawing or video frames. Use it after writing or editing a spec and before "
-            "level_build; plan_render draws other storeys and options.\n"
-            "Give spec (the document) or path (a .level.json on this machine, absolute or relative to the work directory, or an embedded example: "
-            "scct://examples/versus-starter, three-modes-sectors, diskhunt-arena, security-camnet, elevator-3floors). profile draft|release overrides the "
-            "spec's own; release is stricter (3 starts per team, Map Settings, interface textures, unreachable objectives become errors).\n"
-            "Returns valid, summary (counts, map, pieces, actors, modes), diagnostics errors first: {severity, rule, pointer (JSON pointer into the spec, such as "
-            "/security/devices/2), id (the item there), message, wikiPage (read scct://wiki/<page>), fix {tool, args} when there is one}, the plan's steps, and "
-            "the plan image. Errors block level_build apply. The rules come from the wiki: spawn-points (TeamNumber 0 spy / 1 merc, at least 3 per team), "
-            "game-modes (GM_Multi story missions, terminals at floor+78 with DominationCaptureTime, 1-5 flag drop zones, disks per ScoreLimit), "
-            "level-ingredients (a closed CamNet loop with one bFirstCam), alarms, zones-and-volumes, geometric-events (ledge, fence, ladder, zipline sizes), "
-            "map-settings and more.\n" + conventions;
+            "Checks a scct.level-spec without the editor: parses it (a wrong field is an error at its JSON pointer), compiles it exactly as level_build would, runs "
+            "every wiki rule on the result (scct://rules) and draws the top-down plan PNG, north up, to compare with the source. Use it after writing or editing a "
+            "spec, before level_build.\n"
+            "spec, or path: a .level.json on this machine (absolute, or relative to the work directory) or scct://examples/<versus-starter | three-modes-sectors | "
+            "diskhunt-arena | security-camnet | elevator-3floors>. profile release is stricter than draft.\n"
+            "Returns valid, summary, diagnostics errors first {severity, rule, pointer, id, message, wikiPage (scct://wiki/<page>), fix}, the plan's steps and the "
+            "image. A fix is an edit of this spec: {spec: [{pointer, merge | change}], note}. Errors block level_build apply. Units, ids and positions: "
+            "scct://docs/tools.";
         t.inputSchema = S::Input({{"spec", S::Free("The scct.level-spec document (scct://schema/level-spec).")},
                                   {"path", S::String("Instead of spec: a .level.json file on this machine, or scct://examples/<name>.")},
                                   {"profile", S::Enum({"draft", "release"}, "Rule severities; default the spec's profile (draft when it has none).")},
                                   {"limit", S::Integer("Most diagnostics to list, errors first. Default 300.", 1, 5000)},
                                   {"render", S::Boolean("Include the plan PNG. Default true.")},
                                   {"maxEdge", S::Integer("The plan image's longer side in pixels, 64-4096. Default 1024.", 64, 4096)},
-                                  {"options", S::Free("Plan renderer options (as plan_render): storey (an id, to draw one storey), labels, grid, legend, actorLabels, cones, title.")}});
+                                  {"options", S::Free("Plan renderer options, as plan_render's.")}});
         t.outputSchema = {{"type", "object"},
                           {"properties", {{"valid", {{"type", "boolean"}}}, {"source", {{"type", "string"}}}, {"summary", {{"type", "object"}}}, {"diagnostics", {{"type", "array"}}},
                                           {"plan", {{"type", "object"}}}, {"next", {{"type", "array"}}}}},
@@ -1006,44 +961,27 @@ void RegisterSpecTools(Registry& registry)
         t.name = "level_build";
         t.title = "Build a level from a spec";
         t.description =
-            "Builds a whole scct.level-spec in the open map: the compiler turns it into one mcp.plan the editor runs as ONE Undo step (blockout pieces as Map "
-            "Design pieces, every actor through one Map JSON document, objective player counts, GEs, Level Properties, the Map Design records and the "
-            "stored spec), then builds the geometry, runs Map Check and takes a top-view screenshot. If any step fails, every map change of the plan is "
-            "rolled back. Use level_spec_validate first; the intent tools (blockout, gameplay, security, mechanisms, events, environment, geometric_events, "
-            "map_settings) change one part of the spec and build through this same path.\n"
-            "- spec or path (as level_spec_validate: a file or scct://examples/<name>).\n"
-            "- mode: preview (default; dryRun:true too) asks the editor for its preview rows (what each create, update and delete would do) and returns the "
-            "plan PNG, changing nothing; without an editor it is the offline compile. apply builds it; errors in the spec block apply unless force:true.\n"
-            "- sync: the map stores the spec it was built from with the ids' actors and brushes (the sidecar; map_query what:\"spec\"). incremental (the "
-            "default when there is one) builds only the difference by id: new ids are created, changed pieces rebuilt, changed actors updated (or recreated "
-            "when their class, team or Tag changes), ids the spec dropped deleted, the rest left alone. replace (the default otherwise) deletes everything the "
-            "last build made and builds the spec afresh. merge lays the given spec over the stored one first, so a fragment adds to the level.\n"
-            "- brushMode: pieces (default; Map Design pieces the panel can keep editing) or polygons (plain polygon brushes, for per-face textures).\n"
-            "- build: geometry (default: Map Design geometry build, then Map Check), all (the full build with lighting; minutes), none (no build, no Map Check).\n"
-            "- screenshot (default true): the top view after the build, returned as an image. save: map.save to this path after the build (Packages\\MapsEd, "
-            "ASCII, a stem without spaces: the first four letters of the map name plus D, such as AquaD.sdc; scct://wiki/map-packaging).\n"
-            "- With Require approval on, the editor shows the change for the user to approve; approval_wait follows a long wait.\n"
-            "Returns created, changed and removed by spec id (with the actor path the editor gave each), validation (the compiler's and rules' findings with "
-            "JSON pointers and wiki pages), mapCheck, mapSettings (SMapSettings cannot always be written over the bridge: when not, its checklist and manual "
-            "steps), the step results, undo (editor_undo with that call reverts the whole build) and next steps: a new map is saved (map_file save_as), the "
-            "editor restarted (editor_restart) and only then given Map Settings (map_settings), as scct://wiki/map-settings requires.\n"
-            "The compiler applies the wiki defaults: PlayerStart TeamNumber 0 spy / 1 merc, 4 per team at floor+48 (spawn-points); SMission GM_Multi with "
-            "objectives and triggers by exact name, terminals at floor+78 using DominationCaptureTime, SFlag with 1-5 drop zones, sector missions chained "
-            "(game-modes); SDisk groups cycling 1/2/3; deathmatch AtResetEvent switching security off; detectors' Event set to their SAlarm's Tag (alarms); a "
-            "closed CamNet loop with one bFirstCam (level-ingredients); doors TriggerOpenTimed with ME_WaitAndRetryWhenEncroach (movers); SInterrupteur "
-            "interaction 120/60 (buttons-and-hacking-panels); static lights LE_None, LE_Spotlight or LE_Sunlight only (lighting); a ZoneInfo with "
-            "LocationName per zone and portals where zones meet (zones-and-volumes); GE ADD for each geometric event, pipes and ladders low end first "
-            "(geometric-events).\n" + conventions;
+            "Builds a whole scct.level-spec in the open map as ONE Undo step (blockout pieces, every actor through one Map JSON document, player counts, GEs, Level "
+            "Properties and the stored spec), then the geometry build, Map Check and a top-view screenshot. If a step fails, every map change is rolled back. Check "
+            "the spec with level_spec_validate first.\n"
+            "- spec or path, as level_spec_validate. mode preview (default; dryRun too): the editor's preview rows and the plan PNG, nothing changes; apply builds "
+            "it, and errors block it unless force.\n"
+            "- sync incremental (default when the map has a stored spec, map_query what:\"spec\"): only the difference by id is built, dropped ids are deleted; "
+            "replace (default otherwise): what the last build made is deleted and the spec built afresh; merge: laid over the stored spec.\n"
+            "- brushMode pieces|polygons; build geometry|all|none; screenshot; save (a map path in Packages\\MapsEd named as scct://wiki/map-packaging says, such as "
+            "AquaD.sdc).\n"
+            "Returns created, changed and removed by spec id, validation, mapCheck, mapSettings (when not written: the checklist), undo and next (a new map: "
+            "map_file save_as, editor_restart, then map_settings). More: scct://docs/tool-reference#level_build.";
         t.inputSchema = S::Mutating(S::Input({{"spec", S::Free("The scct.level-spec document (scct://schema/level-spec).")},
                                               {"path", S::String("Instead of spec: a .level.json file on this machine, or scct://examples/<name>.")},
-                                              {"mode", S::Enum({"preview", "apply"}, "preview (default) shows what would change; apply builds it.")},
-                                              {"sync", S::Enum({"incremental", "replace", "merge"}, "How the spec meets what the last build made. Default incremental when the map has a stored spec, else replace.")},
-                                              {"brushMode", S::Enum({"pieces", "polygons"}, "Map Design pieces (default, or the stored spec's) or plain polygon brushes.")},
-                                              {"build", S::Enum({"geometry", "all", "none"}, "The build after the change. Default geometry.")},
-                                              {"screenshot", S::Boolean("A top-view screenshot after the build. Default true.")},
-                                              {"save", S::String("Save the map to this path after building (Packages\\MapsEd\\<Name>D.sdc).")},
-                                              {"force", S::Boolean("Apply even though the spec has errors. Default false.")},
-                                              {"profile", S::Enum({"draft", "release"}, "Rule severities, stored with the spec. Default the spec's own.")}}));
+                                              {"mode", S::Enum({"preview", "apply"}, "Default preview.")},
+                                              {"sync", S::Enum({"incremental", "replace", "merge"}, "Default incremental with a stored spec, else replace.")},
+                                              {"brushMode", S::Enum({"pieces", "polygons"}, "Default pieces, or the stored spec's.")},
+                                              {"build", S::Enum({"geometry", "all", "none"}, "Default geometry.")},
+                                              {"screenshot", S::Boolean("Default true.")},
+                                              {"save", S::String("Save the map to this path afterwards.")},
+                                              {"force", S::Boolean("Apply despite errors.")},
+                                              {"profile", S::Enum({"draft", "release"}, "Default the spec's own.")}}));
         t.outputSchema = S::MutationOutput();
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Build(a, c); }); };

@@ -146,12 +146,15 @@ Objective triggers:
   - It goes at floor+78, and a trace checks that it is clear of collision.
   - It uses `DominationCaptureTime`. A warning fires if `CaptureTime` is set.
 - An `SFlag` needs 1-5 `SFlagDropZone`s.
+  - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
+  - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
 - An `SBombTargetObjectiveTrigger` uses `CaptureTime`.
 
 Sectors (`gameplay.story.sectors`):
 - The top mission is `GM_Multi` with `bChained True`.
 - Each sector mission is `GM_Undefined` with `bChained False`.
 - `Zone<N>_Complete` SMagicEvents and `Zone<N>_Announce` SAlarms fire on sector completion (the RE+ Zones window shape).
+- An `open` action holds its door open (`TriggerToggle`) unless `hold: false`. A held door must open from nothing else (error `story.action-door-trigger`); see `scct://wiki/movers`.
 - `map_query what:"stages"` reads them back.
 
 Disk Hunt:

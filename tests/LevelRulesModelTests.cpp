@@ -94,7 +94,7 @@ Json Good()
     Json schema{{"classes",{{"SBase.SMission",{{"class","SBase.SMission"},{"schema",{{"GameMode",{{"writable",true},{"choices",{"GM_Undefined","GM_Multi","GM_DiskHunt","GM_DeathMatch"}}}},
                                                                                      {"bChained",{{"writable",true},{"choices",{"False","True"}}}}}}}}}}};
     return {{"actors",actors},{"pieces",pieces},{"ges",ges},{"modes",{"story","diskhunt","deathmatch"}},{"mapName","TESTMAP"},{"mapFile","TestD.sdc"},
-            {"level",{{"fDeathPawnHeight","0.000000"},{"Events",Json::array({{{"Event","Warning3min"},{"SendAtTime","-180.000000"}}})},{"MotionTrackingTweak",{{"MTVOffset","52"},{"MTVSlope","85"}}}}},
+            {"level",{{"fDeathPawnHeight","0.000000"},{"Event","Warning3min"},{"SendAtTime","-180"},{"MTVOffset","52"},{"MTVSlope","85"}}},
             {"mapSettings",settings},
             {"release",{{"packages",{"TestD_TXT.utx","TestD_STM.usx","Amb_TestD.uax"}},{"uas",{{"packages",{"Interface","Amb_TestD"}}}}}},
             {"documents",Json::array({document})},{"schema",schema}};
@@ -611,20 +611,29 @@ int main()
             Passes("level.death-height",good);
         }
         {
-            auto s=good;s["level"]["Events"][0]["SendAtTime"]="30.000000";
+            // The LevelInfo's one Event and its SendAtTime, an IntProperty
+            // (tests/maps/OffsE's LevelInfo has Event=storm, SendAtTime=1), as
+            // settings.inspect and the compiler give them.
+            auto s=good;s["level"]["SendAtTime"]="30";
             Fails("level.send-at-time",s);
-            // Parallel arrays and the spec's form read the same.
-            Json t=good;t["level"]={{"Events",{"Warning3min"}},{"SendAtTime",{"0"}}};
+            auto none=s;none["level"]["Event"]="None";
+            Passes("level.send-at-time",none);
+            // The spec's form reads the same.
+            Json t=good;t["level"]={{"events",Json::array({{{"event","Warning3min"},{"sendAtTime",0}}})}};
             Fails("level.send-at-time",t);
             Json u=good;u["level"]={{"events",Json::array({{{"event","Warning3min"},{"sendAtTime",-60}}})}};
             Passes("level.send-at-time",u);
             Passes("level.send-at-time",good);
         }
         {
-            auto s=good;s["level"]["MotionTrackingTweak"]["MTVOffset"]="30";
+            // MTVOffset and MTVSlope are LevelInfo properties; MotionTrackingTweak
+            // is only the property sheet's category.
+            auto s=good;s["level"]["MTVOffset"]="30";
             Fails("level.motion-tracking",s,"release","info");
-            auto t=good;t["level"]["MotionTrackingTweak"]={{"MTVOffset","8"},{"MTVSlope","8"}};
+            auto t=good;t["level"]["MTVOffset"]="8";t["level"]["MTVSlope"]="8";
             Passes("level.motion-tracking",t);
+            auto category=good;category["level"].erase("MTVOffset");category["level"].erase("MTVSlope");category["level"]["MotionTrackingTweak"]={{"MTVOffset","30"},{"MTVSlope","85"}};
+            Passes("level.motion-tracking",category);
             Passes("level.motion-tracking",good);
         }
 

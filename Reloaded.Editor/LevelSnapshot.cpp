@@ -1,4 +1,6 @@
 #include "pch.h"
+#undef min
+#undef max
 #include "LevelSnapshot.h"
 #include "EditorConfigBits.h"
 #include "LevelSnapshotModel.h"

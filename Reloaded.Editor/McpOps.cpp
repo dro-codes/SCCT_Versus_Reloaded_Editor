@@ -6,13 +6,13 @@
 #include "McpBridgeModel.h"
 #include "McpEditor.h"
 #include "McpPlanModel.h"
+#include "McpSafetyModel.h"
 #include "WorkflowEditor.h"
 #include "WorkflowTools.h"
 #include "EditorExtras.h"
 #include "Version.h"
 #include "logger.h"
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <map>
@@ -127,26 +127,19 @@ namespace
         return {{"data",Bridge::Base64(bytes)},{"eof",offset+bytes.size()>=total},{"size",total}};
     }
 
-    // Console commands exec never runs: they end the editor, replace, save or
-    // import the map, write packages (map.*, package.save do those with their
-    // checks), undo or redo blindly, or reach the sound driver.
+    // What exec refuses (McpSafetyModel.h): commands that end the editor,
+    // run a file of commands, load, save, import or export maps and
+    // packages, undo blindly or reach the sound driver; and any other that
+    // names a file outside the work folder and [Mcp] WriteRoots, or a
+    // package that is not the map's own.
     void CheckRawCommand(const std::string& command)
     {
-        if(command.empty() || command.size()>4096)Invalid("exec takes one editor command of up to 4096 characters.");
-        std::string words;bool space=true;
-        for(unsigned char c:command)
-        {
-            if(c<0x20 && c!='\t')Invalid("exec runs one command, on one line.");
-            if(std::isspace(c)){if(!space)words+=' ';space=true;}
-            else{words+=static_cast<char>(std::toupper(c));space=false;}
-        }
-        if(!words.empty() && words.back()==' ')words.pop_back();
-        for(const char* entry:{"QUIT","EXIT","MAP NEW","MAP LOAD","MAP SAVE","MAP IMPORT","OBJ SAVEPACKAGE","TRANSACTION","AUDIO"})
-        {
-            const std::string denied=entry;
-            if(words==denied || words.rfind(denied+" ",0)==0)
-                Refuse("exec does not run "+denied+" commands. Use the map, package and undo tools, which check before they act.","denied_command");
-        }
+        Mcp::Safety::RawContext context;
+        try{const auto file=Editor::MapFile();if(!file.empty())context.mapStem=std::filesystem::path(file).stem().string();}
+        catch(const std::exception&){}
+        std::error_code error;context.base=std::filesystem::current_path(error);
+        context.roots=McpBridge::WriteRoots();
+        if(const auto refusal=Mcp::Safety::RawCommandRefusal(command,context))throw Bridge::Error(refusal.code,refusal.message,refusal.reason);
     }
 
     // Undo and redo through the stock TRANSACTION UNDO / REDO, one step at a
@@ -253,6 +246,22 @@ namespace
         const auto* policy=Bridge::FindPolicy(op);
         return policy?policy->policy:Bridge::Policy::Blocked;
     }
+    // Steps whose effect Undo does not reach: files and packages written or
+    // imported into, a process started or ended. A plan a dialog stopped
+    // after one keeps the map changes that went with it.
+    bool Lasting(const Plan::Step& step)
+    {
+        const auto policy=PolicyOf(step.op);
+        return policy==Bridge::Policy::File || policy==Bridge::Policy::Process
+            || (step.op=="authoring.apply" && (Plan::DocumentHas(step.args,"texture") || Plan::DocumentHas(step.args,"save")));
+    }
+    // The dialog watchdog answered a question it did not know during the
+    // step: the answer may not be what the plan needs, so nothing more runs.
+    void StopOnDialog()
+    {
+        if(McpBridge::DialogBlocked())
+            throw Bridge::Error(Bridge::Code::DialogBlocked,"A dialog the bridge does not know opened during this step; it was answered, and the plan stopped here.","unknown_dialog");
+    }
     Json StepRequest(const Plan::Step& step,const std::map<std::string,Json>& results)
     {
         auto request=Plan::Bind(step.args,results);
@@ -260,14 +269,18 @@ namespace
         request["op"]=step.op;
         return request;
     }
+    // ran: the ids of the steps that finished, in order; wrote: the lasting
+    // ones; built: the builds, whose geometry an Undo of the map leaves.
     [[noreturn]] void Fail(const Plan::Step& step,Plan::Section section,const std::exception& error,bool rolledBack,bool earlier,
-                           const std::map<std::string,Json>& results,const Json& errors)
+                           const std::map<std::string,Json>& results,const Json& errors,const Json& ran,const Json& wrote,const Json& built)
     {
         std::string code=Bridge::Code::EditorError,reason;Json cause;
         if(const auto* coded=dynamic_cast<const Bridge::Error*>(&error)){code=coded->code;reason=coded->reason;cause=coded->details;}
         // Retrying the whole plan would run again what already ran.
         if(earlier && Bridge::Retryable(code))code=Bridge::Code::EditorError;
-        Json details={{"failedStep",step.id},{"op",step.op},{"section",Plan::SectionName(section)},{"rolledBack",rolledBack},{"steps",ResultsJson(results)}};
+        Json details={{"failedStep",step.id},{"op",step.op},{"section",Plan::SectionName(section)},{"rolledBack",rolledBack},{"steps",ResultsJson(results)},{"ran",ran}};
+        if(!wrote.empty())details["wrote"]=wrote;
+        if(!built.empty())details["built"]=built;
         if(!errors.empty())details["errors"]=errors;
         if(!cause.is_null())details["cause"]=cause;
         auto message="Plan step \""+step.id+"\" ("+step.op+") failed: "+error.what();
@@ -280,9 +293,18 @@ namespace
     Json DryRun(const Plan::Parsed& plan,const std::string& label)
     {
         std::map<std::string,Json> results;Json preview=Json::array(),errors=Json::object();
+        const Plan::Step* previous=nullptr;
         for(const auto& entry:Plan::Ordered(plan))
         {
             const auto section=entry.first;const auto& step=*entry.second;
+            // A question nobody knows the answer to, opened by the step before:
+            // the rest of the preview would rest on that answer.
+            if(previous && McpBridge::DialogBlocked())
+            {
+                errors[previous->id]="A dialog the bridge does not know opened during this step, so the dry run stopped there.";
+                break;
+            }
+            previous=&step;
             auto row=[&](const std::string& note)
             {
                 return Json{{"step",step.id},{"section",Plan::SectionName(section)},{"change",step.op},{"target",Target(step.args)},{"note",note}};
@@ -329,12 +351,30 @@ namespace
         const auto label=!plan.label.empty()?plan.label:!context.label.empty()?context.label:std::string("MCP plan");
         if(plan.dryRun || context.dryRun)return DryRun(plan,label);
         if(Editor::Joining())throw std::runtime_error("A plan cannot run inside another plan.");
-        std::map<std::string,Json> results;Json errors=Json::object();size_t ran=0,undoSteps=0;
+        std::map<std::string,Json> results;Json errors=Json::object(),done=Json::array(),wrote=Json::array(),built=Json::array();size_t ran=0,undoSteps=0;
+        // A step that finished: in order, with what it wrote, then the stop
+        // when it raised a dialog the bridge does not know.
+        auto finished=[&](const Plan::Step& step,Plan::Section section)
+        {
+            ++ran;done.push_back(step.id);
+            if(Lasting(step))
+            {
+                Json entry={{"step",step.id},{"op",step.op},{"section",Plan::SectionName(section)}};
+                const auto& result=results[step.id];
+                if(result.is_object() && result.contains("file") && result.at("file").is_string())entry["file"]=result.at("file");
+                wrote.push_back(std::move(entry));
+            }
+            if(PolicyOf(step.op)==Bridge::Policy::Build)built.push_back(step.id);
+            StopOnDialog();
+        };
+        // An optional step's failure is noted and the plan goes on, unless a
+        // dialog came with it.
+        auto skippable=[](const Plan::Step& step){return step.optional && !McpBridge::DialogBlocked();};
         // pre: package loads, imports and saves, which Undo does not reach.
         for(const auto& step:plan.pre)
         {
-            try{results[step.id]=WorkflowTools::Request(StepRequest(step,results));++ran;}
-            catch(const std::exception& e){if(step.optional){errors[step.id]=e.what();continue;}Fail(step,Plan::Section::Pre,e,false,ran>0,results,errors);}
+            try{results[step.id]=WorkflowTools::Request(StepRequest(step,results));finished(step,Plan::Section::Pre);}
+            catch(const std::exception& e){if(skippable(step)){errors[step.id]=e.what();continue;}Fail(step,Plan::Section::Pre,e,false,ran>0,results,errors,done,wrote,built);}
         }
         if(!plan.steps.empty())
         {
@@ -343,7 +383,7 @@ namespace
             if(writes)
             {
                 try{scope.emplace(label);}
-                catch(const std::exception& e){Fail(plan.steps.front(),Plan::Section::Steps,e,false,ran>0,results,errors);}
+                catch(const std::exception& e){Fail(plan.steps.front(),Plan::Section::Steps,e,false,ran>0,results,errors,done,wrote,built);}
             }
             Json library;bool kept=false;
             for(const auto& step:plan.steps)
@@ -351,7 +391,8 @@ namespace
                 try
                 {
                     if(LibraryOp(step.op) && !kept){library=WorkflowTools::LibraryEntry();kept=true;}
-                    results[step.id]=WorkflowTools::Request(StepRequest(step,results));++ran;
+                    results[step.id]=WorkflowTools::Request(StepRequest(step,results));
+                    finished(step,Plan::Section::Steps);
                 }
                 catch(const std::exception& e)
                 {
@@ -362,7 +403,7 @@ namespace
                     if(kept)
                         try{WorkflowTools::RestoreLibraryEntry(library);}
                         catch(const std::exception& again){Logger::log(std::string("MCP: could not put the workflow library back: ")+again.what());}
-                    Fail(step,Plan::Section::Steps,e,writes,ran>0,results,errors);
+                    Fail(step,Plan::Section::Steps,e,writes,ran>0,results,errors,done,wrote,built);
                 }
             }
             if(scope){scope->Commit();undoSteps=1;}
@@ -373,12 +414,14 @@ namespace
         {
             try
             {
-                results[step.id]=WorkflowTools::Request(StepRequest(step,results));++ran;
+                results[step.id]=WorkflowTools::Request(StepRequest(step,results));
                 if(PolicyOf(step.op)==Bridge::Policy::Undoable)++undoSteps;
+                finished(step,Plan::Section::Post);
             }
-            catch(const std::exception& e){if(step.optional){errors[step.id]=e.what();continue;}Fail(step,Plan::Section::Post,e,false,true,results,errors);}
+            catch(const std::exception& e){if(skippable(step)){errors[step.id]=e.what();continue;}Fail(step,Plan::Section::Post,e,false,true,results,errors,done,wrote,built);}
         }
         Json result={{"steps",ResultsJson(results)},{"undo",{{"steps",undoSteps}}},{"label",label}};
+        if(!wrote.empty())result["wrote"]=wrote;
         if(!errors.empty())result["errors"]=errors;
         return result;
     }

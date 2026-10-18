@@ -106,6 +106,23 @@ void Refusals()
     Check(Pointer(zones)=="/gameplay/story/objectives/0/triggers/0/dropZones","1 to 5 drop zones");
     Check(Pointer(With("gameplay",{{"targets",{{"mission","M"},{"sizes",{1,2,3}}}}}))=="/gameplay/targets/sizes","targets take eight sizes");
     Check(Pointer(With("map",{{"file","Bad Name"}}))=="/map/file","file stems have no spaces");
+    // Anchored patterns hold the whole string: MS STL's ^ and $ also match
+    // beside a '\n', so a regex_search would pass the first line on Windows.
+    Check(Pointer(With("map",{{"file","AquaD\nX"}}))=="/map/file" && Pointer(With("map",{{"file","AquaD\n"}}))=="/map/file","a file stem with a newline");
+    Check(Pointer(With("geometry",{{"pieces",{{{"id","Room1\nTag=Evil"},{"kind","Room"},{"size",{1,1,1}}}}}}))=="/geometry/pieces/0/id","an id with a newline");
+    Check(Pointer(at({0,0,"floor+48\nceiling"}))=="/spawns/spy/0/at/2","a height with a second line");
+    for(const auto& [pattern,whole]:std::vector<std::pair<std::string,bool>>{{"^[A-Za-z_][A-Za-z0-9_]{0,62}$",true},{"^\\s*(floor|ceiling)\\s*$",true},{"^[|]$",true},{"^\\|$",true},
+                                                                            {"[0-9]",false},{"^a\\$",false},{"^a|b$",false}})
+        Check(Spec::Check::Pattern(pattern).whole==whole,"patterns anchored at both ends, with no | of their own, match the whole string");
+    Check(Spec::Check::Matches("x1y","[0-9]") && !Spec::Check::Matches("a1","^[a-z]$") && Spec::Check::Matches("a1","^a|b$") && Spec::Check::Matches("|","^[|]$"),"other patterns are searched as written");
+    // Drop zones: a new one {id?, at}, or {ref} to one another flag made.
+    auto shared=Base();shared["gameplay"]=Json::parse(R"({"story":{"objectives":[{"id":"O","triggers":[{"id":"F1","kind":"flag","dropZones":[{"id":"Drop1","at":[0,0]}]},{"id":"F2","kind":"flag","dropZones":[{"ref":"Drop1"}]}]}]}})");
+    Spec::Parse(shared);
+    auto both=shared;both["gameplay"]["story"]["objectives"][0]["triggers"][1]["dropZones"][0]["at"]=Json::array({0,0});
+    Check(Pointer(both).rfind("/gameplay/story/objectives/0/triggers/1/dropZones/0/",0)==0,"a shared drop zone has no at of its own");
+    auto twiceMade=shared;twiceMade["gameplay"]["story"]["objectives"][0]["triggers"][1]["dropZones"][0]={{"id","Drop1"},{"at",{0,0}}};
+    Check(Pointer(twiceMade)=="/gameplay/story/objectives/0/triggers/1/dropZones/0/id","making the same drop zone twice is a duplicate id");
+    Check(Pointer(With("environment",{{"lights",{{{"id","L"},{"preset","spot"},{"cone",300}}}}}))=="/environment/lights/0/cone","LightCone is 0-255");
     Check(Pointer(With("units",{{"unit","yd"}}))=="/units/unit","units");
     // Lifts: the doors' mesh and how they open, and a storey's door placed by hand.
     auto lift=With("mechanisms",Json::parse(R"({"lifts":[{"id":"L","shaft":"S","storeys":["A","B"],"mesh":"P.G.Car","doorMesh":"P.G.Door","carDoorMesh":"P.G.Inner",

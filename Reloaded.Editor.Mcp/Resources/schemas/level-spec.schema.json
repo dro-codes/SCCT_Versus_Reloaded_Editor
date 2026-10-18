@@ -381,6 +381,12 @@
                 "minimum": 0.0,
                 "type": "number"
               },
+              "cone": {
+                "description": "LightCone of the spot preset: the beam's width, larger is wider. Default: the class's.",
+                "maximum": 255.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
               "corona": {
                 "type": "boolean"
               },
@@ -996,19 +1002,38 @@
                         },
                         "dropZones": {
                           "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "at": {
-                                "$ref": "#/$defs/position"
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "description": "{id, at}: a new SFlagDropZone; give it an id to share it.",
+                                "properties": {
+                                  "at": {
+                                    "$ref": "#/$defs/position"
+                                  },
+                                  "id": {
+                                    "$ref": "#/$defs/id"
+                                  }
+                                },
+                                "required": [
+                                  "at"
+                                ],
+                                "type": "object"
                               },
-                              "id": {
-                                "$ref": "#/$defs/id"
+                              {
+                                "additionalProperties": false,
+                                "description": "{ref: id}: the drop zone another flag's entry made, shared.",
+                                "properties": {
+                                  "ref": {
+                                    "$ref": "#/$defs/id"
+                                  }
+                                },
+                                "required": [
+                                  "ref"
+                                ],
+                                "type": "object"
                               }
-                            },
-                            "required": [
-                              "at"
                             ],
-                            "type": "object"
+                            "description": "{id, at} for a new SFlagDropZone, or {ref: id} to share one another flag made (flags may share drop zones)."
                           },
                           "maxItems": 5,
                           "minItems": 1,
@@ -1542,6 +1567,7 @@
                 "$ref": "#/$defs/id"
               },
               "faces": {
+                "description": "Faces by the way their surface faces: a carved room's east wall faces west (-X).",
                 "items": {
                   "enum": [
                     "floor",

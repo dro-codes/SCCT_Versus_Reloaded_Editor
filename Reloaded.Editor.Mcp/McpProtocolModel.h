@@ -132,8 +132,8 @@ namespace Mcp::Protocol
             Json hints{{"readOnlyHint", tool.readOnly}, {"openWorldHint", tool.openWorld}};
             // The other two hints only mean something for a tool that changes things.
             if (!tool.readOnly) { hints["destructiveHint"] = tool.destructive; hints["idempotentHint"] = tool.idempotent; }
-            else hints["idempotentHint"] = true;
-            if (!tool.title.empty()) hints["title"] = tool.title;
+            // From 2025-06-18 the tool's own title says it; before, only here.
+            if (!tool.title.empty() && !Titled(protocol)) hints["title"] = tool.title;
             out["annotations"] = hints;
         }
         return out;
@@ -143,15 +143,6 @@ namespace Mcp::Protocol
         if (content.type == "image") return {{"type", "image"}, {"data", content.data}, {"mimeType", content.mimeType.empty() ? "image/png" : content.mimeType}};
         if (content.type == "resource") return {{"type", "resource"}, {"resource", content.resource}};
         return {{"type", "text"}, {"text", content.text}};
-    }
-    inline Json ToolResultJson(const ToolResult& result, const std::string& protocol)
-    {
-        Json content = Json::array();
-        for (const auto& c : result.content) content.push_back(ContentJson(c));
-        if (content.empty()) content.push_back({{"type", "text"}, {"text", result.structured.dump(2, ' ', false, Json::error_handler_t::replace)}});
-        Json out{{"content", content}, {"isError", result.isError}};
-        if (Structured(protocol) && result.structured.is_object()) out["structuredContent"] = result.structured;
-        return out;
     }
     inline Json ResourceJson(const Resource& resource, const std::string& protocol)
     {
@@ -317,5 +308,30 @@ namespace Mcp::Protocol
     {
         if (!arguments.is_object()) return "arguments must be an object";
         return Detail::Check(schema, arguments, "arguments", 0);
+    }
+    // "" when a tool's structured result fits its outputSchema (none declared
+    // fits anything), else the first problem found.
+    inline std::string CheckStructured(const Json& outputSchema, const Json& structured)
+    {
+        if (!outputSchema.is_object()) return {};
+        if (!structured.is_object()) return "structuredContent must be an object";
+        return Detail::Check(outputSchema, structured, "structuredContent", 0);
+    }
+
+    // A tools/call result. A tool's outputSchema describes what it returns
+    // when it works; an error's details ({error, code, hint, ...}) need not
+    // have that shape, and clients validate any structuredContent they get
+    // (the TypeScript SDK even with isError), so an error that does not fit
+    // carries its details in the text block only. The field is optional in
+    // every protocol version.
+    inline Json ToolResultJson(const ToolResult& result, const std::string& protocol, const Json& outputSchema = Json())
+    {
+        Json content = Json::array();
+        for (const auto& c : result.content) content.push_back(ContentJson(c));
+        if (content.empty()) content.push_back({{"type", "text"}, {"text", result.structured.dump(2, ' ', false, Json::error_handler_t::replace)}});
+        Json out{{"content", content}, {"isError", result.isError}};
+        if (Structured(protocol) && result.structured.is_object() && (!result.isError || CheckStructured(outputSchema, result.structured).empty()))
+            out["structuredContent"] = result.structured;
+        return out;
     }
 }

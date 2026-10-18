@@ -10,13 +10,15 @@ arguments:
     description: Areas to look at closely (spawns, modes, security, camnet, lights, zones, ges, settings, release), or "everything".
     default: everything
 wiki: [index, spawn-points, game-modes, level-ingredients, alarms, zones-and-volumes, lighting, map-settings, map-packaging]
-rules: true
+rules: false
 ---
 # Review the map against the wiki
 
 **Profile:** {{profile}}. **Focus:** {{focus}}.
 
 **This is a review: change nothing** unless the user asks you to apply fixes. If they do, use the `fix_validation` prompt.
+
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
 
 ## Recipe
 

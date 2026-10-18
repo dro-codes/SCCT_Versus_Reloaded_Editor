@@ -97,9 +97,12 @@ Simulates a chain. It inherits from `ESBRopeActor`, so it has all the rope prope
 
 `environment` with `softbody[{id, class?, at, mesh?, properties}]` (spec `environment.softbody`) places SoftBody actors.
 
-**`class` defaults to `ESBPatchActor`**, the usual cloth. Set `ESBStripeDoorActor`, `ESBRopeActor` or `ESBChainActor` for the others; a short name gets its package (`Echelon.ESBRopeActor`). The base `ESoftBodyActor` is not placeable, and the compiler refuses it (error `softbody.class`).
+**`class` defaults to `SoftBody.ESBPatchActor`**, the usual cloth. Set `ESBStripDoorActor`, `ESBRopeActor` or `ESBChainActor` for the others.
+- The classes live in the **`SoftBody`** package: a short name gets it (`SoftBody.ESBRopeActor`), and so does an `Echelon.` guess.
+- The engine names the strip door **`ESBStripDoorActor`**. The wiki's `ESBStripeDoorActor` is accepted and written as that.
+- The base `ESoftBodyActor` is not placeable, and the compiler refuses it (error `softbody.class`).
 
-A `mesh` becomes the actor's `LinkMesh` (a chain's links). The SoftBody still draws itself (`DT_SoftBody`), so `StaticMesh` and `DrawType` are left alone.
+**`mesh` is for `ESBChainActor` only:** it becomes the chain's `LinkMesh`, its links. The other SoftBody actors have no `LinkMesh` and draw a texture instead, so a `mesh` on them is an error (`softbody.mesh`). The SoftBody still draws itself (`DT_SoftBody`), so `StaticMesh` and `DrawType` are left alone.
 
 The compiler passes `properties` through, so write the wiki values yourself:
 - **Texture:** in `Texture`.

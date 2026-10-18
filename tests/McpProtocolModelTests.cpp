@@ -74,6 +74,8 @@ void Lists()
     auto tool=Protocol::ToolJson(Sample(),"2025-06-18");
     Check(tool.at("name")=="map_query" && tool.at("title")=="Read the map" && tool.contains("outputSchema"),"tool for 2025-06-18");
     Check(tool.at("annotations").at("readOnlyHint")==true && tool.at("annotations").at("openWorldHint")==false && !tool.at("annotations").contains("destructiveHint"),"read-only annotations");
+    Check(!tool.at("annotations").contains("idempotentHint") && !tool.at("annotations").contains("title"),"no hints that mean nothing here, the title once");
+    Check(Protocol::ToolJson(Sample(),"2025-03-26").at("annotations").at("title")=="Read the map","before 2025-06-18 the title is an annotation");
     auto old=Protocol::ToolJson(Sample(),"2024-11-05");
     Check(!old.contains("title") && !old.contains("outputSchema") && !old.contains("annotations"),"old clients see the 2024 shape");
     auto writer=Sample();writer.readOnly=false;writer.destructive=true;writer.outputSchema=Json();
@@ -90,6 +92,20 @@ void Lists()
     Check(!legacy.contains("structuredContent") && legacy.at("content").size()==2,"no structured content before 2025-06-18");
     auto failed=Protocol::ToolResultJson(Fail("No editor.",{{"code","not_connected"}}),"2025-06-18");
     Check(failed.at("isError")==true && failed.at("structuredContent").at("error")=="No editor." && failed.at("structuredContent").at("code")=="not_connected","error result");
+    // An error whose details do not fit the tool's outputSchema leaves
+    // structuredContent out (clients validate it even with isError); the
+    // text still carries the message and the details.
+    const Json output=Json::parse(R"({"type":"object","required":["valid","summary"],"properties":{"valid":{"type":"boolean"},"summary":{"type":"object","required":["errors"]}}})");
+    auto strict=Protocol::ToolResultJson(Fail("No map is open.",{{"code","editor_error"},{"hint","map_file"}}),"2025-06-18",output);
+    Check(strict.at("isError")==true && !strict.contains("structuredContent") && strict.at("content")[0].at("text").get<std::string>().find("map_file")!=std::string::npos,"a non-conforming error has no structured content");
+    auto loose=Protocol::ToolResultJson(Fail("Busy.",{{"code","busy"}}),"2025-06-18",Json{{"type","object"},{"properties",{{"undo",{{"type",Json::array({"object","null"})}}}}}});
+    Check(loose.at("structuredContent").at("code")=="busy","an error that fits keeps its details");
+    auto fits=Protocol::ToolResultJson(Ok({{"valid",true},{"summary",{{"errors",0}}}}),"2025-06-18",output);
+    Check(fits.at("structuredContent").at("valid")==true,"results keep structured content");
+    Check(Protocol::CheckStructured(output,{{"valid",true},{"summary",{{"errors",0}}}}).empty(),"a conforming result");
+    Check(Protocol::CheckStructured(output,{{"valid",true},{"summary",Json::object()}}).find("summary.errors is required")!=std::string::npos,"nested required named");
+    Check(Protocol::CheckStructured(output,{{"valid","yes"},{"summary",{{"errors",0}}}}).find("valid must be boolean")!=std::string::npos,"types checked");
+    Check(Protocol::CheckStructured(Json(),{{"anything",1}}).empty(),"no outputSchema fits anything");
     ToolResult empty;empty.structured={{"x",2}};
     Check(Protocol::ToolResultJson(empty,"2025-06-18").at("content")[0].at("text").get<std::string>().find("\"x\"")!=std::string::npos,"empty content gets the JSON");
 

@@ -8,13 +8,75 @@ namespace Mcp
 {
 namespace E = Protocol::ErrorCode;
 
+namespace
+{
+    // The batch the reader thread is answering, if any: its replies are
+    // gathered rather than written one by one.
+    thread_local std::shared_ptr<Server::Batch> gathering;
+
+    bool IsReply(const Json& message) { return message.is_object() && message.contains("id") && (message.contains("result") || message.contains("error")); }
+
+    // The editor as one request sees it, noting whether a call changed
+    // anything there: only then do subscribers of the live resources hear
+    // about it. Dry runs and reads change nothing; a plan that failed after
+    // some of its steps ran (rolledBack false) did.
+    class Watched : public IBridge
+    {
+    public:
+        explicit Watched(IBridge& b) : inner(b) {}
+        Json Call(const std::string& op, const Json& args, const CallOptions& options) override
+        {
+            try
+            {
+                auto result = inner.Call(op, args, options);
+                Note(op, args, options, result);
+                return result;
+            }
+            catch (const Bridge::Error& e)
+            {
+                // A call that stopped after writing a file left that file changed.
+                if (e.details.is_object() && ((e.details.contains("rolledBack") && e.details.at("rolledBack") == false) ||
+                                              (e.details.contains("wrote") && e.details.at("wrote").is_array() && !e.details.at("wrote").empty())))
+                    changed = true;
+                throw;
+            }
+        }
+        Json Hello() override { return inner.Hello(); }
+        bool Connected() override { return inner.Connected(); }
+        Json State() override { return inner.State(); }
+        Json Editors() override { return inner.Editors(); }
+        void Select(unsigned long pid) override { inner.Select(pid); }
+        void Disconnect() override { inner.Disconnect(); }
+        bool changed = false;
+
+    private:
+        void Note(const std::string& op, const Json& args, const CallOptions& options, const Json& result)
+        {
+            // approval_wait: a change the user approved has been applied.
+            if (op == "approval.status")
+            {
+                const bool done = result.is_object() && ((result.contains("status") && result.at("status") == "done") ||
+                                                         (result.contains("pending") && result.at("pending") == false && result.contains("ok") && result.at("ok") == true));
+                changed = changed || done;
+                return;
+            }
+            const auto* policy = Bridge::FindPolicy(op);
+            const bool dry = options.dryRun || (args.is_object() && args.contains("dryRun") && args.at("dryRun") == true);
+            if (policy && Bridge::Mutates(policy->policy) && !dry) changed = true;
+        }
+        IBridge& inner;
+    };
+}
+
 std::string DefaultInstructions()
 {
     return "RE+ MCP builds and edits Splinter Cell Chaos Theory Versus maps in the running RE+ editor (Reloaded_Editor.exe).\n"
            "1. Start with editor_status: it connects to the editor and shows the open map, unsaved changes and whether the user approves each change. "
            "editor_launch starts the editor when none is running (the user must have turned on RE+ Tools > MCP > Enable MCP server).\n"
            "2. Before designing, read scct://wiki/index and scct://rules. The wiki digests (scct://wiki/<page>) are the source of truth for every "
-           "gameplay rule (spawns, game modes, CamNet, alarms, geometric events, map settings, packaging); validation cites them by page.\n"
+           "gameplay rule (spawns, game modes, CamNet, alarms, geometric events, map settings, packaging); validation cites them by page. "
+           "scct://docs/tools holds the conventions every tool shares (positions, ids, how the intent tools merge, fixes), scct://docs/tool-reference "
+           "every field with the wiki defaults applied, scct://docs/ops the bridge ops.\n"
            "3. Write the level as a scct.level-spec (scct://schema/level-spec, examples at scct://examples/*). Check it offline with level_spec_validate "
            "and plan_render, then level_build with mode preview, then mode apply. The intent tools (blockout, gameplay, security, mechanisms, events, "
            "environment, geometric_events, map_settings) make focused changes the same way.\n"
@@ -42,9 +104,33 @@ std::string Server::NegotiatedVersion() const
 
 void Server::Send(const Json& message)
 {
+    if (gathering && IsReply(message))
+    {
+        std::lock_guard<std::mutex> guard(gathering->lock);
+        gathering->replies.push_back(message);
+        return;
+    }
+    Write(message);
+}
+void Server::Write(const Json& message)
+{
     const auto line = Protocol::Line(message);
     std::lock_guard<std::mutex> guard(output);
     write(line);
+}
+void Server::Settle(const std::shared_ptr<Batch>& batch, const Json* reply)
+{
+    Json replies;
+    {
+        std::lock_guard<std::mutex> guard(batch->lock);
+        if (reply) batch->replies.push_back(*reply);
+        if (batch->pending) --batch->pending;
+        if (!batch->sealed || batch->pending || batch->sent) return;
+        batch->sent = true;
+        replies = std::move(batch->replies);
+    }
+    // A batch of notifications alone, or of requests all cancelled, has no reply.
+    if (replies.is_array() && !replies.empty()) Write(replies);
 }
 
 void Server::Log(const std::string& level, const std::string& text)
@@ -70,11 +156,27 @@ void Server::Handle(const std::string& raw)
         Send(Protocol::Error(nullptr, E::Parse, std::string("Parse error: ") + e.what()));
         return;
     }
-    // Batches (2025-03-26) are answered message by message.
+    // Batches came with 2025-03-26 and went with 2025-06-18. The replies go
+    // back as one array, in the order the requests finish.
     if (message.is_array())
     {
-        if (message.empty()) Send(Protocol::Error(nullptr, E::InvalidRequest, "An empty batch."));
-        for (const auto& item : message) Dispatch(item);
+        if (message.empty()) { Send(Protocol::Error(nullptr, E::InvalidRequest, "An empty batch.")); return; }
+        if (Protocol::AtLeast(NegotiatedVersion(), "2025-06-18"))
+        {
+            Send(Protocol::Error(nullptr, E::InvalidRequest, "MCP " + NegotiatedVersion() + " has no JSON-RPC batches: send one message per line."));
+            return;
+        }
+        auto batch = std::make_shared<Batch>();
+        gathering = batch;
+        try { for (const auto& item : message) Dispatch(item); }
+        catch (...) { gathering.reset(); throw; }
+        gathering.reset();
+        {
+            std::lock_guard<std::mutex> guard(batch->lock);
+            batch->sealed = true;
+            ++batch->pending; // released by the Settle below
+        }
+        Settle(batch, nullptr);
         return;
     }
     Dispatch(message);
@@ -197,9 +299,22 @@ void Server::Request(const Protocol::Message& m)
             if (!params.contains("name") || !params.at("name").is_string()) { invalid("name is required."); return; }
             const auto* prompt = registry.FindPrompt(params.at("name").get<std::string>());
             if (!prompt) { invalid("Unknown prompt: " + params.at("name").get<std::string>()); return; }
-            const auto arguments = params.value("arguments", Json::object());
+            const auto arguments = params.contains("arguments") && !params.at("arguments").is_null() ? params.at("arguments") : Json::object();
+            if (!arguments.is_object()) { invalid("A prompt's arguments are an object of strings."); return; }
             for (const auto& a : prompt->arguments)
-                if (a.required && (!arguments.is_object() || !arguments.contains(a.name))) { invalid("The prompt needs the argument \"" + a.name + "\"."); return; }
+                if (a.required && !arguments.contains(a.name)) { invalid("The prompt needs the argument \"" + a.name + "\"."); return; }
+            for (auto it = arguments.begin(); it != arguments.end(); ++it)
+            {
+                const bool known = std::any_of(prompt->arguments.begin(), prompt->arguments.end(), [&](const PromptArgument& a) { return a.name == it.key(); });
+                if (!known)
+                {
+                    std::string names;
+                    for (const auto& a : prompt->arguments) names += (names.empty() ? "" : ", ") + a.name;
+                    invalid("The prompt " + prompt->name + " has no argument \"" + it.key() + "\" (it takes: " + (names.empty() ? std::string("none") : names) + ").");
+                    return;
+                }
+                if (!it.value().is_string()) { invalid("Prompt arguments are strings: \"" + it.key() + "\" is not."); return; }
+            }
             Enqueue(m);
             return;
         }
@@ -221,12 +336,23 @@ void Server::Notify(const Protocol::Message& m)
         if (!m.params.contains("requestId")) return;
         const auto key = m.params.at("requestId").dump();
         bool interrupt = false;
+        std::shared_ptr<Batch> dropped;
         {
             std::lock_guard<std::mutex> guard(lock);
             const auto queued = std::find_if(queue.begin(), queue.end(), [&](const Job& job) { return job.key == key; });
-            if (queued != queue.end()) queue.erase(queued);
-            else if (busy && running == key) { cancelled.insert(key); interrupt = true; }
+            if (queued != queue.end())
+            {
+                dropped = queued->batch;
+                queue.erase(queued);
+            }
+            else if (busy && running == key)
+            {
+                cancelled.insert(key);
+                stopRunning = true;
+                interrupt = true;
+            }
         }
+        if (dropped) Settle(dropped, nullptr);
         if (interrupt)
         {
             if (options.cancel) options.cancel();
@@ -241,13 +367,20 @@ void Server::Enqueue(const Protocol::Message& m)
 {
     {
         std::lock_guard<std::mutex> guard(lock);
-        queue.push_back({m.id, m.id.dump(), m.method, m.params});
+        if (gathering)
+        {
+            std::lock_guard<std::mutex> batch(gathering->lock);
+            ++gathering->pending;
+        }
+        queue.push_back({m.id, m.id.dump(), m.method, m.params, gathering});
     }
     wake.notify_one();
 }
 
 void Server::Work()
 {
+    // Tools ask Tools::Cancelled() whether the request they run was cancelled.
+    Tools::CancelFlag() = &stopRunning;
     for (;;)
     {
         Job job;
@@ -259,6 +392,7 @@ void Server::Work()
             queue.pop_front();
             running = job.key;
             busy = true;
+            stopRunning = false;
         }
         if (options.resume) options.resume();
         Json reply;
@@ -273,7 +407,8 @@ void Server::Work()
             busy = false;
         }
         // A cancelled request gets no reply (the MCP cancellation rule).
-        if (!drop) Send(reply);
+        if (job.batch) Settle(job.batch, drop ? nullptr : &reply);
+        else if (!drop) Send(reply);
         idle.notify_all();
     }
 }
@@ -297,9 +432,21 @@ std::function<void(double, double, const std::string&)> Server::Progress(const J
 
 Json Server::Execute(const Job& job)
 {
-    ToolContext context{bridge, options.systemDir, options.workDir};
-    context.progress = Progress(job.params);
-    if (job.method == "tools/call") return CallTool(job, context);
+    Watched watched(bridge);
+    ToolContext context{watched, options.systemDir, options.workDir};
+    // A cancelled tool stops at its next progress report, whether or not the
+    // client asked for progress.
+    context.progress = [this, report = Progress(job.params)](double done, double total, const std::string& message)
+    {
+        if (stopRunning) throw Bridge::Error(Bridge::Code::Cancelled, "The request was cancelled.");
+        report(done, total, message);
+    };
+    if (job.method == "tools/call")
+    {
+        auto reply = CallTool(job, context);
+        if (watched.changed) MapChanged();
+        return reply;
+    }
     if (job.method == "resources/read") return ReadResource(job.id, job.params.value("uri", std::string()), context);
     if (job.method == "prompts/get") return GetPrompt(job, context);
     return Protocol::Error(job.id, E::MethodNotFound, "Method not found: " + job.method);
@@ -324,9 +471,7 @@ Json Server::CallTool(const Job& job, ToolContext& context)
             options.log("[info] " + name + (result.isError ? " failed" : " done") + " in " +
                         std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()) + " ms");
     }
-    const bool dryRun = arguments.contains("dryRun") && arguments.at("dryRun").is_boolean() && arguments.at("dryRun").get<bool>();
-    if (!tool->readOnly && !result.isError && !dryRun) MapChanged();
-    return Protocol::Response(job.id, Protocol::ToolResultJson(result, NegotiatedVersion()));
+    return Protocol::Response(job.id, Protocol::ToolResultJson(result, NegotiatedVersion(), tool->outputSchema));
 }
 
 Json Server::ReadResource(const Json& id, const std::string& uri, ToolContext& context)
@@ -340,6 +485,7 @@ Json Server::ReadResource(const Json& id, const std::string& uri, ToolContext& c
         const auto hint = Tools::Hint(e);
         return Protocol::Error(id, E::Internal, "Could not read " + uri + ": " + e.what() + (hint.empty() ? "" : " " + hint), {{"uri", uri}, {"code", e.code}});
     }
+    catch (const Tools::NotFound& e) { return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + uri + ". " + e.what(), {{"uri", uri}}); }
     catch (const std::exception& e) { return Protocol::Error(id, E::Internal, "Could not read " + uri + ": " + e.what(), {{"uri", uri}}); }
     if (read.is_null()) return Protocol::Error(id, E::ResourceNotFound, "Resource not found: " + uri, {{"uri", uri}});
     return Protocol::Response(id, Protocol::ReadContents(uri, read, resource->mimeType));
@@ -406,7 +552,7 @@ bool Server::Finish(unsigned waitMs, unsigned drainMs)
         if (finished) return true;
         finished = stopping = true;
         queue.clear();
-        if (busy) { cancelled.insert(running); interrupt = true; }
+        if (busy) { cancelled.insert(running); stopRunning = true; interrupt = true; }
     }
     if (interrupt && options.cancel) options.cancel();
     wake.notify_all();

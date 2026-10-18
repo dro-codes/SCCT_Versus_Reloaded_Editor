@@ -12,7 +12,7 @@ arguments:
   - name: findings
     description: Findings JSON from an earlier map_validate call, to start from instead of validating again.
 wiki: [index]
-rules: true
+rules: false
 ---
 # Fix validation findings
 
@@ -23,6 +23,8 @@ rules: true
 {{findings}}
 ```
 {{/findings}}
+The rule catalogue is not embedded, to keep this recipe short: read `scct://rules` (every check with its draft and release severity and its wiki page) before you design or fix anything.
+
 ## Recipe
 
 1. **Findings.** {{^findings}}Call `map_validate` with `profile:"{{profile}}"`.{{/findings}}{{#findings}}Use the findings above, but call `map_validate` with `profile:"{{profile}}"` once to confirm they are current.{{/findings}}
@@ -37,6 +39,7 @@ rules: true
 
    For each finding:
    - If it has `fix: {tool, args}`, call that tool with those args plus `dryRun:true`. Read the preview, then call it again without `dryRun`.
+   - If it has `fix: {spec: [{pointer, merge | change}]}`, the finding is about a spec checked offline: edit that spec at each pointer (merge objects field by field and lists by id, as `scct://docs/tools` describes), then check it again with `level_spec_validate`; do not call the intent tools for it, which change the open map instead.
    - If it has no `fix`, choose the tool:
 
      | Finding is about | Tool |

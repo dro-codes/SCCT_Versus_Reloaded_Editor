@@ -7,12 +7,15 @@
 #include "../../Reloaded.Editor/McpGuardModel.h"
 #include "../../Reloaded.Editor/McpPlanModel.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <thread>
 
 namespace Mcp::Tools
 {
@@ -154,24 +157,29 @@ namespace Mcp::Tools
         inline Json Free(const std::string& description) { return {{"type", "object"}, {"description", description}}; }
         inline Json Vector3(const std::string& description)
         {
-            return {{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}, {"description", description}};
+            Json out{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
+            if (!description.empty()) out["description"] = description;
+            return out;
         }
+        // {path: "MyLevel.Light12", class: "Engine.Light"}.
         inline Json Identity(const std::string& description)
         {
-            return Object({{"path", String("Object path, such as MyLevel.Light12.")}, {"class", String("Class path, such as Engine.Light.")}}, {"path", "class"}, description);
+            return Object({{"path", {{"type", "string"}}}, {"class", {{"type", "string"}}}}, {"path", "class"}, description);
         }
         // An actor by path ("MyLevel.Light12"), object name, or identity.
         inline Json Actor(const std::string& description)
         {
-            return {{"anyOf", Json::array({{{"type", "string"}}, Identity("The actor's identity.")})}, {"description", description}};
+            Json out{{"anyOf", Json::array({{{"type", "string"}}, Identity({})})}};
+            if (!description.empty()) out["description"] = description;
+            return out;
         }
         // A tool's inputSchema: a closed object.
         inline Json Input(Json properties, const std::vector<std::string>& required = {}) { return Object(std::move(properties), required); }
         // dryRun and label, which every mutating tool takes.
         inline Json Mutating(Json schema)
         {
-            schema["properties"]["dryRun"] = Boolean("Preview only: report what would change (preview rows, the plan) and change nothing. Default false.");
-            schema["properties"]["label"] = String("Short name for the Undo History entry (\"MCP <n>: <label>\") and the call history. Default: the tool name.");
+            schema["properties"]["dryRun"] = {{"type", "boolean"}};
+            schema["properties"]["label"] = String("Undo History name.");
             return schema;
         }
         // The result every mutating tool returns.
@@ -189,19 +197,66 @@ namespace Mcp::Tools
     }
 
     // ------------------------------------------------------- session memory
-    // What one exe run remembers between tools: the last bridge call that
-    // made an Undo step (editor_undo's default) and where editor_log stopped.
+    // What one exe run remembers between tools: the bridge calls of this
+    // server that made Undo steps, newest last (editor_undo with no
+    // arguments takes the newest; one it undid moves to undone, and comes
+    // back when redone), and where editor_log stopped. A new editor process
+    // numbers its calls afresh, so editor_launch and editor_restart forget.
     struct Session
     {
+        struct Made { unsigned call = 0; int steps = 0; std::string op; };
         std::mutex lock;
-        unsigned lastCall = 0;
-        std::string lastLabel;
+        std::vector<Made> calls, undone;
         uint64_t logSeen = 0;
+        void Push(unsigned call, int steps, const std::string& op)
+        {
+            if (!call) return;
+            Forget(call);
+            calls.push_back({call, steps, op});
+            undone.clear(); // a new change ends Redo
+        }
+        void Forget(unsigned call)
+        {
+            for (auto* list : {&calls, &undone})
+                list->erase(std::remove_if(list->begin(), list->end(), [&](const Made& m) { return m.call == call; }), list->end());
+        }
+        void Reset() { calls.clear(); undone.clear(); }
     };
     inline Session& Memory()
     {
         static Session session;
         return session;
+    }
+
+    // ---------------------------------------------------------- cancelling
+    // The running request's cancel flag, which McpServer.cpp points at for
+    // its worker thread and sets when the client cancels the request. Editor
+    // calls stop by themselves (BridgeClient::Cancel); a tool that waits or
+    // loops without calling the editor asks here, and ToolContext::progress
+    // throws once the request is cancelled.
+    inline const std::atomic<bool>*& CancelFlag()
+    {
+        thread_local const std::atomic<bool>* flag = nullptr;
+        return flag;
+    }
+    inline bool Cancelled()
+    {
+        const auto* flag = CancelFlag();
+        return flag && flag->load();
+    }
+    inline void StopIfCancelled(const std::string& what)
+    {
+        if (Cancelled()) throw Bridge::Error(Bridge::Code::Cancelled, what + " was cancelled.");
+    }
+    // Sleeps ms in short slices, throwing as soon as the request is cancelled.
+    inline void Pause(unsigned ms, const std::string& what)
+    {
+        for (unsigned slept = 0; slept < ms; slept += 50)
+        {
+            StopIfCancelled(what);
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::min(50u, ms - slept)));
+        }
+        StopIfCancelled(what);
     }
 
     // --------------------------------------------------------- editor calls
@@ -250,8 +305,7 @@ namespace Mcp::Tools
         {
             auto& memory = Memory();
             std::lock_guard<std::mutex> guard(memory.lock);
-            memory.lastCall = call;
-            memory.lastLabel = last.value("op", std::string());
+            memory.Push(call, undo.value("steps", 0), last.value("op", std::string()));
         }
         return {{"call", call}, {"steps", undo.value("steps", 0)}, {"how", "editor_undo with call " + std::to_string(call) + " reverts this whole call while it is the newest change"}};
     }
@@ -294,6 +348,10 @@ namespace Mcp::Tools
     inline std::string Hint(const Bridge::Error& e)
     {
         namespace C = Bridge::Code;
+        if (e.code == C::Busy && e.reason == "approval_pending")
+            return "A change is waiting for the user's approval in the editor, which takes no other call meanwhile: call approval_wait with its ticket "
+                   "(details.ticket, or the ticket of the awaiting_approval error), or ask the user to answer the review window.";
+        if (e.code == C::Busy && e.reason == "another_client") return "Close the other MCP client, or ask the user to use RE+ Tools > MCP > Disconnect client.";
         if (e.code == C::Busy) return Guard::BusyHint(e.reason) + " Wait a moment and try again.";
         if (e.code == C::Stale) return "The map changed since it was read. Read it again (map_query) and repeat the change against what is there now.";
         if (e.code == C::NotConnected) return "editor_status shows the running editors; editor_launch starts one.";
@@ -328,6 +386,9 @@ namespace Mcp::Tools
     }
 
     // --------------------------------------------------------------- actors
+    // Nothing in the map answers to a name: the resource read of a missing
+    // actor is "not found", not a failure.
+    struct NotFound : std::runtime_error { using std::runtime_error::runtime_error; };
     inline bool IsIdentity(const Json& v)
     {
         return v.is_object() && v.contains("path") && v.contains("class") && v.at("path").is_string() && v.at("class").is_string();
@@ -366,7 +427,7 @@ namespace Mcp::Tools
             if (matches.empty())
                 for (const auto& f : found)
                     if (Lower(f.value("name", std::string())) == name || Lower(LastSegment(f.value("path", std::string()))) == name) matches.push_back(f);
-            if (matches.empty()) throw std::runtime_error("No actor named \"" + a.get<std::string>() + "\" is in the map. map_query with what \"actors\" lists them.");
+            if (matches.empty()) throw NotFound("No actor named \"" + a.get<std::string>() + "\" is in the map. map_query with what \"actors\" lists them.");
             if (matches.size() > 1) throw std::runtime_error("\"" + a.get<std::string>() + "\" names several actors; use the full path.");
             out.push_back({{"path", matches.front().at("path")}, {"class", matches.front().at("class")}});
         }
@@ -411,6 +472,143 @@ namespace Mcp::Tools
     Json BuildContext(ToolContext& c, bool needEditor);
     Json LevelBuild(ToolContext& c, const Json& context, const Json& spec, const Json& request, std::vector<Content>& images);
     ToolResult BuildResult(ToolContext& c, const Json& report, const std::vector<Content>& images);
+
+    // ------------------------------------------------------- spec documents
+    // spec as given, or read from path: a .level.json on this machine (a
+    // relative path is looked for in the work directory first) or an
+    // embedded example, scct://examples/<name>. files is EmbeddedFiles()
+    // (Embedded.h), passed in so only the tools that read specs compile the
+    // embedded data.
+    template<class Files> std::vector<std::string> ExampleUris(const Files& files)
+    {
+        std::vector<std::string> out;
+        for (const auto& file : files)
+        {
+            std::string path = file.path;
+            if (path.rfind("examples/", 0) != 0) continue;
+            for (const std::string suffix : {".level.json", ".json"})
+                if (path.size() > suffix.size() && path.compare(path.size() - suffix.size(), std::string::npos, suffix) == 0) { path.resize(path.size() - suffix.size()); break; }
+            out.push_back("scct://" + path);
+        }
+        return out;
+    }
+    template<class Files> Json LoadSpec(const Json& a, ToolContext& c, std::string& source, const Files& files)
+    {
+        if (Has(a, "spec"))
+        {
+            if (Has(a, "path")) throw std::runtime_error("Give spec or path, not both.");
+            if (!a.at("spec").is_object()) throw std::runtime_error("spec must be a scct.level-spec object (scct://schema/level-spec).");
+            source = "spec";
+            return a.at("spec");
+        }
+        const auto path = String(a, "path");
+        if (path.empty()) throw std::runtime_error("Give spec (a scct.level-spec document) or path (a .level.json file, or scct://examples/<name>).");
+        source = path;
+        std::string text;
+        if (path.rfind("scct://", 0) == 0)
+        {
+            const auto wanted = path.substr(7);
+            bool found = false;
+            for (const auto& file : files)
+            {
+                const std::string name = file.path;
+                if (name != wanted && name != wanted + ".level.json" && name != wanted + ".json") continue;
+                text.assign(reinterpret_cast<const char*>(file.data), file.size);
+                found = true;
+                break;
+            }
+            if (!found)
+                throw std::runtime_error("No embedded spec " + path + ". path takes a file on this machine or one of the examples, " + Join(ExampleUris(files)) +
+                                         (path.rfind("scct://map/", 0) == 0 ? "; the live map's spec is map_query what:\"spec\"." : "."));
+        }
+        else
+        {
+            auto file = std::filesystem::path(std::u8string(path.begin(), path.end()));
+            std::error_code error;
+            if (file.is_relative() && !c.workDir.empty() && std::filesystem::exists(c.workDir / file, error)) file = c.workDir / file;
+            std::ifstream in(file, std::ios::binary);
+            if (!in) throw std::runtime_error("Cannot open " + path + ". Give a full path, or one relative to the work directory " + PathText(c.workDir) + ".");
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            if (text.size() > Bridge::kMaxDocument) throw std::runtime_error(path + " is larger than a level spec can be (128 MiB).");
+        }
+        Json spec;
+        try { spec = Json::parse(text); }
+        catch (const Json::parse_error& e) { throw std::runtime_error(path + " is not JSON: " + e.what()); }
+        if (!spec.is_object()) throw std::runtime_error(path + " does not hold a scct.level-spec object.");
+        return spec;
+    }
+
+    // Where each intent tool's arguments go in a scct.level-spec (the
+    // tools' own field lists, IntentTools.cpp; McpSpecToolsTests keeps the
+    // two in step). "" for an argument with no section of its own.
+    inline std::string SpecPointer(const std::string& tool, const std::string& argument)
+    {
+        static const std::map<std::string, std::map<std::string, std::string>> table{
+            {"blockout", {{"pieces", "/geometry/pieces"}, {"doorways", "/geometry/doorways"}, {"vertical", "/geometry/vertical"}, {"brushes", "/geometry/brushes"},
+                          {"surfaces", "/geometry/surfaces"}, {"meshes", "/geometry/meshes"}, {"storeys", "/storeys"}, {"defaults", "/defaults"}}},
+            {"gameplay", {{"spawns", "/spawns"}, {"modes", "/gameplay/modes"}, {"story", "/gameplay/story"}, {"diskhunt", "/gameplay/diskhunt"},
+                          {"deathmatch", "/gameplay/deathmatch"}, {"playerCounts", "/gameplay/playerCounts"}, {"targets", "/gameplay/targets"}}},
+            {"security", {{"alarms", "/security/alarms"}, {"devices", "/security/devices"}, {"camnet", "/security/camnet"}}},
+            {"mechanisms", {{"doors", "/mechanisms/doors"}, {"movers", "/mechanisms/movers"}, {"lifts", "/mechanisms/lifts"}, {"buttons", "/mechanisms/buttons"}}},
+            {"events", {{"links", "/events/links"}, {"magic", "/events/magic"}, {"messages", "/events/messages"}, {"shakers", "/events/shakers"},
+                        {"noises", "/events/noises"}, {"level", "/events/level"}, {"triggerLights", "/events/triggerLights"}}},
+            {"environment", {{"lights", "/environment/lights"}, {"sounds", "/environment/sounds"}, {"zones", "/zones"}, {"volumes", "/environment/volumes"},
+                             {"ingredients", "/environment/ingredients"}, {"objects", "/environment/objects"}, {"meshes", "/geometry/meshes"},
+                             {"vision", "/environment/vision"}, {"props", "/environment/props"}, {"fish", "/environment/fish"}, {"softbody", "/environment/softbody"},
+                             {"animated", "/environment/animated"}, {"tutorials", "/environment/tutorials"}}},
+            {"geometric_events", {{"ges", "/ges"}, {"geTriggers", "/geTriggers"}}},
+            {"map_settings", {{"level", "/level"}, {"interface", "/interface"}, {"mapSettings", "/settings"}, {"settings", "/settings"}, {"modes", "/settings/modes"},
+                              {"mapName", "/settings/mapName"}, {"briefSpy", "/settings/briefSpy"}, {"briefMerc", "/settings/briefMerc"}, {"legend", "/settings/legend"},
+                              {"legendInBrief", "/settings/legendInBrief"}}}};
+        const auto found = table.find(tool);
+        if (found == table.end()) return {};
+        const auto field = found->second.find(argument);
+        return field == found->second.end() ? std::string() : field->second;
+    }
+    // A finding's fix for a spec checked offline (level_spec_validate,
+    // map_validate with spec or path): an intent tool would change the open
+    // map's stored spec and build it, not the document under check, so its
+    // arguments become edits of that document, {spec: [{pointer, merge}]},
+    // merged at each pointer as the intent tools merge (objects field by
+    // field, lists item by item by id). A level_build fix is its note; any
+    // other tool's fix is for the built map and says so (live: true).
+    inline Json SpecFix(const Json& fix)
+    {
+        if (!fix.is_object() || !fix.contains("tool") || !fix.at("tool").is_string()) return fix;
+        const auto tool = fix.at("tool").get<std::string>();
+        const auto args = fix.value("args", Json::object());
+        Json out = Json::object();
+        if (tool == "level_build")
+        {
+            out["spec"] = Json::array();
+            out["note"] = fix.value("note", std::string("Change the spec, then check it again."));
+            return out;
+        }
+        Json edits = Json::array();
+        bool all = args.is_object() && !args.empty();
+        if (args.is_object())
+            for (auto it = args.begin(); it != args.end() && all; ++it)
+            {
+                const auto pointer = SpecPointer(tool, it.key());
+                if (pointer.empty()) { all = false; break; }
+                // Prose instead of a value says what to write there (only
+                // the Map Settings texts are strings themselves).
+                const bool text = pointer.rfind("/settings/", 0) == 0 && pointer != "/settings/modes";
+                if (it.value().is_string() && !text)
+                    edits.push_back({{"pointer", pointer}, {"change", it.value()}});
+                else edits.push_back({{"pointer", pointer}, {"merge", it.value()}});
+            }
+        if (!all)
+        {
+            out = fix;
+            out["live"] = true;
+            out["note"] = fix.value("note", std::string()) + (fix.contains("note") ? " " : "") + "This applies to the map once the spec is built (level_build).";
+            return out;
+        }
+        out["spec"] = edits;
+        if (fix.contains("note")) out["note"] = fix.at("note");
+        return out;
+    }
 
     // ---------------------------------------------------------------- files
     // One section of an INI file (Reloaded_Editor.ini), keys lower-cased.

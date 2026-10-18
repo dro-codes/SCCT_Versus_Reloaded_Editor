@@ -4,6 +4,7 @@
 #include "McpOps.h"
 #include "McpBridge.h"
 #include "McpBridgeModel.h"
+#include "McpSafetyModel.h"
 #include "McpEditor.h"
 #include "WorkflowEditor.h"
 #include "WorkflowTools.h"
@@ -42,6 +43,7 @@ namespace
 {
     namespace Editor = Workflow::Editor;
     namespace Bridge = Mcp::Bridge;
+    namespace Safety = Mcp::Safety;
     namespace fs = std::filesystem;
 
     [[noreturn]] void Invalid(const std::string& message) { throw Bridge::Error(Bridge::Code::Invalid, message); }
@@ -246,35 +248,23 @@ namespace
         if (value.empty() || value.size() > 63 || value.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos)
             Invalid(what + " is 1-63 ASCII letters, digits and underscores: \"" + value + "\".");
     }
-    // The two kinds of package the bridge imports into, the file each saves
-    // to and the name the wiki's Map Packaging page gives it.
-    struct PackageKind { const char* assets; const char* folder; const char* extension; const char* suffix; const char* what; };
-    constexpr PackageKind kTextures{"material", "Textures", ".utx", "_TXT", "Textures"};
-    constexpr PackageKind kMeshes{"staticmesh", "StaticMeshes", ".usx", "_STM", "Static meshes"};
+    // The two kinds of package the bridge imports into (McpSafetyModel.h).
+    using Safety::PackageKind;
+    constexpr const PackageKind& kTextures = Safety::kTextures;
+    constexpr const PackageKind& kMeshes = Safety::kMeshes;
 
-    // A package the bridge may write: the map's own, named <Map>_<anything>
-    // as the wiki's Map Packaging page has it (<Map>_TXT, <Map>_STM). <Map>
-    // itself would clash with the map's package, <Map>-i is written by
-    // interface.texture, and Amb_<Map> holds the map's sounds. No file of
-    // another kind may have its base name.
+    // Packages\<folder>\<file> as text when it exists, for the package rule.
+    std::string ExistingPackageFile(const std::string& folder, const std::string& file)
+    {
+        std::error_code error;
+        const auto path = Root() / "Packages" / folder / file;
+        return fs::exists(path, error) ? Text(path) : std::string();
+    }
+    // A package the bridge may write: the map's own, <Map>_<anything>
+    // (Safety::PackageRefusal says why the others are not).
     void CheckPackage(const std::string& package, const std::string& stem, const PackageKind& kind)
     {
-        if (Same(package, stem + "-i")) Refuse("The interface package is written by interface.texture, through the map save.", "interface_package");
-        Token(package, "A package name");
-        if (!Bridge::MapOwnedPackage(package, stem))
-            Refuse("Only the map's own packages are written over the bridge, never a stock one: name it " + stem + kind.suffix + " (or " + stem + "_<anything>).", "not_map_owned");
-        if (Lower(package).rfind(Lower(stem) + "_", 0) != 0)
-            Refuse(std::string(kind.what) + " go in " + stem + kind.suffix + " (or " + stem + "_<anything>): a package named " + package +
-                   " would clash with the map's own or its sounds, as packages of one base name are one package to the engine.", "package_name");
-        for (const auto& [folder, extension] : std::initializer_list<std::pair<const char*, const char*>>{
-                 {"Textures", ".utx"}, {"Textures", ".utc"}, {"StaticMeshes", ".usx"}, {"Sounds", ".uax"}, {"Animations", ".ukx"}, {"Maps", ".sdc"}, {"MapsEd", ".sdc"}})
-        {
-            if (Same(folder, kind.folder) && Same(extension, kind.extension)) continue;
-            std::error_code error;
-            const auto other = Root() / "Packages" / folder / (package + extension);
-            if (fs::exists(other, error))
-                Refuse(Text(other) + " already has the base name " + package + "; packages of one base name are one package to the engine. Choose another name.", "package_name");
-        }
+        if (const auto refusal = Safety::PackageRefusal(package, stem, kind, ExistingPackageFile)) throw Bridge::Error(refusal.code, refusal.message, refusal.reason);
     }
     // The loaded asset of a kind at exactly this path, or null.
     Json AssetAt(const std::string& path, const char* kind)
@@ -659,6 +649,64 @@ namespace
         return SoundBrowser::BuildUas(stem, packages, static_cast<float>(quality));
     }
 
+    // --------------------------------------- older ops a bridge call reaches --
+
+    // authoring.apply / authoring.preview, as WorkflowTools' chain runs them
+    // (McpOps answers first). Over the pipe a document's texture and save
+    // operations write only the map's own packages: its save replaces
+    // Packages\Textures\<package>.utx, a stock package's included. A load
+    // only reads, so it stays allowed. The preview refuses what the apply
+    // would, so a dry run or the approval window says so first.
+    Json Authoring(const Json& q, bool apply)
+    {
+        auto document = q.at("document");
+        Workflow::Authoring::Rebase(document, Workflow::Authoring::Utf8Path(q.value("baseDirectory", std::string{})));
+        if (Current().call)
+            if (const auto refusal = Safety::DocumentRefusal(document, MapStem(), ExistingPackageFile))
+                throw Bridge::Error(refusal.code, Utf8(refusal.message), refusal.reason);
+        return apply ? Editor::ApplyMapAuthoring(document) : Editor::PreviewMapAuthoring(document);
+    }
+
+    // optimise.release over the pipe: the release copy goes only into
+    // <Game>\Releases, the work folder or [Mcp] WriteRoots (with overwrite it
+    // deletes and rewrites the map's files there), and its asset package is
+    // one of the map's own. Optimise Map Assets' window still takes any folder.
+    Json Release(const Json& q)
+    {
+        if (!Current().call) return Editor::OptimiseRelease(q);
+        const auto stem = NamedMap("the release copy");
+        auto options = q;
+        fs::path folder = Editor::ReleaseFolder(stem);
+        const auto given = q.contains("folder") && !q.at("folder").is_null() ? q.at("folder").get<std::string>() : std::string();
+        if (!given.empty())
+        {
+            folder = Workflow::Authoring::Utf8Path(given);
+            if (folder.is_relative()) Invalid("Give the release folder's full path, such as " + Text(Editor::ReleaseFolder(stem)) + ": " + given);
+        }
+        std::error_code error;
+        auto resolved = fs::weakly_canonical(folder, error);
+        if (error) resolved = folder.lexically_normal();
+        auto roots = McpBridge::WriteRoots();
+        const auto releases = fs::weakly_canonical(Root() / "Releases", error);
+        roots.insert(roots.begin(), error ? (Root() / "Releases").lexically_normal() : releases);
+        if (!Safety::InsideAny(resolved, roots))
+            Refuse("The release copy is written only in the game's Releases folder, the work folder and [Mcp] WriteRoots (" + Safety::RootList(roots) + "), not " + Text(resolved) +
+                       ". Leave folder out for " + Text(Editor::ReleaseFolder(stem)) + ", or ask the user to add the folder to WriteRoots in System\\Reloaded_Editor.ini.",
+                   "outside_write_roots");
+        if (!given.empty())
+        {
+            // Optimise Map Assets reads the folder in the ANSI code page, as its window gives it.
+            std::string ansi;
+            try { ansi = resolved.string(); }
+            catch (const std::exception&) { ansi.clear(); }
+            if (ansi.empty() || fs::path(ansi) != resolved) Invalid("The editor cannot write to " + Text(resolved) + " by name: choose a folder whose path the system's code page can spell.");
+            options["folder"] = ansi;
+        }
+        else options.erase("folder");
+        if (q.value("destination", std::string("map")) != "map") CheckPackage(q.value("assetPackage", std::string()), stem, kMeshes);
+        return Editor::OptimiseRelease(options);
+    }
+
     // ------------------------------------------------- what is not reachable --
 
     Json MapSettingsSteps()
@@ -708,6 +756,9 @@ void RegisterLifecycle()
     Write("interface.texture", InterfaceTexture);
     Write("minimap.apply", [](const Json& q) -> Json { return MinimapWindow::Apply(q); });
     Write("uas.build", BuildUas);
+    Add("authoring.apply", [](const Json& q) -> Json { return Authoring(q, true); });
+    Add("authoring.preview", [](const Json& q) -> Json { return Authoring(q, false); });
+    Write("optimise.release", Release);
 
     // Reflection on objects outside the level is not reachable from here:
     // the editor's property readers only resolve actors in the open level.
