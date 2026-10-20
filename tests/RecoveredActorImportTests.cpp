@@ -442,6 +442,36 @@ int main(int argc, char** argv)
     assert(!Prepare(xboxMap, bad, error, "", {}, {"MyLevel.Xbox0"}));
     assert(error.find("UnexportedXboxCloth") != std::string::npos);
 
+    // Asked to keep Xbox-only actors (map.recover keepXboxOnly), every one
+    // comes back as common content: its root label goes, its nested
+    // components keep theirs, and references to it stay. Nothing is left out.
+    assert(Prepare(mislabeledPc, bad, error, "", {}, {}, true));
+    assert(bad.keptXboxActorCount == 2 && bad.skippedXboxActorCount == 0 && bad.correctedPcActorPlatformCount == 0);
+    assert((bad.keptXboxActorNames == std::vector<std::string>{"Xbox0", "ConsoleEffect"}));
+    assert(bad.skippedXboxActorNames.empty() && bad.clearedXboxActorReferenceCount == 0 && bad.clearedReferenceActorNames.empty());
+    assert(bad.actorsT3d.find("Owner=Trigger'MyLevel.Xbox0'") != std::string::npos);
+    assert(bad.actorsT3d.find("Name=ConsoleEffect") != std::string::npos);
+    assert(bad.actorsT3d.find("MaxParticles=30") != std::string::npos);
+    {
+        // Only Flame0's own label is left.
+        std::size_t labels = 0;
+        for (auto at = bad.actorsT3d.find("Platform=PLF_XBOX_Only"); at != std::string::npos;
+             at = bad.actorsT3d.find("Platform=PLF_XBOX_Only", at + 1)) ++labels;
+        assert(labels == 1);
+    }
+    assert(ComposeSourceMap(bad, kFresh, kGeometry, composed, error));
+    assert(VerifySourceMap(bad, composed, error));
+    // With PC evidence for one, that one is corrected and the other kept.
+    assert(Prepare(mislabeledPc, bad, error, "", {}, {"MyLevel.Xbox0"}, true));
+    assert(bad.correctedPcActorPlatformCount == 1 && bad.keptXboxActorCount == 1 && bad.skippedXboxActorCount == 0);
+    assert((bad.keptXboxActorNames == std::vector<std::string>{"ConsoleEffect"}));
+    // Kept content is checked as PC content is: unsupported data still fails,
+    // and an Xbox-only LevelInfo still cannot define the map.
+    assert(!Prepare(xboxMap, bad, error, "", {}, {}, true));
+    assert(error.find("UnexportedXboxCloth") != std::string::npos);
+    assert(!Prepare(Replace(kRecovered, "Title=\"Recovered test\"",
+        "Title=\"Recovered test\"\nPlatform=PLF_XBOX_Only"), bad, error, "", {}, {}, true));
+
     const auto deletedMap = Replace(Replace(kRecovered,
         "Owner=Trigger'MyLevel.Trigger0'", "Owner=Trigger'MyLevel.Deleted0'"),
         "Event=\"Trigger event\"", "Event=\"Trigger event\"\n"

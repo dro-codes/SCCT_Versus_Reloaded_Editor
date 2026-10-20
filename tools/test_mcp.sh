@@ -35,6 +35,7 @@ suites=(
     "McpBridgeModelTests|tests/McpBridgeModelTests.cpp"
     "McpPlanModelTests|tests/McpPlanModelTests.cpp"
     "McpOpCoverageTests|tests/McpOpCoverageTests.cpp"
+    "McpRecoverModelTests|tests/McpRecoverModelTests.cpp"
     "MapCheckJsonModelTests|tests/MapCheckJsonModelTests.cpp"
     "McpProtocolModelTests|tests/McpProtocolModelTests.cpp"
     "LevelSpecModelTests|tests/LevelSpecModelTests.cpp $W"

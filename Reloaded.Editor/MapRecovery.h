@@ -34,6 +34,10 @@ namespace MapRecovery
         // combine matching surface pieces. Off: only cells sharing whole
         // faces are joined (recovery's earlier behaviour).
         bool mergeGeometry = true;
+        // Keep the compiled map's Xbox-only actors as common content (the PC
+        // game then loads them too) instead of leaving them out; references
+        // to them stay. The report lists each one. Off for the menu command.
+        bool keepXboxOnly = false;
         // Called at every checkpoint on the UI thread; false cancels while
         // MapRecoveryModel::CancelAllowed(stage). May be empty.
         std::function<bool(MapRecoveryModel::Stage, double)> progress;
@@ -61,6 +65,8 @@ namespace MapRecovery
                          const std::filesystem::path& destination,
                          std::string& error, const RecoveryOptions& options,
                          RecoveryOutcome* outcome);
+    // A recovery is running (the menu's, map.recover's or a test's).
+    bool Running();
     bool HandleSaveCommand(UINT commandId);
     constexpr UINT kRecalculateLightingCommandId = 40929;
     constexpr UINT kRecalculateSelectedLightingCommandId = 40930;

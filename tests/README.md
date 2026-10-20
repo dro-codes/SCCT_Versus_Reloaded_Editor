@@ -12,7 +12,11 @@ I3DL2 reverb preset a `ZoneInfo.ZoneEffect` can name — the whole standard set,
 not the presets that happened to turn up in the maps recovered so far, since a
 map-local object whose class is not recognised stops recovery rather than being
 moved to the dependency package. Anything else map-local, an `ESBPatch` among
-them, is still refused.
+them, is still refused. Asked to keep Xbox-only actors (`map.recover`'s
+`keepXboxOnly`), the actor tests check each one comes back as common content,
+its root platform label removed and its nested components' kept, with the
+references to it intact; an Xbox-only LevelInfo and unsupported data still
+fail.
 
 The native recovery harness with `-SourceMap <HELI02.sdc>` additionally checks
 the map's duplicate portal outlines (cooked surfaces 1165 and 1168), recovery,
@@ -808,6 +812,7 @@ and the embed check.
 | `McpBridgeModelTests` | The pipe's framing and limits, the hello handshake and protocol versions, op policies and error codes. |
 | `McpPlanModelTests` | `mcp.plan` checks: section order, `$bind` pointers, single ops wrapped as plans, refused ops. |
 | `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). The bridge's refusals in `Reloaded.Editor/McpSafetyModel.h`: map-owned packages for imports and Map JSON `texture`/`save`, release folders inside `Releases`, the work folder and `WriteRoots`, and `exec`'s deny list read word by word as the console reads it, with its `FILE=`, `PACKAGE=` and one-command rules. The dialog watchdog's button (by control id, translated labels, OK only alone, closed when none is safe). No DLL source calls `std::min`/`std::max` while `windows.h`'s macros are live, and every Level Properties name the level spec compiler writes is one `settings.edit` accepts. |
+| `McpRecoverModelTests` | `map.recover`'s pure part (`Reloaded.Editor/McpRecoverModel.h`): the source and destination a request names (bare names, `Packages\...`, full paths, `..` folded), the compiled-map test `map.open` refuses by, every file a recovery writes and a free name when one is taken, imported packages nothing installed provides, the request's checks, one progress message per change of stage or percent, and the replies (counts, rows capped at `maxRows`, categories, the dry run). Also run by `tools\test_workflow_tools.cmd`. |
 | `MapCheckJsonModelTests` | Map Check rows and summary as JSON (`mapcheck.run`). |
 | `McpProtocolModelTests` | JSON-RPC messages, protocol version negotiation, capabilities, tool and resource JSON, argument checking against schemas. |
 | `McpServerTests` | The server over strings against a FakeBridge: handshake, lists, the session, query and escape tools, resources, prompts, progress, approval, busy and stale replies, cancellation, launch and restart. |
@@ -853,6 +858,23 @@ one Undo step, `undo.call`, `spec.material`, `build.all`, `mapcheck.run`,
 the `map.new`/`map.save`/`map.open` round trip, `design.register`, approval
 (approve, cancel, client cancel, busy while the review is open), Disconnect and
 turning the server off and on.
+
+`-McpRecoverSource <compiled .sdc>` runs `map.recover` over the same pipe
+instead, on a copy of that map in the disposable `Packages\Maps`: `map.open`
+of the compiled file is refused (`compiled_map`); a missing source, a bad
+name, a source in `MapsEd` (`source_map`), a destination whose recovery
+folder is left over (`destination_exists`, with a free name) and unsaved
+changes (`unsaved_changes`) are refused; the dry run, given as the call's
+`dryRun` or in the arguments, lists its checks and writes nothing; a cancel
+sent after the first progress message stops the recovery before it saves,
+leaving a new empty map and none of its files; then the recovery itself, with
+its counts, rows capped at `maxRows`, Recovery.txt, progress messages and the
+map left open and saved, and `map.open` of its playable copy pointing at the
+editable map. A large map takes minutes: raise `-TimeoutSeconds`.
+
+```powershell
+./tools/run_native_map_recovery_test.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpRecoverSource <Game>/Packages/Maps/OffsD.sdc -TimeoutSeconds 3600
+```
 
 The end-to-end run starts the editor through the launcher with `-reMcp` in the
 disposable install (`[Mcp] Enabled=1`, approval, raw commands and Play off), runs

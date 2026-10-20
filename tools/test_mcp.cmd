@@ -17,6 +17,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpOpCoverageTe
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpOpCoverageTests.exe"
 if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpRecoverModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpRecoverModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\McpRecoverModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\MapCheckJsonModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\MapCheckJsonModelTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\MapCheckJsonModelTests.exe"
