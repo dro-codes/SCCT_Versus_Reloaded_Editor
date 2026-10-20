@@ -232,6 +232,21 @@ namespace
         if (!policy) return Fail("The bridge has no op \"" + op + "\". scct://docs/ops lists every op with its policy and arguments.");
         if (policy->policy == Bridge::Policy::Blocked) return Fail(op + " is not available over MCP: it opens editor windows, undoes blindly or skips the staleness checks (scct://docs/ops).");
         if (policy->policy == Bridge::Policy::Raw) return Fail("Console commands go through editor_exec.");
+        // A recovery runs for up to hours and is cancelled when its call times
+        // out, which here is 15 minutes; inside a plan a cancel would not reach
+        // it at all. map_recover checks first, waits long enough and reports
+        // progress.
+        const std::string recover = "map.recover runs through the map_recover tool, which checks first, waits up to 3 hours and reports each stage: "
+                                    "call map_recover {source, name, merge, keepXboxOnly, dryRun} instead.";
+        if (op == "map.recover") return Fail(recover, {{"code", Bridge::Code::Refused}, {"reason", "use_map_recover"}, {"next", Json::array({Next("map_recover", "Recover the compiled map.")})}});
+        if (op == "mcp.plan")
+        {
+            const auto plan = Plan::Parse(args);
+            for (const auto& entry : Plan::Ordered(plan))
+                if (entry.second->op == "map.recover")
+                    return Fail("map.recover cannot run inside a plan (step \"" + entry.second->id + "\"). " + recover,
+                                {{"code", Bridge::Code::Refused}, {"reason", "not_in_plan"}, {"next", Json::array({Next("map_recover", "Recover the compiled map on its own.")})}});
+        }
         const bool dry = DryRun(a);
         const auto label = Label(a, "workflow_request " + op);
         const auto result = op == "mcp.plan" ? RunPlan(c, args, label, dry) : Call(c, op, args, label, dry, 900000);

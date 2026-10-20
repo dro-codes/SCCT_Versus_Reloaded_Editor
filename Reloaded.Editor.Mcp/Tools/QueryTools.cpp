@@ -132,7 +132,7 @@ namespace
         std::string text;
         text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         if (text.size() > 64u * 1024 * 1024) return Fail(PathText(file) + " is larger than a Recovery Report can be.");
-        const auto report = Recovery::Parse(text);
+        const auto report = Recovery::Parse(Recovery::Utf8Text(text));
         std::set<std::string> wanted;
         for (const auto& name : Strings(a, "category")) wanted.insert(Lower(name));
         Json rows = Json::array();
@@ -164,7 +164,13 @@ namespace
         if (!report.summary.empty()) line += "\n" + report.summary;
         if (!tally.empty()) line += "\n" + Recovery::TallyText(tally);
         line += Recovery::RowsText(page);
-        return Ok(out, line);
+        // The text holds the summary, the tally and the rows already: the JSON
+        // after it adds the rest, and structuredContent carries everything.
+        Json rest = out;
+        for (const char* key : {"summary", "categories", "rows"}) rest.erase(key);
+        auto result = Ok(rest, line);
+        result.structured = out;
+        return result;
     }
 
     // ------------------------------------------------------------ map_query

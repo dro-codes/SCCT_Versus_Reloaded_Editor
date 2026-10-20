@@ -20,7 +20,7 @@ namespace Mcp
     {
     public:
         using Handler = std::function<Json(const Json& args, const CallOptions& options)>;
-        struct Received { std::string op; Json args; std::string label; bool dryRun = false; bool expect = false; unsigned timeoutMs = 0; };
+        struct Received { std::string op; Json args; std::string label; bool dryRun = false; bool expect = false; unsigned timeoutMs = 0, busyMs = 0; };
 
         FakeBridge()
         {
@@ -64,7 +64,7 @@ namespace Mcp
             uint64_t id = 0;
             {
                 std::lock_guard<std::mutex> guard(lock);
-                calls.push_back({op, args.is_null() ? Json::object() : args, options.label, options.dryRun, options.expect.set, options.timeoutMs});
+                calls.push_back({op, args.is_null() ? Json::object() : args, options.label, options.dryRun, options.expect.set, options.timeoutMs, options.busyMs});
                 id = ++nextCall;
                 if (!connected) throw Bridge::Error(Bridge::Code::NotConnected, "No editor is connected (FakeBridge).");
                 auto found = scripts.find(op);
