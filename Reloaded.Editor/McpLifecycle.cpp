@@ -332,6 +332,20 @@ namespace
         std::error_code error;
         return fs::exists(path, error);
     }
+    bool ExistsText(const std::string& path) { return Exists(Workflow::Authoring::Utf8Path(path)); }
+    // The files a recovery into the map <stem> would write that exist already.
+    Json TakenOutputs(const std::string& stem)
+    {
+        Json found = Json::array();
+        for (const auto& path : Recover::MustBeFree(Recover::OutputsFor(Text(Root()), stem)))
+            if (ExistsText(path)) found.push_back(path);
+        return found;
+    }
+    // A destination for recovering the map <stem> that nothing uses yet, or "".
+    std::string FreeDestination(const std::string& stem)
+    {
+        return Recover::FreeName(stem, [](const std::string& name) { return !TakenOutputs(name).empty(); });
+    }
 
     // A compiled map (one in Packages\Maps, where every save also writes its
     // playable copy) holds cooked data: MAP LOAD reads it as source data and
@@ -350,10 +364,13 @@ namespace
         if (Exists(source))
         {
             details["source"] = Text(source);
-            message += "Packages\\MapsEd has a map of the same name, normally its editable source: open " + Text(source.filename()) + " with map.open. ";
+            message += "Packages\\MapsEd has a map of the same name, normally its editable source: open " + Text(source.filename()) + " (map.open, or map_file action \"open\"). ";
         }
-        message += "To turn the compiled map itself into an editable one, use map.recover (the map_recover tool), such as {\"source\": \"" + stem +
-                   "\", \"destination\": \"" + stem + "_Recovered\"}.";
+        // Named both ways: map.recover's destination is map_recover's name.
+        const auto spare = FreeDestination(stem);
+        if (!spare.empty()) details["suggestion"] = spare;
+        message += "To turn the compiled map itself into an editable one, recover it (map.recover, or the map_recover tool) with source \"" + stem + "\"" +
+                   (spare.empty() ? std::string(".") : " and the new map's name \"" + spare + "\" (map.recover's destination, map_recover's name).");
         Refuse(message, "compiled_map", details);
     }
 
@@ -370,8 +387,19 @@ namespace
 
     Json OpenMap(const Json& q)
     {
-        const auto file = MapPath(q.at("path").get<std::string>());
+        const auto text = q.at("path").get<std::string>();
+        auto file = MapPath(text);
         std::error_code error;
+        // A bare name ("AquaD") is a .sdc in Packages\MapsEd, as map.recover
+        // reads one; when only Packages\Maps has it, it is a compiled map.
+        if (Recover::Bare(text))
+        {
+            const auto root = Text(Root());
+            file = Workflow::Authoring::Utf8Path(Recover::MapFile(text, root, "MapsEd", "path"));
+            if (!fs::is_regular_file(file, error))
+                if (const auto compiled = Workflow::Authoring::Utf8Path(Recover::MapFile(text, root, "Maps", "path")); fs::is_regular_file(compiled, error))
+                    RefuseCompiled(compiled);
+        }
         if (!fs::is_regular_file(file, error)) Invalid("There is no map file at " + Text(file) + ".");
         if (Lower(Workflow::Authoring::Utf8Text(file.extension())) != ".sdc") Invalid("The editor opens .sdc map files: " + Text(file.filename()));
         RefuseCompiled(file);
@@ -404,6 +432,14 @@ namespace
         const bool sameFile = !current.empty() && UnsavedChanges::SameFile(target.string(), current);
         if (!sameFile && fs::exists(target, error) && !q.value("overwrite", false))
             Refuse(Text(target) + " is another map's file. Pass \"overwrite\": true to save over it (the file it replaces is kept in System\\ReloadedEditor\\Backups).", "exists");
+        // The playable copy every save writes must not replace a compiled
+        // original, which nothing backs up or could make again; overwrite
+        // does not reach it.
+        if (const auto outputs = Recover::OutputsFor(Text(Root()), Text(target.stem())); Recover::ReplacesCompiledOriginal(outputs, ExistsText))
+            Refuse("Saving as " + Text(target.filename()) + " would replace " + outputs.playable +
+                       ", a compiled map with no editable map of that name in Packages\\MapsEd (such as a downloaded map, or the one a recovery came from): every save also "
+                       "writes its playable copy to Packages\\Maps, and that original could not be made again. Choose another name.",
+                   "compiled_original", {{"playable", outputs.playable}});
         RebuildAllMaps::SaveMapTo(EnginePath(target));
         if (!sameFile) Editor::SetMapFile(target.string());
         SyncLibrary();
@@ -493,11 +529,17 @@ namespace
         if (const auto canonical = fs::weakly_canonical(plan.source, error); !error) plan.source = canonical;
         const auto source = Text(plan.source);
         std::error_code same;
-        if (Recover::SourceMapPath(source, root) || fs::equivalent(plan.source.parent_path(), MapsEd(), same))
-            Refuse(source + " is an editable source map (Packages\\MapsEd): open it with map.open instead. Recovery is for compiled maps, such as those in Packages\\Maps.",
+        const bool inMapsEd = Recover::SourceMapPath(source, root) || fs::equivalent(plan.source.parent_path(), MapsEd(), same);
+        // Nothing in the file says which it is, so the folder decides unless
+        // the request says it is a legacy recovered map or a compiled copy.
+        if (inMapsEd && !o.legacy)
+            Refuse(source + " is in Packages\\MapsEd, where editable source maps live: if it is one, open it with map.open (map_file action \"open\"). "
+                       "If it is a legacy recovered map (saved in compiled layout by an older RE+) or a compiled map copied there, recover it with \"legacy\": true, "
+                       "as File > Convert Legacy Recovered Map does.",
                    "source_map", {{"source", source}});
         const auto stem = Text(plan.source.stem());
-        if (Recover::CompiledMapPath(source, root))
+        if (inMapsEd) checks.push_back("source is in Packages\\MapsEd; recovered as a legacy recovered map or compiled copy (File > Convert Legacy Recovered Map)");
+        else if (Recover::CompiledMapPath(source, root))
         {
             checks.push_back("source is a compiled map in Packages\\Maps");
             if (Exists(MapsEd() / plan.source.filename()))
@@ -512,28 +554,28 @@ namespace
         CheckSaveTarget(destination);
         plan.destination = MapsEd() / destination.filename();
         const auto destinationStem = Text(plan.destination.stem());
+        if (!MapRecoveryModel::AssetFileFits(destinationStem))
+            Invalid("The new map's name " + destinationStem + " (map.recover's destination, map_recover's name) is too long: the editor saves the assets a compiled map carries as "
+                    "Packages\\StaticMeshes\\" + MapRecoveryModel::AssetPackageName(destinationStem) +
+                    ".usx, and cannot save a file with that long a name. Use at most 42 characters, 33 when the name starts with a digit.");
         plan.outputs = Recover::OutputsFor(root, destinationStem);
-        auto taken = [&](const std::string& name)
+        if (const auto found = TakenOutputs(destinationStem); !found.empty())
         {
-            Json found = Json::array();
-            for (const auto& path : Recover::MustBeFree(Recover::OutputsFor(root, name)))
-                if (Exists(Workflow::Authoring::Utf8Path(path))) found.push_back(path);
-            return found;
-        };
-        if (const auto found = taken(destinationStem); !found.empty())
-        {
-            const auto spare = Recover::FreeName(stem, [&](const std::string& name) { return !taken(name).empty(); });
+            const auto spare = FreeDestination(stem);
             Json details{{"existing", found}};
             if (!spare.empty()) details["suggestion"] = spare;
-            Refuse("The destination " + destinationStem + " is taken: " + found.front().get<std::string>() + (found.size() > 1 ? " and " + std::to_string(found.size() - 1) + " more" : std::string()) +
-                       " already exist" + (found.size() > 1 ? "" : "s") + ", and recovery never replaces a file. Choose another destination" +
-                       (spare.empty() ? std::string(".") : ", such as \"" + spare + "\"."),
+            Refuse("The new map's name " + destinationStem + " (map.recover's destination, map_recover's name) is taken: " + found.front().get<std::string>() +
+                       (found.size() > 1 ? " and " + std::to_string(found.size() - 1) + " more" : std::string()) + " already exist" + (found.size() > 1 ? "" : "s") +
+                       ", and recovery never replaces a file. Choose another name" + (spare.empty() ? std::string(".") : ", such as \"" + spare + "\"."),
                    "destination_exists", details);
         }
         checks.push_back("destination " + destinationStem + ".sdc and its Maps copy, recovery folder and asset package are all free");
-        if (!AnsiPath(plan.source) || !AnsiPath(plan.destination) || !AnsiPath(Workflow::Authoring::Utf8Path(plan.outputs.folder)))
-            Invalid("The editor cannot recover between these paths: it hands them to its console in the system's code page, which cannot spell " +
-                    (AnsiPath(plan.source) ? Text(plan.destination.parent_path()) : source) + ".");
+        // The source is only copied, through wide calls, into the recovery
+        // folder: the engine is handed that copy and the outputs.
+        const auto folder = Workflow::Authoring::Utf8Path(plan.outputs.folder);
+        if (!AnsiPath(plan.destination) || !AnsiPath(folder))
+            Invalid("The editor cannot recover into these paths: it hands them to its console in the system's code page, which cannot spell " +
+                    Text(AnsiPath(plan.destination) ? folder : plan.destination.parent_path()) + ".");
 
         // Unsaved work: recovery starts with a new map, which would lose it.
         RefuseUnsaved(q, "recover a map (recovery starts with a new map)");
@@ -553,7 +595,7 @@ namespace
                        ". Install " + (missing.size() > 1 ? "them" : "it") + " (textures in Packages\\Textures, static meshes in Packages\\StaticMeshes, sounds in Packages\\Sounds, scripts in System), then try again.",
                    "missing_packages", {{"missing", missing}});
         }
-        checks.push_back(std::to_string(imports.size()) + " imported packages, each installed or supplied by the game (their own imports are not checked)");
+        checks.push_back(std::to_string(imports.size()) + " packages the map imports directly, each installed or supplied by the game (the packages those import are not checked)");
         checks.push_back(o.merge ? "geometry merging on (File > Merge Recovered Geometry)" : "geometry merging off: only cells sharing whole faces are joined");
         checks.push_back(o.keepXboxOnly ? "Xbox-only actors are kept as common content" : "Xbox-only actors are left out (keepXboxOnly keeps them)");
 
@@ -628,7 +670,7 @@ namespace
             auto details = at;
             Json left = Json::array();
             for (const auto& path : Recover::MustBeFree(plan.outputs))
-                if (Exists(Workflow::Authoring::Utf8Path(path))) left.push_back(path);
+                if (ExistsText(path)) left.push_back(path);
             details["left"] = left;
             if (!outcome.folder.empty() && Exists(outcome.folder)) details["folder"] = Text(outcome.folder);
             throw Bridge::Error(Bridge::Code::EditorError, Utf8(error), "recovery_failed", details);

@@ -3312,6 +3312,14 @@ namespace
             error = "The recovery asset package already exists. Choose a new map name.";
             return false;
         }
+        // Checked before any work: the embedded assets are only saved after
+        // loading and rebuilding, and the name a failure leaves is taken.
+        const auto relativeAssetPath = std::filesystem::relative(assetPackagePath, ExecutableDirectory()).string();
+        if (relativeAssetPath.size() >= MapRecoveryModel::kAssetPathLimit)
+        {
+            error = "The recovery asset filename is too long for the editor. Choose a shorter map name (at most 42 characters, 33 when it starts with a digit).";
+            return false;
+        }
         void* editor = *reinterpret_cast<void**>(kGEditor);
         void* output = *reinterpret_cast<void**>(kGWarn);
         if (!editor || !output)
@@ -3628,12 +3636,6 @@ namespace
                     // Save the selectively loaded assets into a clean package. The
                     // scratch input also contains the old cooked level; whole-package
                     // browser loads must never encounter that level in the dependency.
-                    const auto relativeAssetPath = std::filesystem::relative(assetPackagePath, ExecutableDirectory()).string();
-                    if (relativeAssetPath.size() >= 79)
-                    {
-                        error = "The recovery asset filename is too long for the editor. Choose a shorter map name.";
-                        return false;
-                    }
                     created.assetPackage = assetPackagePath;
                     if (!exec("OBJ SAVEPACKAGE PACKAGE=\"" + assetPackageName + "\" FILE=\"" + relativeAssetPath + "\"")
                         || !std::filesystem::is_regular_file(assetPackagePath))

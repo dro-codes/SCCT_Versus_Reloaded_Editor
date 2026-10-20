@@ -96,6 +96,16 @@ namespace MapRecoveryModel
         if (name.front() >= '0' && name.front() <= '9') name.insert(0, "Recovery_");
         return name;
     }
+    // OBJ SAVEPACKAGE is handed that package's file relative to System,
+    // "..\Packages\StaticMeshes\<name>.usx", which must stay under 79
+    // characters: a recovered map's name is at most 42 characters, 33 when
+    // it starts with a digit.
+    constexpr size_t kAssetPathLimit = 79;
+    inline size_t AssetPathLength(const std::string& stem)
+    {
+        return std::string("..\\Packages\\StaticMeshes\\").size() + AssetPackageName(stem).size() + std::string(".usx").size();
+    }
+    inline bool AssetFileFits(const std::string& stem) { return AssetPathLength(stem) < kAssetPathLimit; }
 
     // Saving writes the playable and source maps; from there on a cancel
     // would leave files the user did not ask for, so the stage runs to the end.

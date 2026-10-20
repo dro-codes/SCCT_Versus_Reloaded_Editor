@@ -46,6 +46,9 @@ void Names()
     Check(R::MapFile("OffsD.utx",kRoot,"Maps","source")==maps+"OffsD.utx","a bare name keeps the extension it has (the caller refuses it)");
     Check(R::MapFile("Packages\\Maps\\OffsD.sdc",kRoot,"MapsEd","source")==maps+"OffsD.sdc","Packages\\... is relative to the game folder");
     Check(R::SamePath(R::MapFile("packages/maps/OffsD.sdc",kRoot,"MapsEd","source"),maps+"OffsD.sdc"),"without case and with forward slashes");
+    // map.open reads a bare name as a map in MapsEd, and failing that as a compiled one in Maps.
+    Check(R::Bare("AquaD") && R::Bare("AquaD.sdc") && !R::Bare("MapsEd\\AquaD.sdc") && !R::Bare("x/AquaD") && !R::Bare("C:AquaD"),"bare names");
+    Check(R::MapFile("AquaD",kRoot,"MapsEd","path")==mapsEd+"AquaD.sdc" && R::MapFile("AquaD",kRoot,"Maps","path")==maps+"AquaD.sdc","a bare name in either folder");
     Check(R::MapFile("D:\\Backups\\OffsD.sdc",kRoot,"Maps","source")=="D:\\Backups\\OffsD.sdc","a full path stays as it is");
     Check(R::MapFile("Packages\\..\\..\\Elsewhere\\X.sdc",kRoot,"Maps","source")=="C:\\Games\\Elsewhere\\X.sdc",".. is folded before the folder tests see the path");
     for(const char* bad:{"","Maps\\OffsD.sdc","C:OffsD.sdc","Off\"sD","Offs*D","..","Off\nsD"})
@@ -75,12 +78,35 @@ void Outputs()
     Check(R::OutputsFor(kRoot,"2Fort").assets.find("Recovery_2Fort_Assets.usx")!=std::string::npos,"a leading digit, as MapRecovery names it");
     const auto mustBeFree=R::MustBeFree(out);
     Check(mustBeFree.size()==4 && mustBeFree[0]==out.map && mustBeFree[1]==out.playable && mustBeFree[2]==out.folder && mustBeFree[3]==out.assets,"every file a recovery writes must be free");
+    // A save writes the map's playable copy, which must not replace a compiled-only map.
+    {
+        const auto aqua=R::OutputsFor(kRoot,"AquaD");
+        std::set<std::string> files{aqua.playable};
+        auto exists=[&](const std::string& path){return files.count(path)!=0;};
+        Check(R::ReplacesCompiledOriginal(aqua,exists),"a compiled map with no MapsEd twin is an original a save would replace");
+        files.insert(aqua.map);
+        Check(!R::ReplacesCompiledOriginal(aqua,exists),"a stock map's compiled copy is its own source's, which every save rewrites");
+        files={aqua.map};
+        Check(!R::ReplacesCompiledOriginal(aqua,exists),"no compiled copy yet: nothing to replace");
+        files.clear();
+        Check(!R::ReplacesCompiledOriginal(aqua,exists),"a new map");
+    }
+    // The asset package's file, relative to System, stays under 79 characters.
+    Check(MapRecoveryModel::AssetPathLength("OffsR")==std::string("..\\Packages\\StaticMeshes\\OffsR_Assets.usx").size(),"the asset package's path as the editor is handed it");
+    Check(MapRecoveryModel::AssetFileFits(std::string(42,'a')) && !MapRecoveryModel::AssetFileFits(std::string(43,'a')),"42 characters at most");
+    Check(MapRecoveryModel::AssetFileFits("2"+std::string(32,'a')) && !MapRecoveryModel::AssetFileFits("2"+std::string(33,'a')),"33 when it starts with a digit (Recovery_)");
     Check(R::MapName("OffsR") && R::MapName("A_1") && !R::MapName("Offs R") && !R::MapName("") && !R::MapName(std::string(61,'a')),"map names");
     std::set<std::string> taken{"OffsD_Recovered","OffsD_Recovered_2"};
     auto isTaken=[&](const std::string& name){return taken.count(name)!=0;};
     Check(R::FreeName("OffsD",isTaken)=="OffsD_Recovered_3","the first free name, as the menu picks it");
     Check(R::FreeName("Offs D",isTaken)=="Offs_D_Recovered","a stem the editor cannot name a map after is made one");
     Check(R::MapName(R::FreeName(std::string(80,'x'),isTaken)),"a long stem is cut to fit");
+    for(const auto& stem:{std::string(80,'x'),"9"+std::string(80,'x')})
+    {
+        int seen=0;
+        const auto last=R::FreeName(stem,[&](const std::string&){return ++seen<1000;});
+        Check(last.size()>15 && last.substr(last.size()-15)=="_Recovered_1000" && MapRecoveryModel::AssetFileFits(last),"even its thousandth name leaves the asset package a name the editor saves");
+    }
     Check(R::FreeName("X",[](const std::string&){return true;}).empty(),"none free: none");
 }
 
@@ -100,16 +126,16 @@ void Options()
 {
     const Json minimal{{"source","OffsD"},{"destination","OffsR"}};
     auto o=R::ReadOptions(minimal,true);
-    Check(o.source=="OffsD" && o.destination=="OffsR" && o.merge && !o.keepXboxOnly && !o.discard && o.maxRows==200,"defaults");
+    Check(o.source=="OffsD" && o.destination=="OffsR" && o.merge && !o.keepXboxOnly && !o.discard && !o.legacy && o.maxRows==200,"defaults");
     Check(!R::ReadOptions(minimal,false).merge,"merge defaults to File > Merge Recovered Geometry");
-    auto full=minimal;full["merge"]=false;full["keepXboxOnly"]=true;full["discard"]=true;full["maxRows"]=0;full["op"]="map.recover";full["dryRun"]=true;
+    auto full=minimal;full["merge"]=false;full["keepXboxOnly"]=true;full["discard"]=true;full["legacy"]=true;full["maxRows"]=0;full["op"]="map.recover";full["dryRun"]=true;
     o=R::ReadOptions(full,true);
-    Check(!o.merge && o.keepXboxOnly && o.discard && o.maxRows==0,"every option");
+    Check(!o.merge && o.keepXboxOnly && o.discard && o.legacy && o.maxRows==0,"every option");
     full["maxRows"]=2000;Check(R::ReadOptions(full,true).maxRows==2000,"2000 rows at most");
     auto nulls=minimal;nulls["merge"]=nullptr;nulls["maxRows"]=nullptr;
     Check(R::ReadOptions(nulls,true).merge && R::ReadOptions(nulls,true).maxRows==200,"null is the default");
     std::vector<Json> bad{Json::array(),Json{{"source","OffsD"}},Json{{"destination","OffsR"}},Json{{"source",1},{"destination","OffsR"}}};
-    for(auto [key,value]:std::vector<std::pair<const char*,Json>>{{"merge","yes"},{"keepXboxOnly",1},{"discard","true"},{"maxRows",-1},{"maxRows",2001},{"maxRows",1.5},{"maxRows","10"}})
+    for(auto [key,value]:std::vector<std::pair<const char*,Json>>{{"merge","yes"},{"keepXboxOnly",1},{"discard","true"},{"legacy","yes"},{"maxRows",-1},{"maxRows",2001},{"maxRows",1.5},{"maxRows","10"}})
     {auto request=minimal;request[key]=value;bad.push_back(request);}
     for(const auto& request:bad)Check(Code([&]{R::ReadOptions(request,true);})==Bridge::Code::Invalid,"a request of the wrong shape is invalid");
 }
@@ -165,6 +191,7 @@ void Replies()
     Check(dry.at("dryRun")==true && dry.at("source")==done.source && dry.at("destination")==done.file && dry.at("merge")==false && dry.at("keepXboxOnly")==true,"the dry run says what would run");
     Check(dry.at("imports")==12 && dry.at("missing")==Json::array() && dry.at("sourceBytes")==123456789 && dry.at("checks").size()==1,"and what it checked");
     Check(dry.at("note").get<std::string>().find("OffsD.sdc into OffsR.sdc")!=std::string::npos,"its note, for the approval window's row");
+    Check(dry.at("note").get<std::string>().find("Only the packages the map imports directly were checked")!=std::string::npos,"which says the packages those import are not checked");
 }
 
 void Policies()

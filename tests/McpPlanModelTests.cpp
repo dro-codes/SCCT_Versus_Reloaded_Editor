@@ -82,9 +82,29 @@ void Single()
     Plan::Check(Plan::Single("authoring.apply",Document({"load","create"}),""));
     Check(!Plan::Mutates(Plan::Parse({{"post",{Step("q","actors.query")}}})) && Plan::Mutates(Plan::Parse(edit)),"mutates");
 }
+// map.recover runs only as its own call: a client's plan holding it is
+// refused by the bridge, while the bridge's own one-step plan of the call is
+// checked as any plan.
+void Alone()
+{
+    const Json recover{{"source","OffsD"},{"destination","OffsR"}};
+    const auto single=Plan::Single("map.recover",recover,"");
+    Check(single.contains("pre"),"map.recover's own call is a plan of one step in pre");
+    Plan::Check(single);
+    for(const char* section:{"pre","post"})
+    {
+        const Json plan{{section,{Step("r","map.recover",recover)}},{"steps",{Step("q","actors.query")}}};
+        Plan::Check(plan);
+        const auto refusal=Plan::NotInPlan(Plan::Parse(plan));
+        Check(refusal.find("map.recover cannot run inside a plan")==0 && refusal.find("step \"r\" in "+std::string(section))!=std::string::npos
+              && refusal.find("map_recover")!=std::string::npos,"a client's plan holding map.recover is refused, naming the step and the tool");
+    }
+    Check(!Plan::NotInPlan(Plan::Parse({{"pre",{Step("r","map.recover",recover)}}})).empty(),"even alone in a client's plan, which cannot cancel it");
+    Check(Plan::NotInPlan(Plan::Parse({{"pre",{Step("o","map.open")}},{"post",{Step("s","map.save")}}})).empty(),"other file ops run in plans as before");
+}
 int main()
 {
-    try{Parsing();Policies();Ordering();Binding();Single();}
+    try{Parsing();Policies();Ordering();Binding();Single();Alone();}
     catch(const std::exception& e){std::cerr<<"MCP plan model tests failed: "<<e.what()<<"\n";return 1;}
     std::cout<<"MCP plan model tests passed\n";
 }
