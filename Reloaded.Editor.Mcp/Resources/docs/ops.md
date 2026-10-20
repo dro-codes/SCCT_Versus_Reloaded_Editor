@@ -151,8 +151,9 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 ## File
 
 - `map.new` {discard} → editor.state
-- `map.open` {path, discard} → editor.state
+- `map.open` {path, discard} → editor.state; a compiled map in Packages\Maps is refused as compiled_map (use `map.recover`)
 - `map.save` {path, overwrite} → {file}
+- `map.recover` {source, destination, merge, keepXboxOnly, discard, maxRows} → {ok, file, source, merge, keepXboxOnly, seconds, summary, counts, categories, rows, rowsTotal, report, folder}; a dry run → {dryRun, source, destination, merge, keepXboxOnly, imports, missing, sourceBytes, checks}. Never in a plan; progress {stage, stageIndex, percent}; cancellable until it saves. Refused: source_map, destination_exists, unsaved_changes, missing_packages (details.missing), busy
 - `asset.texture` {file, package, group, name, format, mips, masked, alphaTexture, lodSet}: the map's own package only
 - `asset.mesh` {file (.ase), package, group, name, collision}: the map's own package only
 - `package.save` {package, overwrite}: the map's own package only

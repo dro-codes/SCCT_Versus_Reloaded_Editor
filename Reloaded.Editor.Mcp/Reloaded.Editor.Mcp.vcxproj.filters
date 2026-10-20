@@ -62,6 +62,7 @@
     <ClInclude Include="McpTool.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Media.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PlanRender.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="RecoveryReportModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="resource.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Tools\Common.h"><Filter>Header Files\Tools</Filter></ClInclude>
     <ClInclude Include="Importers\Authoring.h"><Filter>Header Files\Importers</Filter></ClInclude>

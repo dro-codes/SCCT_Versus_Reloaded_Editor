@@ -168,6 +168,7 @@
     <ClInclude Include="McpTool.h" />
     <ClInclude Include="Media.h" />
     <ClInclude Include="PlanRender.h" />
+    <ClInclude Include="RecoveryReportModel.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Tools\Common.h" />
     <ClInclude Include="Importers\Authoring.h" />

@@ -178,7 +178,7 @@ namespace Mcp
     }
 
     // Each Tools/*.cpp contributes its part; Register calls them all.
-    void RegisterSessionTools(Registry&);  // editor_status, editor_launch, editor_restart, editor_undo, approval_wait, editor_log, map_file, map_build
+    void RegisterSessionTools(Registry&);  // editor_status, editor_launch, editor_restart, editor_undo, approval_wait, editor_log, map_file, map_recover, map_build
     void RegisterQueryTools(Registry&);    // map_query, view_screenshot, plan_render
     void RegisterValidateTools(Registry&); // map_validate
     void RegisterSpecTools(Registry&);     // level_spec_validate, level_build

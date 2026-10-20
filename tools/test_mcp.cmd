@@ -69,6 +69,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpServerTests.
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpServerTests.exe"
 if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpRecoverToolsTests.cpp Reloaded.Editor.Mcp\McpServer.cpp Reloaded.Editor.Mcp\Resources.cpp Reloaded.Editor.Mcp\BridgeClient.cpp Reloaded.Editor.Mcp\Tools\SessionTools.cpp Reloaded.Editor.Mcp\Tools\QueryTools.cpp Reloaded.Editor.Mcp\Tools\EscapeTools.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpRecoverToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\McpRecoverToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpSpecToolsTests.cpp Reloaded.Editor.Mcp\Tools\SpecTools.cpp Reloaded.Editor.Mcp\Tools\IntentTools.cpp Reloaded.Editor.Mcp\Tools\ValidateTools.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpSpecToolsTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpSpecToolsTests.exe"

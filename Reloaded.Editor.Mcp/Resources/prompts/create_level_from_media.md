@@ -41,6 +41,8 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 
 ## Recipe
 
+0. **Is it already an SCCT Versus map?** If the footage shows one of the game's own maps (or a custom Versus map the user has), do not rebuild it from frames: use the game's file. A source map in `Packages\MapsEd` opens with `map_file` `action:"open"`; a compiled one in `Packages\Maps` becomes editable with `map_recover` (the `recover_map` prompt walks through it). Use the frames only to check the result.
+
 1. **Connect.** Call `editor_status`; use `editor_launch` if no editor is running. If the open map has unsaved work, ask the user before `map_file` with `action:"new"`.
 
 2. **Get frames (video).** Call `media_extract_frames` on the video.
