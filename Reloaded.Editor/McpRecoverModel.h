@@ -99,6 +99,9 @@ namespace Mcp::Recover
 
     inline std::string Packages(const std::string& root, const char* folder) { return Join(Join(root, "Packages"), folder); }
 
+    // A bare stem or file name ("OffsD", "OffsD.sdc"): no folder or drive.
+    inline bool Bare(const std::string& text) { return text.find_first_of("\\/:") == std::string::npos; }
+
     // A map file a request names: a bare stem or file name ("OffsD",
     // "OffsD.sdc") is in Packages\<folder>; a path starting with Packages is
     // relative to the game folder; anything else must be a full path. what
@@ -110,8 +113,7 @@ namespace Mcp::Recover
         for (unsigned char c : text)
             if (c < 0x20 || c == '"' || c == '*' || c == '?' || c == '<' || c == '>' || c == '|')
                 throw Bridge::Error(Bridge::Code::Invalid, what + " has a character a file name cannot hold" + example);
-        const bool bare = text.find_first_of("\\/:") == std::string::npos;
-        if (bare)
+        if (Bare(text))
         {
             if (text == "." || text == "..") throw Bridge::Error(Bridge::Code::Invalid, what + " names a map file" + example);
             return Join(Packages(root, folder), Extension(text).empty() ? text + ".sdc" : text);
@@ -150,6 +152,14 @@ namespace Mcp::Recover
     // compiled copy and the asset package; a recovery folder is the earlier
     // attempt a failed run keeps for inspection.
     inline std::vector<std::string> MustBeFree(const Outputs& out) { return {out.map, out.playable, out.folder, out.assets}; }
+    // Whether saving the map <stem> would replace a compiled original: the
+    // save also writes Packages\Maps\<stem>.sdc, and one there with no
+    // Packages\MapsEd\<stem>.sdc beside it is a compiled-only map (one
+    // downloaded, or a recovery's source) that no save could make again.
+    inline bool ReplacesCompiledOriginal(const Outputs& out, const std::function<bool(const std::string&)>& exists)
+    {
+        return exists(out.playable) && !exists(out.map);
+    }
 
     // A map file name the editor and map.save take: ASCII letters, digits and
     // underscores, at most 60 (McpLifecycle.cpp CheckSaveTarget).
@@ -159,13 +169,14 @@ namespace Mcp::Recover
     }
     // A free destination stem, as File > Recover Compiled Map picks one:
     // <source>_Recovered, then _Recovered_2, _3 ... "" when none of the first
-    // thousand is free.
+    // thousand is free. The source's part is cut so that every one of them
+    // leaves the asset package a file name the editor can save.
     inline std::string FreeName(const std::string& sourceStem, const std::function<bool(const std::string&)>& taken)
     {
         std::string base;
         for (char c : sourceStem) base += MapName(std::string(1, c)) ? c : '_';
         if (base.empty()) base = "Map";
-        base = base.substr(0, 60 - std::string("_Recovered_1000").size());
+        while (base.size() > 1 && !MapRecoveryModel::AssetFileFits(base + "_Recovered_1000")) base.pop_back();
         for (int index = 1; index <= 1000; ++index)
         {
             const auto name = base + "_Recovered" + (index > 1 ? "_" + std::to_string(index) : std::string());
@@ -201,11 +212,14 @@ namespace Mcp::Recover
     }
 
     // The request: map.recover {source, destination, merge, keepXboxOnly,
-    // discard, maxRows}. mergeDefault is File > Merge Recovered Geometry.
+    // discard, legacy, maxRows}. mergeDefault is File > Merge Recovered
+    // Geometry; legacy takes a source in Packages\MapsEd, as File > Convert
+    // Legacy Recovered Map does (a map older RE+ builds saved in compiled
+    // layout, or a compiled map copied there).
     struct Options
     {
         std::string source, destination;
-        bool merge = true, keepXboxOnly = false, discard = false;
+        bool merge = true, keepXboxOnly = false, discard = false, legacy = false;
         int maxRows = 200;
     };
     inline Options ReadOptions(const Json& q, bool mergeDefault)
@@ -216,7 +230,7 @@ namespace Mcp::Recover
         if (!q.is_object()) invalid("its arguments are an object.");
         for (const char* key : {"source", "destination"})
             if (!q.contains(key) || !q.at(key).is_string())
-                invalid(std::string(key) + " is required text: source is the compiled map (\"OffsD\" for Packages\\Maps\\OffsD.sdc), destination the new map (\"OffsR\" for Packages\\MapsEd\\OffsR.sdc).");
+                invalid(std::string(key) + " is required text: source is the compiled map (\"OffsD\" for Packages\\Maps\\OffsD.sdc), destination (map_recover's name) the new map (\"OffsR\" for Packages\\MapsEd\\OffsR.sdc).");
         o.source = q.at("source").get<std::string>();
         o.destination = q.at("destination").get<std::string>();
         auto flag = [&](const char* key, bool& value)
@@ -228,6 +242,7 @@ namespace Mcp::Recover
         flag("merge", o.merge);
         flag("keepXboxOnly", o.keepXboxOnly);
         flag("discard", o.discard);
+        flag("legacy", o.legacy);
         if (q.contains("maxRows") && !q.at("maxRows").is_null())
         {
             const auto& rows = q.at("maxRows");
@@ -311,6 +326,7 @@ namespace Mcp::Recover
         return {{"dryRun", true}, {"source", c.source}, {"destination", c.destination}, {"merge", c.merge}, {"keepXboxOnly", c.keepXboxOnly},
                 {"imports", c.imports}, {"missing", Json::array()}, {"sourceBytes", c.sourceBytes}, {"checks", c.checks},
                 {"note", "Recovers " + Leaf(c.source) + " into " + Leaf(c.destination) + (c.merge ? " (merging geometry)" : " (no merging)") +
-                             ". It starts with a new map, so the open map is replaced; nothing was changed by this dry run."}};
+                             ". It starts with a new map, so the open map is replaced; nothing was changed by this dry run. Only the packages the map imports directly"
+                             " were checked: one that a package of those needs and that is not installed can still stop the load at a dialog."}};
     }
 }

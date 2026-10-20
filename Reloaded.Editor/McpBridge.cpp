@@ -268,6 +268,19 @@ namespace
         }
         catch (const std::exception&) { return false; } // mcp.plan itself says what is wrong.
     }
+    // A client's plan holding an op that runs only as its own call.
+    void RefuseNotInPlan(const Json& args)
+    {
+        std::string refusal;
+        try
+        {
+            Json plan = args;
+            plan.erase("op");
+            refusal = Plan::NotInPlan(Plan::Parse(plan));
+        }
+        catch (const std::exception&) { return; } // mcp.plan itself says what is wrong.
+        if (!refusal.empty()) throw Bridge::Error(Bridge::Code::Refused, refusal, "not_in_plan");
+    }
 
     // The call in the bridge, and the frames waiting for the pipe thread.
     enum class Stage { Queued, Running, Approval };
@@ -694,6 +707,7 @@ namespace
                 throw Bridge::Error(Bridge::Code::Refused, "Raw editor commands are off. The user can allow them with [Mcp] AllowRawExec=1 in Reloaded_Editor.ini.", "raw_exec_off");
             if (call->op == "play.level" && !current.allowPlay)
                 throw Bridge::Error(Bridge::Code::Refused, "Play Level over the bridge is off. The user can allow it with [Mcp] AllowPlay=1 in Reloaded_Editor.ini.", "play_off");
+            if (call->op == "mcp.plan") RefuseNotInPlan(call->args);
             if (call->op == "mcp.plan" && ReadOnlyPlan(call->args)) call->policy = &kReadPlan;
             std::optional<Json> answer;
             {
