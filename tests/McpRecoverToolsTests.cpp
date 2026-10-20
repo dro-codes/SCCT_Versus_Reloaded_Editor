@@ -301,6 +301,12 @@ void Refusals()
     Check(Contains(Text(unsaved),"MAP NEW") && Contains(Text(unsaved),"discard: true") && Structured(unsaved).at("next")[0].at("tool")=="map_file","unsaved changes");
     auto sourceMap=refuse(Bridge::Code::Refused,"OffsD.sdc is in Packages\\MapsEd.","source_map");
     Check(Contains(Text(sourceMap),"map_file action:\"open\"") && Structured(sourceMap).at("next")[0].at("args").at("path")=="OffsD","a source map is opened, not recovered");
+    Check(Structured(sourceMap).at("next")[1].at("tool")=="map_recover" && Structured(sourceMap).at("next")[1].at("args").at("legacy")==true && Contains(Text(sourceMap),"legacy: true"),
+          "a legacy recovered map in MapsEd is offered legacy: "+Text(sourceMap));
+    // legacy reaches the editor, in the preflight and the run.
+    h.fake.Clear("map.recover");
+    h.fake.On("map.recover",[](const Json& a,const CallOptions& o)->Json{Check(a.value("legacy",false),"legacy is passed on");return o.dryRun?Preflight(a):Recovered(a);});
+    Check(h.Call("map_recover",{{"source","Packages\\MapsEd\\OldR.sdc"},{"name","OldR2"},{"legacy",true}}).at("isError")==false,"a legacy recovery runs");
     auto busy=refuse(Bridge::Code::Busy,"A map recovery is running.","rebuild");
     Check(Contains(Text(busy),"Rebuild All Maps") && Structured(busy).at("next")[0].at("tool")=="editor_status" && Structured(busy).at("retryable")==true,"a running recovery");
     Check(Contains(Text(busy),"before anything ran") && Contains(Text(busy),"Nothing was started"),"the preflight says nothing ran: "+Text(busy));
@@ -435,6 +441,11 @@ void OpenCompiled()
     const auto& twinNext=Structured(twin).at("next");
     Check(twin.at("isError")==true && Contains(Text(twin),"original editable source") && twinNext.size()==2 && twinNext[0].at("tool")=="map_file" &&
           twinNext[0].at("args").at("path")==PathText(h.dir/"Packages"/"MapsEd"/"OffsD.sdc") && twinNext[1].at("tool")=="map_recover","the MapsEd source is offered first: "+Text(twin));
+    // Saving under a compiled-only map's name is refused by the editor; the tool offers another name.
+    h.fake.Fail("map.save",Bridge::Code::Refused,"OffsD.sdc would replace Packages\\Maps\\OffsD.sdc, a compiled map with no editable map of that name. Choose another name.","compiled_original");
+    auto keep=h.Call("map_file",{{"action","save_as"},{"path","OffsD.sdc"}});
+    Check(keep.at("isError")==true && Structured(keep).at("reason")=="compiled_original" && Structured(keep).at("next")[0].at("args").at("path")=="OffsD_Edit.sdc",
+          "a compiled original is never saved over: "+Text(keep));
     h.fake.Clear("map.open");
     h.fake.On("map.open",Harness::State(false,"C:\\Game\\Packages\\MapsEd\\OffsD.sdc"));
     const auto opens=h.fake.Count("map.open");

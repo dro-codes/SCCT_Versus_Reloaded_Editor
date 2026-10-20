@@ -313,7 +313,7 @@ checked in full, with the JSON pointer of any problem.
 | `approval_wait` | Keeps waiting for the review window: `ticket` (required), `timeoutSeconds` (default 50). |
 | `editor_log` | The editor's log (last 2,000 lines): `level` (all, warning, error), `contains`, `since`, `newOnly`, `max`. Read-only. |
 | `map_file` | `action`: `new`, `open`, `save` or `save_as`. `path` (a bare name such as `AquaD` is looked up in `Packages\MapsEd`), `mapName` (save_as names the file after its first four letters plus `D`), `discardUnsaved`, `overwrite`. A compiled map (`Packages\Maps`) is refused as `refused` / `compiled_map`, with the `map_recover` call to use instead. |
-| `map_recover` | **File > Recover Compiled Map**: a compiled `.sdc` (`source`) into an editable map in `Packages\MapsEd` (`name`, default `<source>_Recovered`). `merge`, `keepXboxOnly`, `discard`, `maxRows`. Checks first, reports progress, can be cancelled until it saves, and returns the Recovery Report. See [Recovering compiled maps](#recovering-compiled-maps). |
+| `map_recover` | **File > Recover Compiled Map**: a compiled `.sdc` (`source`) into an editable map in `Packages\MapsEd` (`name`, default `<source>_Recovered`). `merge`, `keepXboxOnly`, `legacy`, `discard`, `maxRows`. Checks first, reports progress, can be cancelled until it saves, and returns the Recovery Report. See [Recovering compiled maps](#recovering-compiled-maps). |
 | `map_build` | `what`: `geometry` (default, as Build Geometry) or `all` (the full build with lighting, without the Lighting Budget question); then Map Check (`check`, default true). |
 
 ### Inspect
@@ -413,7 +413,9 @@ Compiled Map** (see the [README](../README.md)) without its dialogs:
   (`destination_exists`).
 - **`merge`**: join the compiled BSP's fragments into fewer brushes (default:
   **File > Merge Recovered Geometry**). **`keepXboxOnly`**: keep the Xbox-only
-  actors as common content instead of leaving them out. **`discard`**: drop the
+  actors as common content instead of leaving them out. **`legacy`**: the source
+  is in `Packages\MapsEd` but is a legacy recovered map or a compiled copy (File
+  > Convert Legacy Recovered Map; otherwise `source_map`). **`discard`**: drop the
   open map's unsaved changes (recovery starts with a new map; otherwise
   `unsaved_changes`). **`maxRows`**: report rows in the result (default 200).
 
@@ -533,7 +535,7 @@ Arguments of the ops made for the MCP server (the others take the shapes
 - `map.new {discard}`, `map.open {path, discard}`, `map.save {path,
   overwrite}`, `build.all {}`, `editor.quit {discard}`. `map.open` refuses a
   compiled map in `Packages\Maps` (`refused` / `compiled_map`).
-- `map.recover {source, destination, merge, keepXboxOnly, discard, maxRows}`:
+- `map.recover {source, destination, merge, keepXboxOnly, legacy, discard, maxRows}`:
   only on its own, cancellable while it runs. `workflow_request` refuses it
   (`use_map_recover`: `map_recover` runs it), and so does a plan holding it
   (`not_in_plan`: the server refuses any such plan, the editor one of more

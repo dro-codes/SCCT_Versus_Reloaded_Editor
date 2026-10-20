@@ -597,6 +597,7 @@ namespace
         Json retry = Json{{"source", source}, {"name", stem}};
         if (args.contains("merge")) retry["merge"] = args.at("merge");
         if (args.value("keepXboxOnly", false)) retry["keepXboxOnly"] = true;
+        if (args.value("legacy", false)) retry["legacy"] = true;
         auto with = [&](const char* key, const Json& value) { Json out = retry; out[key] = value; return out; };
         // A name for a retry: the editor's own suggestion when it made one
         // (destination_exists), else the next default name.
@@ -664,9 +665,14 @@ namespace
             return RecoverFailure(e, "Recovery replaces the open map (it starts with MAP NEW), and the open map has unsaved changes, so nothing was changed. Save it first "
                                      "(map_file action:\"save\", or save_as for a map with no file yet), or pass discard: true to lose them.",
                                   Json::array({Next("map_file", "Save the open map first.", {{"action", "save"}})}));
+        // A file in Packages\MapsEd is normally an editable map already; a legacy
+        // recovered map (compiled layout, older RE+) or a compiled copy put
+        // there is recovered with legacy, as File > Convert Legacy Recovered Map does.
         if (e.reason == "source_map")
-            return RecoverFailure(e, std::string(e.what()) + " " + source + " is already an editable source map (Packages\\MapsEd): open it with map_file action:\"open\" instead.",
-                                  Json::array({Next("map_file", "Open the source map.", {{"action", "open"}, {"path", source}})}));
+            return RecoverFailure(e, source + " is in Packages\\MapsEd, where maps are normally editable already: open it with map_file action:\"open\". "
+                                     "Only if it is a legacy recovered map (saved in compiled layout by an older RE+) or a compiled map copied there, recover it with legacy: true.",
+                                  Json::array({Next("map_file", "Open the source map.", {{"action", "open"}, {"path", source}}),
+                                               Next("map_recover", "Recover it as a legacy recovered map or compiled copy.", with("legacy", true))}));
         if (e.code == C::Busy && e.reason != "approval_pending" && e.reason != "another_client")
         {
             std::string said = e.what();
@@ -754,6 +760,7 @@ namespace
     {
         Json args{{"source", source}, {"destination", destination}, {"keepXboxOnly", Bool(a, "keepXboxOnly")}, {"discard", Bool(a, "discard")},
                   {"maxRows", Integer(a, "maxRows", 200, 0, 2000)}};
+        if (Bool(a, "legacy")) args["legacy"] = true;
         // Absent: the editor's File > Merge Recovered Geometry setting.
         if (Has(a, "merge")) args["merge"] = Bool(a, "merge");
         return args;
@@ -801,6 +808,7 @@ namespace
         Json retry{{"source", source}, {"name", Recovery::Stem(destination)}};
         if (Has(a, "merge")) retry["merge"] = merge;
         if (keep) retry["keepXboxOnly"] = true;
+        if (Bool(a, "legacy")) retry["legacy"] = true;
         if (dry)
         {
             const bool checked = preflight.contains("checks") || preflight.contains("imports");
@@ -955,7 +963,18 @@ namespace
             else if (state.value("mapFile", std::string()).empty())
                 return Fail("The map has no file yet. Use action save_as with mapName (named after its first four letters plus D, such as AquaD) or path.");
             if (Bool(a, "overwrite")) args["overwrite"] = true;
-            const auto result = Call(c, "map.save", args, label, dry, 900000);
+            Json result;
+            try { result = Call(c, "map.save", args, label, dry, 900000); }
+            catch (const Bridge::Error& e)
+            {
+                // Saving under a compiled-only map's name would replace that
+                // original in Packages\Maps (every save writes the playable copy).
+                if (e.reason != "compiled_original") throw;
+                const auto stem = Recovery::Stem(args.value("path", state.value("mapFile", std::string())));
+                return Fail(std::string(e.what()) + " Save under another name, such as \"" + stem + "_Edit\".",
+                            {{"code", e.code}, {"reason", e.reason}, {"retryable", false}, {"details", e.details},
+                             {"next", Json::array({Next("map_file", "Save under a name no compiled map has.", {{"action", "save_as"}, {"path", stem + "_Edit.sdc"}})})}});
+            }
             const auto file = result.value("file", args.value("path", state.value("mapFile", std::string())));
             o.summary = dry ? "Dry run: would save the map as " + file + "." : "Saved the map to " + file + ".";
             o.changed.push_back(file);
@@ -1163,6 +1182,7 @@ void RegisterSessionTools(Registry& registry)
                                               {"name", S::String("The new file in Packages\\MapsEd. Default <source>_Recovered.")},
                                               {"merge", S::Boolean("Merge BSP fragments into fewer brushes. Default: File > Merge Recovered Geometry.")},
                                               {"keepXboxOnly", S::Boolean("Keep Xbox-only actors.")},
+                                              {"legacy", S::Boolean("The source is a legacy recovered map in Packages\\MapsEd.")},
                                               {"discard", S::Boolean("Drop unsaved changes.")},
                                               {"maxRows", S::Integer("Rows to return. Default 200.", 0, 2000)}},
                                              {"source"}));
