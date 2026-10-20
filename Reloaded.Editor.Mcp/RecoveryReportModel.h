@@ -31,6 +31,8 @@ namespace Mcp::Recovery
         static const std::vector<Category> table = {
             {"Actor left out", "An Xbox-only actor of the compiled map (PLF_XBOX_ONLY) was not recreated: the recovered map is for PC.",
              "Usually nothing. To keep them as common content, recover again under a new name with keepXboxOnly: true.", false},
+            {"Xbox-only actor kept", "An Xbox-only actor of the compiled map, kept as common content (keepXboxOnly), so the PC game loads it too.",
+             "Look at it (view_screenshot frame:[name]): the PC version never showed it, so check it fits and plays well.", true},
             {"Reference cleared", "A property pointed at an actor that was left out or had been deleted, so it is now None.",
              "Check the actor (map_query what:\"actor\", view_screenshot frame:[actor]) and point the property at a suitable actor again if gameplay needs it (actors_edit).", true},
             {"Asset moved", "A mesh or material embedded in the compiled map now lives in the map's own StaticMeshes\\<map>_Assets.usx.",

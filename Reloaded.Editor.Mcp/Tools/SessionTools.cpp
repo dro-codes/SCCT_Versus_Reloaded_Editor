@@ -543,13 +543,30 @@ namespace
         return false;
     }
     Json RecoverArgs(const ToolContext& c, const std::string& source) { return {{"source", source}, {"name", RecoveryName(c, source)}}; }
-    ToolResult CompiledMapRefusal(const ToolContext& c, const std::string& path, const std::string& message = {})
+    ToolResult CompiledMapRefusal(const ToolContext& c, const std::string& path, const std::string& message = {}, const Json& details = Json())
     {
         const auto args = RecoverArgs(c, path);
-        return Fail((message.empty() ? path + " is a compiled map (Packages\\Maps): opened as a source map its geometry loses alignment, so it was not opened." : message) +
-                        " Turn it into an editable map with map_recover (source \"" + path +
-                        "\", name \"" + args.at("name").get<std::string>() + "\"; dryRun: true checks it first).",
-                    {{"code", Bridge::Code::Refused}, {"reason", "compiled_map"}, {"retryable", false}, {"next", Json::array({Next("map_recover", "Recover the compiled map as an editable source map.", args)})}});
+        // A stock map's editable source has the same name in Packages\MapsEd:
+        // the original file, which recovery can only approach.
+        std::string twin;
+        if (details.is_object() && details.contains("source") && details.at("source").is_string()) twin = details.at("source").get<std::string>();
+        else
+        {
+            std::error_code error;
+            const auto candidate = GamePackages(c) / "MapsEd" / (Recovery::Stem(path) + ".sdc");
+            if (std::filesystem::is_regular_file(candidate, error)) twin = PathText(candidate);
+        }
+        Json next = Json::array();
+        std::string text = message.empty() ? path + " is a compiled map (Packages\\Maps): opened as a source map its geometry loses alignment, so it was not opened." : message;
+        if (!twin.empty())
+        {
+            if (message.empty()) text += " Packages\\MapsEd has " + Recovery::Stem(path) + ".sdc, normally its original editable source: open that instead (exact, nothing rebuilt).";
+            next.push_back(Next("map_file", "Open the original editable source of this map.", {{"action", "open"}, {"path", twin}}));
+        }
+        next.push_back(Next("map_recover", "Recover the compiled map as an editable source map.", args));
+        return Fail(text + " To turn the compiled map itself into an editable map, use map_recover (source \"" + path + "\", name \"" + args.at("name").get<std::string>() +
+                        "\"; dryRun: true checks it first).",
+                    {{"code", Bridge::Code::Refused}, {"reason", "compiled_map"}, {"retryable", false}, {"next", next}});
     }
 
     // A refused or failed recovery: the bridge's code and reason, a message
@@ -621,8 +638,24 @@ namespace
                 advice = " Merging may be what the BSP build could not reproduce: try again with merge: false (only cells sharing whole faces are joined).";
                 next.push_back(Next("map_recover", "Recover without merging.", with("merge", false)));
             }
-            return RecoverFailure(e, "The recovery failed: " + std::string(e.what()) + " Nothing was saved as " + destination +
-                                         "; the editor may be left with an unsaved working map, which map_file action:\"new\" with discardUnsaved: true clears." + advice,
+            // What the failed recovery left for inspection (details.left): those
+            // names stay taken, so a retry needs another name.
+            std::vector<std::string> left;
+            if (e.details.is_object())
+            {
+                const Json list = e.details.value("left", Json::array());
+                for (const auto& path : list) if (path.is_string()) left.push_back(path.get<std::string>());
+            }
+            std::string kept = " Nothing was saved as " + destination + ".";
+            if (!left.empty())
+            {
+                auto other = RecoveryName(c, source);
+                if (Lower(other) == Lower(Recovery::Stem(destination))) other = Recovery::Stem(destination) + "_2";
+                kept = " Nothing usable was saved as " + destination + "; it left " + Join(left) + " for inspection, so recover again under another name, such as \"" + other + "\".";
+                for (auto& step : next) if (step.value("tool", std::string()) == "map_recover") step["args"]["name"] = other;
+            }
+            return RecoverFailure(e, "The recovery failed: " + std::string(e.what()) + kept +
+                                         " The editor may be left with an unsaved working map, which map_file action:\"new\" with discardUnsaved: true clears." + advice,
                                   next);
         }
         return ErrorResult(e);
@@ -733,8 +766,11 @@ namespace
         if (rows.size() < total)
             o.summary += (rows.empty() ? std::string(" ") : " The first " + std::to_string(rows.size()) + " are below; ") + "map_query what:\"recovery\" pages through all of them.";
         o.created.push_back(file);
+        // The playable copy (Packages\Maps) and the asset package the editor wrote beside it.
+        if (result.contains("playable") && result.at("playable").is_string()) o.created.push_back(result.at("playable").get<std::string>());
+        if (result.contains("assetPackage") && result.at("assetPackage").is_string()) o.created.push_back(result.at("assetPackage").get<std::string>());
         o.changed.push_back("the open map: now " + file);
-        if (counted.contains("Asset moved"))
+        if (result.contains("assetPackage") || counted.contains("Asset moved"))
             o.warnings.push_back("Embedded assets moved into Packages\\StaticMeshes\\" + Recovery::AssetPackage(newStem) + ".usx: ship it with the map.");
         o.warnings.push_back("The recovered map keeps the compiled map's baked lighting. Ordinary builds (map_build, Build All) keep it too, so new or moved lights do not show until a "
                              "re-bake; Build > Recalculate Lighting re-bakes the whole map and changes the recovered look. For listed surfaces and meshes, the user selects them "
@@ -788,7 +824,7 @@ namespace
             try { result = Call(c, "map.open", {{"path", path}, {"discard", discard}}, label, dry, 600000); }
             catch (const Bridge::Error& e)
             {
-                if (e.reason == "compiled_map") return CompiledMapRefusal(c, path, e.what());
+                if (e.reason == "compiled_map") return CompiledMapRefusal(c, path, e.what(), e.details);
                 throw;
             }
             o.summary = dry ? "Dry run: would open " + path + "." : "Opened " + result.value("mapFile", path) + ".";

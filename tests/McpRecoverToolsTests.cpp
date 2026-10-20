@@ -115,7 +115,8 @@ Json Recovered(const Json& args)
             {"counts",{{"merged",true},{"cells",18422},{"cellFaces",110532},{"joinedBrushes",8552},{"brushes",2104},{"brushFaces",14980},{"grown",1204},{"absorbed",3410},
                        {"splitBack",0},{"sheetBrushes",12},{"polygons",16204},{"unifiedSurfaces",1877},{"actors",1311}}},
             {"categories",{{"Thin brush",7},{"Reference cleared",1},{"Asset moved",1},{"BSP lighting not preserved",1}}},
-            {"rows",rows},{"rowsTotal",10},{"report","C:\\Game\\Packages\\MapsEd\\Recovery\\"+stem+"\\Recovery.txt"},{"folder","C:\\Game\\Packages\\MapsEd\\Recovery\\"+stem}};
+            {"rows",rows},{"rowsTotal",10},{"report","C:\\Game\\Packages\\MapsEd\\Recovery\\"+stem+"\\Recovery.txt"},{"folder","C:\\Game\\Packages\\MapsEd\\Recovery\\"+stem},
+            {"playable","C:\\Game\\Packages\\Maps\\"+stem+".sdc"},{"assetPackage","C:\\Game\\Packages\\StaticMeshes\\"+stem+"_Assets.usx"}};
 }
 
 // ------------------------------------------------------------- the model
@@ -214,6 +215,8 @@ void Success()
     Check(h.fake.Last("map.recover")->label=="map_recover OffsD" && h.fake.Last("map.recover")->args.at("destination")=="OffsD_Recovered.sdc","label and destination");
     const auto& s=Structured(done);
     Check(s.at("file")=="C:\\Game\\Packages\\MapsEd\\OffsD_Recovered.sdc" && s.at("created")[0]==s.at("file") && s.at("seconds")==312.4 && s.at("counts").at("brushes")==2104,"file, seconds and counts");
+    Check(s.at("created").size()==3 && s.at("created")[1]=="C:\\Game\\Packages\\Maps\\OffsD_Recovered.sdc" && s.at("created")[2]=="C:\\Game\\Packages\\StaticMeshes\\OffsD_Recovered_Assets.usx",
+          "the playable copy and the asset package the editor wrote: "+s.at("created").dump());
     Check(!Contains(s.at("recoverySummary").get<std::string>(),"\r") && Contains(s.at("recoverySummary").get<std::string>(),"\nBrush faces"),"the summary's CRLF is \\n");
     Check(s.at("rowsTotal")==10 && s.at("rows").size()==4 && s.at("categories")[0].at("category")=="Reference cleared" && s.at("categories")[0].contains("action"),"rows and the explained tally");
     Check(Contains(Text(done),"2104 structural brushes from 18422 BSP cells") && Contains(Text(done),"10 items: 1 Reference cleared, 1 Asset moved, 7 Thin brush"),
@@ -282,6 +285,19 @@ void Refusals()
     Check(Structured(cancelled).at("code")=="cancelled" && Contains(Text(cancelled),"new, empty map") && Contains(Text(cancelled),"were removed"),"a cancelled recovery says what is left: "+Text(cancelled));
     auto slow=failing(Bridge::Code::Timeout,"map.recover did not finish within 10800 s.");
     Check(Contains(Text(slow),"MapRecovery") && Structured(slow).at("next")[0].at("tool")=="editor_log","a timeout points at the log");
+    // A failed recovery that left its files: those names stay taken, so the retry gets another.
+    h.fake.Clear("map.recover");
+    h.fake.On("map.recover",[](const Json& a,const CallOptions& o)->Json
+    {
+        if(o.dryRun)return Preflight(a);
+        throw Bridge::Error(Bridge::Code::EditorError,"The normal BSP rebuild changed 3 of 4000 solid/empty space samples.","recovery_failed",
+                            {{"stage","Verifying"},{"left",{"C:\\Game\\Packages\\MapsEd\\OffsR.sdc","C:\\Game\\Packages\\MapsEd\\Recovery\\OffsR"}}});
+    });
+    auto leftover=h.Call("map_recover",{{"source","OffsD"},{"name","OffsR"}});
+    Check(Contains(Text(leftover),"it left C:\\Game\\Packages\\MapsEd\\OffsR.sdc") && Contains(Text(leftover),"under another name") &&
+          Structured(leftover).at("reason")=="recovery_failed","the files a failure left are named: "+Text(leftover));
+    for(const auto& step:Structured(leftover).at("next"))
+        if(step.at("tool")=="map_recover")Check(step.at("args").at("name")!="OffsR","a retry never reuses the taken name: "+step.dump());
     // The server's own checks: unsaved changes before the recovery, and a
     // preflight that lists missing packages without refusing.
     h.fake.Clear("map.recover");
@@ -338,6 +354,12 @@ void OpenCompiled()
     auto bridge=h.Call("map_file",{{"action","open"},{"path","D:\\Other\\Packages\\Maps\\OffsD.sdc"},{"dryRun",true}});
     Check(bridge.at("isError")==true && Contains(Text(bridge),"is a compiled map.") && Contains(Text(bridge),"map_recover (source \"D:\\Other\\Packages\\Maps\\OffsD.sdc\""),
           "the bridge's refusal names map_recover too: "+Text(bridge));
+    // A stock map's editable source in Packages\MapsEd comes first: the original file.
+    h.Touch("MapsEd\\OffsD.sdc");
+    auto twin=h.Call("map_file",{{"action","open"},{"path","Packages\\Maps\\OffsD.sdc"}});
+    const auto& twinNext=Structured(twin).at("next");
+    Check(twin.at("isError")==true && Contains(Text(twin),"original editable source") && twinNext.size()==2 && twinNext[0].at("tool")=="map_file" &&
+          twinNext[0].at("args").at("path")==PathText(h.dir/"Packages"/"MapsEd"/"OffsD.sdc") && twinNext[1].at("tool")=="map_recover","the MapsEd source is offered first: "+Text(twin));
     h.fake.Clear("map.open");
     h.fake.On("map.open",Harness::State(false,"C:\\Game\\Packages\\MapsEd\\OffsD.sdc"));
     const auto opens=h.fake.Count("map.open");
