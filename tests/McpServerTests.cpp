@@ -188,7 +188,7 @@ void Lists()
         Check(t.at("description").get<std::string>().size()>20,"every tool explains itself");
         Check(t.contains("annotations") && t.at("annotations").contains("readOnlyHint"),"annotations");
     }
-    for(const char* name:{"editor_status","editor_launch","editor_restart","editor_undo","approval_wait","editor_log","map_file","map_build",
+    for(const char* name:{"editor_status","editor_launch","editor_restart","editor_undo","approval_wait","editor_log","map_file","map_recover","map_build",
                           "map_query","view_screenshot","plan_render","actors_edit","map_changes_apply","workflow_request","editor_exec"})
         Check(names.count(name)!=0,"tool listed");
     for(const auto& t:tools)
@@ -618,10 +618,11 @@ void OutputSchemas()
     h.fake.On("authoring.mapid",Json{{"map","unsaved:7:2"}});
     h.fake.On("mcp.plan",Json{{"steps",Json::object()},{"undo",{{"steps",1}}}});
     h.fake.On("exec",Json{{"ok",true},{"output",""}});
+    h.fake.On("map.recover",Json{{"dryRun",true},{"source","OffsD"},{"destination","OffsD_Recovered.sdc"},{"merge",true},{"keepXboxOnly",false},{"imports",3},{"missing",Json::array()}});
     const Json document{{"format","scct.map-changes"},{"version",2},{"map","*"},{"operations",Json::array({{{"op","create"},{"id","Lamp"},{"class","Engine.Light"}}})}};
     const std::map<std::string,Json> working{
         {"editor_launch",Json::object()},{"editor_restart",{{"dryRun",true}}},{"editor_undo",{{"call",3}}},
-        {"map_file",{{"action","save_as"},{"mapName","AQUARIUM"}}},{"map_build",Json::object()},
+        {"map_file",{{"action","save_as"},{"mapName","AQUARIUM"}}},{"map_recover",{{"source","OffsD"},{"dryRun",true}}},{"map_build",Json::object()},
         {"actors_edit",{{"edits",Json::array({{{"action","set"},{"actor","Light1"},{"properties",{{"LightBrightness","96"}}}}})}}},
         {"map_changes_apply",{{"document",document}}},{"editor_exec",{{"command","STAT FPS"}}}};
     size_t tools=0;
@@ -838,7 +839,7 @@ void Stub()
     Registry registry;RegisterSessionTools(registry);
     std::vector<std::string> lines;
     Server server(registry,client,{},[&](const std::string& line){lines.push_back(line);});
-    Check(server.Run(input)==0 && lines.size()==3 && Json::parse(lines[1]).at("result").at("tools").size()==8,"Run serves a stream to its end");
+    Check(server.Run(input)==0 && lines.size()==3 && Json::parse(lines[1]).at("result").at("tools").size()==9,"Run serves a stream to its end");
     Check(Json::parse(lines[2]).at("result").at("structuredContent").at("connected")==false,"a request queued before the input ended is still answered");
 }
 int main()

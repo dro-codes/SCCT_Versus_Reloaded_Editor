@@ -653,6 +653,27 @@ namespace Mcp::Tools
     }
 
     // ---------------------------------------------------------------- files
+    // The game's Packages folder (the exe lives in System), and a path in it
+    // written as the editor writes them, "MapsEd\\Recovery\\OffsD".
+    inline std::filesystem::path GamePackages(const ToolContext& c)
+    {
+        auto system = c.systemDir;
+        if (!system.has_filename()) system = system.parent_path();
+        return system.parent_path() / "Packages";
+    }
+    inline std::filesystem::path InPackages(const ToolContext& c, const std::string& relative)
+    {
+        auto path = GamePackages(c);
+        std::string part;
+        const std::string parts = relative + "\\";
+        for (const char ch : parts)
+        {
+            if (ch != '\\' && ch != '/') { part += ch; continue; }
+            if (!part.empty()) path /= std::filesystem::path(std::u8string(part.begin(), part.end()));
+            part.clear();
+        }
+        return path;
+    }
     // One section of an INI file (Reloaded_Editor.ini), keys lower-cased.
     // The editor writes it through the profile API, so ANSI or UTF-16.
     inline std::map<std::string, std::string> IniSection(const std::filesystem::path& file, const std::string& section)

@@ -825,6 +825,7 @@ and the embed check.
 | `GridPlanModelTests` | The grid legend, rectangle decomposition, doorways and the golden `grid-basic` spec. |
 | `BrushImportModelTests` | Hammer and Quake brushes clipped to polygons that pass the editor's own polygon check and wind outward. |
 | `ImportersTests` | Every importer on `tests/mcp/fixtures`; each result is a valid spec that compiles with no errors. `--render <dir>` writes the plans as PNGs. |
+| `McpRecoverToolsTests` | Recovering compiled maps: the Recovery Report's categories (each one `Reloaded.Editor/MapRecovery.cpp` writes is explained), the menu's default names, `tests/mcp/fixtures/Recovery.txt` read back; `map_recover` against a FakeBridge (the preflight, dry runs, progress, every refusal, a cancel sent to the bridge), `map_file open` of a compiled map, and `map_query what:"recovery"` with and without the editor. |
 | `McpSpecToolsTests` | `level_spec_validate`, `level_build` and the intent tools on all five examples, against a FakeBridge that runs plans as the editor does. |
 | `McpMediaToolsTests` | The media and import tools: frame sampling and scene picking, grids and palettes, `image_convert`, OBJ to ASE, `import_to_spec`, `assets_import`. Video extraction runs only when ffmpeg is on `PATH` (the last line says with or without ffmpeg). |
 | `McpReleaseToolsTests` | The `release` tool against a temporary game folder with a real MapsEd import table and a compressed `<Map>-i.utc`. |

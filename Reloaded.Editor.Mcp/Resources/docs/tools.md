@@ -21,7 +21,7 @@
 - **Approval:** when the user turns on *Require approval*, each change opens a review window in the editor. After about 50 s the call fails with code `timeout`, reason `awaiting_approval` and a `ticket`; call `approval_wait` with it.
   - `denied` means the user said no. Do not retry the same change unasked.
 - **Busy:** the editor is in a dialog, a menu, a drag or a rebuild. The server retries with backoff. If that keeps failing, ask the user to finish what they are doing in the editor (the reason says what). Two reasons come back at once instead, since waiting cannot help: approval_pending (a change waits in the review window: call `approval_wait` with its ticket, which the error's details carry) and `another_client` (another MCP client holds the editor).
-- **Cancelling** a request stops it: the editor is asked to drop the call in flight, and waits (`editor_launch`, `editor_restart`, `approval_wait`) and long tools stop at their next progress report. Check `editor_status` before repeating a cancelled change.
+- **Cancelling** a request stops it: the editor is asked to drop the call in flight (a `map_recover` stops at its next stage until it saves), and waits (`editor_launch`, `editor_restart`, `approval_wait`) and long tools stop at their next progress report. Check `editor_status` before repeating a cancelled change.
 - **Never allowed:**
   - writing stock packages (only the map's own: `<Map>`, `<Map>-i`, `Amb_<Map>`, `<Map>_*`). Imports, package saves and a Map JSON document's `texture` and `save` operations (`map_changes_apply`, `workflow_request` authoring.apply) write only `<Map>_<name>` (a Map JSON texture may also go into `MyLevel`); another package is refused (reason not_map_owned, package_name or interface_package), and so is any of them before the map's first save (unsaved_map), since those packages are named after its file. A `load` alone is allowed;
   - deleting actors without `allowDeletes`;
@@ -30,12 +30,12 @@
   - writing outside the work folder and `[Mcp] WriteRoots` (media and import tools; `editor_exec` `FILE=`), or a release copy outside `<Game>\Releases`, the work folder and `WriteRoots`;
   - raw console commands, unless the user set `AllowRawExec=1`. Even then `editor_exec` refuses (reason denied_command) any command that starts with QUIT, EXIT, RELAUNCH, DEBUG, EXEC, MAP NEW/LOAD/SAVE/IMPORT/EXPORT, OBJ SAVEPACKAGE/EXPORT/IMPORT/LOAD, SAVEMAPPROP, LOADMAPPROP, TEXTURE IMPORT/EXPORT, STATICMESH IMPORT/EXPORT, MESH IMPORT, BRUSH IMPORT/EXPORT, DUMPINT, TRANSACTION or AUDIO, read as the console reads it (any case; `QUIT;` and `EXEC"x"` count); a `FILE=` anywhere outside the work folder and WriteRoots (`outside_write_roots`); a `PACKAGE=` other than MyLevel or the map's own (not_map_owned); and more than one command. Use the tool that does the job with its checks.
 
-## Tools (32)
+## Tools (33)
 
 | Group | Tools |
 |---|---|
-| Session | `editor_status` (start here; `pid` picks one of several editors), `editor_launch` (`waitSeconds`, `map`, `force`), `editor_restart` (`save`), `editor_undo` (`call`, `steps`, `redo`), `approval_wait` (`ticket`), `editor_log` (`level`, `contains`, `since`, `newOnly`), `map_file` (`action`: new, open, save or `save_as`; `path`, `mapName`, `discardUnsaved`, `overwrite`), `map_build` (`what`: geometry or all; `check`) |
-| Inspect | `map_query` (`what`: summary, actors, actor, level, schema, assets, wiring, spawns, missions, security, cameras, lights, stages, design, ges, spec; actors filter by `classes`, `tags`, `names`, `near`, `box`, `selected`, with `fields`, `limit`, `cursor`), `view_screenshot` (`viewport`, `maxEdge`, `camera`, `frame`, or `preset`: overview, spawn:spy, spawn:merc, objective:<name>), `plan_render` (`spec` or `path` offline, or the live map; `maxEdge`, `options`: storey, labels, grid, legend, actorLabels, cones, title) |
+| Session | `editor_status` (start here; `pid` picks one of several editors), `editor_launch` (`waitSeconds`, `map`, `force`), `editor_restart` (`save`), `editor_undo` (`call`, `steps`, `redo`), `approval_wait` (`ticket`), `editor_log` (`level`, `contains`, `since`, `newOnly`), `map_file` (`action`: new, open, save or `save_as`; `path`, `mapName`, `discardUnsaved`, `overwrite`; a compiled map is refused for `map_recover`), `map_recover` (a compiled `.sdc` `source` into an editable map: `name`, `merge`, `keepXboxOnly`, `discard`, `maxRows`; `dryRun` checks only; see `scct://docs/tool-reference#map_recover`), `map_build` (`what`: geometry or all; `check`) |
+| Inspect | `map_query` (`what`: summary, actors, actor, level, schema, assets, wiring, spawns, missions, security, cameras, lights, stages, design, ges, spec, recovery (`file`, `category`, `offset`); actors filter by `classes`, `tags`, `names`, `near`, `box`, `selected`, with `fields`, `limit`, `cursor`), `view_screenshot` (`viewport`, `maxEdge`, `camera`, `frame`, or `preset`: overview, spawn:spy, spawn:merc, objective:<name>), `plan_render` (`spec` or `path` offline, or the live map; `maxEdge`, `options`: storey, labels, grid, legend, actorLabels, cones, title) |
 | Validate | `map_validate` (`profile`: draft or release; `include` groups wiki, design, security, mapcheck, lighting, release; `rules`; `spec` or `path` to check a spec offline; findings cite `wikiPage` and carry a `fix`: a tool call on the live map, an edit of the spec offline) |
 | Spec | `level_spec_validate` (`spec` or `path`, offline), `level_build` (`spec` or `path`; `mode`: preview (default) or apply; `sync`: incremental, replace or merge; `brushMode`: pieces or polygons; `build`: geometry, all or none; `screenshot`; `save`; `force`) |
 | Intent | `blockout`, `gameplay`, `security`, `mechanisms`, `events`, `environment`, `geometric_events`, `map_settings`: each takes its part of the spec at the top level, lays it over the spec the map was built from (matched by id; `remove` takes ids out) and builds only what changed, as `level_build` with `sync:"incremental"` does, so the wiki defaults always apply. `mode` defaults to apply here; `mode:"preview"` or `dryRun` changes nothing |
@@ -159,7 +159,7 @@ Known gaps to work around:
 
 ## Prompts
 
-`create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`, `add_game_mode`, `design_security`, `ge_pass`, `review_map_against_wiki`, `fix_validation` and `prepare_release`.
+`create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`, `add_game_mode`, `design_security`, `ge_pass`, `review_map_against_wiki`, `fix_validation`, `prepare_release` and `recover_map`.
 
 Each prompt is a step-by-step recipe that embeds the wiki pages it needs and points at `scct://rules`.
 
@@ -171,10 +171,10 @@ Each prompt is a step-by-step recipe that embeds the wiki pages it needs and poi
 | `busy` | The editor is occupied (reason given: modal, menu, drag, rebuild); the server already retried. Ask the user to close dialogs. approval_pending (call `approval_wait` with the ticket) and `another_client` come back at once |
 | `stale` | The map changed since you read it; re-read and retry |
 | `invalid` | Bad arguments or document; the message names the field (reason several editors: pass `pid` to `editor_status`) |
-| `refused` | A blocked op, or the reason says what: a setting the user has not enabled (`AllowRawExec`, `AllowPlay`), unsaved changes, a package that is not the map's own (not_map_owned, package_name, interface_package), a map not saved yet (unsaved_map), a folder or `FILE=` outside the write roots (`outside_write_roots`), a console command `editor_exec` never runs (denied_command) |
+| `refused` | A blocked op, or the reason says what: a compiled map to open (`compiled_map`: use `map_recover`), a recovery's `missing_packages`, `destination_exists` or `source_map`, a setting the user has not enabled (`AllowRawExec`, `AllowPlay`), unsaved changes, a package that is not the map's own (not_map_owned, package_name, interface_package), a map not saved yet (unsaved_map), a folder or `FILE=` outside the write roots (`outside_write_roots`), a console command `editor_exec` never runs (denied_command) |
 | `denied` | The user declined in the approval window |
 | `dialog_blocked` | An unexpected editor dialog appeared. It was answered with its most cautious button (Cancel, No, Close, Abort by control id; OK only when alone) or closed, and the call stopped there. details.dialogs has its title, text and answer; details.stoppedAt the step, details.ran the steps that finished, details.wrote the files and packages already written (they stay). details.rolledBack says whether the map changes were undone: a plan that had already saved or written files keeps them, so map and file stay alike, and then `editor_undo` with the call the message names takes them back |
 | `editor_error` | The editor refused the change; the message says why (nothing was changed) |
 | `timeout` | Too slow; reason `awaiting_approval` comes with a ticket for `approval_wait` |
-| `cancelled` | The client cancelled the request |
+| `cancelled` | The client cancelled the request (a cancelled `map_recover` leaves a new, empty map and no files) |
 | `protocol_mismatch` | The exe and the editor's DLL are different versions; update RE+ so both match |
