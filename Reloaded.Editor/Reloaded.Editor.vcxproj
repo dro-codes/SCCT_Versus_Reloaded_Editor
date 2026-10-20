@@ -210,6 +210,7 @@
     <ClInclude Include="McpGuardModel.h" />
     <ClInclude Include="McpOps.h" />
     <ClInclude Include="McpPlanModel.h" />
+    <ClInclude Include="McpRecoverModel.h" />
     <ClInclude Include="McpSafetyModel.h" />
     <ClInclude Include="McpNative.inl" />
     <ClInclude Include="CharacterPreview.h" />

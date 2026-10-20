@@ -26,6 +26,7 @@ namespace RecoveredActorImport
         std::size_t removedBrushCount = 0;
         std::size_t removedRuntimePropertyCount = 0;
         std::size_t skippedXboxActorCount = 0;
+        std::size_t keptXboxActorCount = 0;
         std::size_t correctedPcActorPlatformCount = 0;
         std::size_t clearedXboxActorReferenceCount = 0;
         std::size_t clearedDeletedActorReferenceCount = 0;
@@ -33,6 +34,8 @@ namespace RecoveredActorImport
         // For the recovery report: actors left out, and kept actors that lost
         // a reference to an excluded or deleted actor.
         std::vector<std::string> skippedXboxActorNames;
+        // keepXboxOnlyActors: the Xbox-only actors kept as common content.
+        std::vector<std::string> keptXboxActorNames;
         std::vector<std::string> clearedReferenceActorNames;
         std::vector<ExternalizedAsset> externalizedAssets;
         // Native procedural strip doors and patches rebuild their level-owned simulation
@@ -51,10 +54,14 @@ namespace RecoveredActorImport
     // external copy of the original logical package. Missing actors still fail.
     // A native caller may supply actor paths proven deleted and absent from all
     // level actor arrays; only exact typed references to those paths are cleared.
+    // keepXboxOnlyActors keeps every other Xbox-only actor too, as common
+    // content (its root platform label removed, so the PC game loads it), and
+    // references to it stay; its LevelInfo must still not be Xbox-only.
     bool Prepare(std::string_view exportedMap, PreparedMap& prepared,
                  std::string& error, std::string_view externalAssetPackage = {},
                  const std::vector<std::string>& confirmedDeletedActorPaths = {},
-                 const std::vector<std::string>& confirmedPcActorPaths = {});
+                 const std::vector<std::string>& confirmedPcActorPaths = {},
+                 bool keepXboxOnlyActors = false);
 
     // freshMap must be the complete MAP EXPORT of a fresh normal MAP NEW.
     // Keeps its builder brush and a canonical LevelInfo0, applies recovered level

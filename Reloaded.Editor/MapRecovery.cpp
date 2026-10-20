@@ -1795,11 +1795,7 @@ namespace
 
     std::string RecoveryAssetName(const std::filesystem::path& destination)
     {
-        std::string name = destination.stem().string() + "_Assets";
-        for (char& character : name)
-            if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_') character = '_';
-        if (std::isdigit(static_cast<unsigned char>(name.front()))) name.insert(0, "Recovery_");
-        return name;
+        return MapRecoveryModel::AssetPackageName(destination.stem().string());
     }
 
     void SetCurrentMapFilename(const char* filename)
@@ -3244,6 +3240,9 @@ namespace
 
 namespace
 {
+    // MapRecovery::Running: set for the whole of RecoverToSource.
+    bool g_recoveryRunning = false;
+
     // Files a cancelled recovery removes again: only ones this run created.
     struct CreatedFiles
     {
@@ -3449,7 +3448,8 @@ namespace
         }
         RecoveredActorImport::PreparedMap actors;
         Logger::log("MapRecovery: preparing source actors and level settings");
-        if (!RecoveredActorImport::Prepare(actorText, actors, error, assetPackageName, deletedActorPaths, pcActorPaths)) return false;
+        if (!RecoveredActorImport::Prepare(actorText, actors, error, assetPackageName, deletedActorPaths, pcActorPaths,
+                                           options.keepXboxOnly)) return false;
         std::vector<ProceduralSoftBodyStructure> softBodies;
         for (const auto& name : actors.regeneratedSoftBodies)
         {
@@ -3459,6 +3459,10 @@ namespace
         for (const auto& name : actors.skippedXboxActorNames)
             outcome.rows.push_back({"Actor left out", name,
                 "Xbox-only in the compiled map; the recovered map is for PC.", MapRecoveryModel::Target::None});
+        for (const auto& name : actors.keptXboxActorNames)
+            outcome.rows.push_back({"Xbox-only actor kept", name,
+                "Xbox-only in the compiled map; kept as common content, so the PC game loads it too.",
+                MapRecoveryModel::Target::Actor, name});
         for (const auto& name : actors.clearedReferenceActorNames)
             outcome.rows.push_back({"Reference cleared", name,
                 "Pointed at an actor that was left out or had been deleted; that property is now None.",
@@ -3924,12 +3928,14 @@ namespace
         std::ostringstream report;
         report << "Normal source map: " << destination.string()
                << "\nPlayable map: " << runtime.string()
-               << "\nTarget platform: PC (common and PC-only actors)"
+               << "\nTarget platform: PC (common and PC-only actors"
+               << (options.keepXboxOnly ? ", and Xbox-only ones kept as common)" : ")")
                << "\nReconstructed structural brushes: " << structuralBrushCount
                << "\nRetained actors: " << actors.actorCount
                << "\nPreserved and verified original baked mesh colour streams: " << preservedMeshCount
                << "\nRecalculated incompatible mesh colour streams: " << recalculatedMeshCount
                << "\nExcluded Xbox-only actors: " << actors.skippedXboxActorCount
+               << "\nXbox-only actors kept as common content: " << actors.keptXboxActorCount
                << "\nCorrected stale platform labels on active PC actors: " << actors.correctedPcActorPlatformCount
                << "\nCleared references to excluded Xbox actors: " << actors.clearedXboxActorReferenceCount
                << "\nCleared references to confirmed deleted actors: " << actors.clearedDeletedActorReferenceCount
@@ -4005,6 +4011,7 @@ namespace
             if (left.size() > 1) error += " and " + std::to_string(left.size() - 1) + " more";
             error += ".";
         }
+        else error += " The files it had written were removed.";
         Logger::log("MapRecovery: " + error);
     }
 }
@@ -4024,6 +4031,12 @@ bool MapRecovery::RecoverToSource(const std::filesystem::path& source,
     RecoveryOutcome local;
     RecoveryOutcome& result = outcome ? *outcome : local;
     result = {};
+    struct RunningScope
+    {
+        bool previous = g_recoveryRunning;
+        RunningScope() { g_recoveryRunning = true; }
+        ~RunningScope() { g_recoveryRunning = previous; }
+    } running;
     Checkpoint step{options};
     CreatedFiles created;
     const bool success = RecoverToSourceImpl(source, destination, error, options, result, step, created);
@@ -4033,6 +4046,11 @@ bool MapRecovery::RecoverToSource(const std::filesystem::path& source,
         FinishCancelledRecovery(created, error);
     }
     return success;
+}
+
+bool MapRecovery::Running()
+{
+    return g_recoveryRunning;
 }
 
 extern "C" __declspec(dllexport) int __cdecl ReloadedRecoverMapToSource(

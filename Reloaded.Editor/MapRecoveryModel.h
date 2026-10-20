@@ -85,6 +85,18 @@ namespace MapRecoveryModel
         return static_cast<int>(std::floor(done * 100.0 / total + 1e-9));
     }
 
+    // The package recovery moves a map's embedded assets to, named after the
+    // recovered map: <stem>_Assets, anything but ASCII letters, digits and
+    // underscores made an underscore, and Recovery_ before a leading digit.
+    inline std::string AssetPackageName(const std::string& stem)
+    {
+        std::string name = stem + "_Assets";
+        for (auto& c : name)
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) c = '_';
+        if (name.front() >= '0' && name.front() <= '9') name.insert(0, "Recovery_");
+        return name;
+    }
+
     // Saving writes the playable and source maps; from there on a cancel
     // would leave files the user did not ask for, so the stage runs to the end.
     inline bool CancelAllowed(Stage stage) { return stage < Stage::Saving; }

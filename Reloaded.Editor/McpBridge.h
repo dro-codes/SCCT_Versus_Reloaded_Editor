@@ -53,6 +53,13 @@ namespace McpBridge
     // Whether the dialog watchdog answered a question it did not know during
     // the call running now: mcp.plan runs no further step once it has.
     bool DialogBlocked();
+    // For the handler of the call running now, on the frame's thread: a
+    // progress message for that call ({"t": "progress", "stage", ...extra}),
+    // and whether its client has asked to cancel it. Only the ops
+    // Mcp::Bridge::Cancellable lists ever see a cancel; outside a bridge call
+    // the one does nothing and the other is false.
+    void OpProgress(const std::string& stage, const Workflow::Json& extra = Workflow::Json::object());
+    bool OpCancelRequested();
 
     // The bridge calls that changed the map, newest last: undo.call checks a
     // call's transactions are still the newest undoable ones before undoing.

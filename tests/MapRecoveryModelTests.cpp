@@ -113,6 +113,13 @@ void Rules()
     Check(UnifyMappings({}).empty(), "no surfaces");
 }
 
+void AssetPackages()
+{
+    Check(AssetPackageName("OffsD_Recovered") == "OffsD_Recovered_Assets", "the asset package is named after the recovered map");
+    Check(AssetPackageName("Off-s D") == "Off_s_D_Assets", "other characters become underscores");
+    Check(AssetPackageName("2Fort") == "Recovery_2Fort_Assets", "a leading digit gets a prefix");
+}
+
 int main()
 {
     try
@@ -120,6 +127,7 @@ int main()
         Stages();
         Summaries();
         Rules();
+        AssetPackages();
     }
     catch (const std::exception& e)
     {

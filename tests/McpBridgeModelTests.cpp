@@ -42,6 +42,9 @@ void Policies()
     Check(Bridge::FindPolicy("exec")->policy==Bridge::Policy::Raw,"exec raw");
     Check(!Bridge::FindPolicy("no.such.op"),"unknown op");
     Check(!Bridge::FindPolicy("surface.texture")->joinable,"surface texturing keeps its own step");
+    Check(Bridge::FindPolicy("map.recover")->policy==Bridge::Policy::File && !Bridge::FindPolicy("map.recover")->joinable,"map.recover writes files");
+    // A running call stops on a cancel only when its op reads the flag.
+    for(const auto& p:Bridge::OpPolicies())Check(Bridge::Cancellable(p.name)==(std::string(p.name)=="map.recover"),"only map.recover is cancellable while it runs");
     for(const auto& op:Bridge::OpList())Check(op.at("policy")!="blocked","blocked ops are not advertised");
     Check(!Bridge::Mutates(Bridge::Policy::Read) && Bridge::Mutates(Bridge::Policy::File),"mutates");
 }
