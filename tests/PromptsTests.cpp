@@ -199,8 +199,11 @@ void RegisteredPrompts()
     // The recovery recipe: the dry run, missing packages, the report, what is not 1:1.
     const auto recover = registry.FindPrompt("recover_map")->messages({{"source", "OffsD"}, {"goal", "add Disk Hunt"}}, context)[0]["content"]["text"].get<std::string>();
     for (const char* needle : {"`source:\"OffsD\"`", "dryRun:true", "SCCT-Maps", "what:\"recovery\"", "frame:[actor, ...]", "map_validate", "profile:\"draft\"", "not a 1:1 copy",
-                               "RecoveredVolume<n>", "Recalculate Selected Lighting", "MCP_TOOL_TIMEOUT", "Never save it under the compiled map's own name", "The user wants: add Disk Hunt."})
+                               "RecoveredVolume<n>", "Recalculate Selected Lighting", "MCP_TOOL_TIMEOUT", "Never save it under the compiled map's own name", "The user wants: add Disk Hunt.",
+                               "before you start", "cancels the call", "Xbox-only actor kept"})
         Check(recover.find(needle) != std::string::npos, std::string("recover_map explains: ") + needle);
+    // A client that stops waiting cancels the recovery: it does not finish on its own.
+    Check(recover.find("regardless") == std::string::npos, "recover_map does not promise the recovery finishes when the client gives up");
     Check(recover.find("Ask the user what to change.") == std::string::npos && recover.find("`source:\"OffsD\"` and `dryRun:true`") != std::string::npos, "recover_map passes only the arguments given");
     const auto merged = registry.FindPrompt("recover_map")->messages({{"source", "OffsD"}, {"merge", "false"}, {"keepXboxOnly", "true"}, {"name", "OffsR"}}, context)[0]["content"]["text"].get<std::string>();
     Check(merged.find("`source:\"OffsD\"`, `name:\"OffsR\"`, `merge:false`, `keepXboxOnly:true` and `dryRun:true`") != std::string::npos && merged.find("Ask the user what to change.") != std::string::npos,

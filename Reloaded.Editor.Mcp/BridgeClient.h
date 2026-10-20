@@ -18,6 +18,11 @@
 // "awaiting_approval", details {ticket, call}). The result still arrives
 // later; Call("approval.status", {ticket, waitMs}) returns it once it has
 // ({pending:false, ok, result | error, state}) and otherwise asks the editor.
+//
+// Heartbeat: while a call waits, every kHeartbeatMs with nothing from the
+// editor (one long engine step of a build or a recovery) is reported to
+// CallOptions::progress as Heartbeat(), so a client whose tool timeout
+// restarts with each progress report keeps waiting.
 #include "McpTool.h"
 #include <atomic>
 #include <filesystem>
@@ -62,6 +67,11 @@ namespace Mcp
         void Resume();
         // Process ids of editors with a bridge pipe, from the pipe namespace.
         static std::vector<unsigned long> Discover();
+        // {t:"progress", id, stage:"running", heartbeat:true, seconds}: seconds
+        // since the call was sent; while a change waits for approval, stage
+        // "awaiting_approval" and its ticket.
+        static constexpr unsigned kHeartbeatMs = 15000;
+        static Json Heartbeat(uint64_t id, unsigned seconds, const std::string& ticket = {});
 
     private:
         struct Impl;

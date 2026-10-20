@@ -288,12 +288,16 @@ namespace Mcp::Tools
     }
 
     // --------------------------------------------------------- editor calls
+    // "45 s", "12 min": how long a call has run, for heartbeats.
+    inline std::string RunTime(unsigned seconds) { return seconds < 120 ? std::to_string(seconds) + " s" : std::to_string(seconds / 60) + " min"; }
     inline std::string ProgressText(const std::string& op, const Json& message)
     {
         const auto stage = message.value("stage", std::string());
         if (stage == "awaiting_approval")
             return "Waiting for the user to approve the change in the editor (ticket " +
                    (message.contains("ticket") ? (message.at("ticket").is_string() ? message.at("ticket").get<std::string>() : message.at("ticket").dump()) : std::string("?")) + ").";
+        // BridgeClient's own while the editor sends nothing (BridgeClient.h).
+        if (message.value("heartbeat", false)) return op + ": still running, " + RunTime(message.value("seconds", 0u)) + " in";
         std::string text = op + (stage.empty() ? std::string() : ": " + stage);
         if (message.contains("message") && message.at("message").is_string()) text += " - " + message.at("message").get<std::string>();
         if (message.contains("step") && message.at("step").is_string()) text += " (" + message.at("step").get<std::string>() + ")";

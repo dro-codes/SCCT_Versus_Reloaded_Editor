@@ -1,10 +1,12 @@
 // Recovering compiled maps over MCP: RecoveryReportModel.h (the report's
 // categories, the editor's default names, Recovery.txt read back), map_recover
-// against a FakeBridge (the preflight, dry runs, progress, each refusal,
-// cancelling), map_file open of a compiled map, and map_query what:"recovery"
-// on tests/mcp/fixtures/Recovery.txt, with and without the editor. Run from
-// the repository root: it reads the fixture and Reloaded.Editor/MapRecovery.cpp.
+// against a FakeBridge (the preflight, dry runs, progress and heartbeats, each
+// refusal, cancelling), map_file open of a compiled map, workflow_request
+// refusing map.recover, and map_query what:"recovery" on
+// tests/mcp/fixtures/Recovery.txt, with and without the editor. Run from the
+// repository root: it reads the fixture and Reloaded.Editor/MapRecovery.cpp.
 #include "../Reloaded.Editor.Mcp/McpServer.h"
+#include "../Reloaded.Editor.Mcp/BridgeClient.h"
 #include "../Reloaded.Editor.Mcp/FakeBridge.h"
 #include "../Reloaded.Editor.Mcp/RecoveryReportModel.h"
 #include "../Reloaded.Editor.Mcp/Tools/Common.h"
@@ -49,7 +51,7 @@ struct Harness
         fs::create_directories(dir/"System");
         fs::create_directories(dir/"Packages"/"MapsEd");
         fs::create_directories(dir/"Packages"/"Maps");
-        RegisterSessionTools(registry);RegisterQueryTools(registry);
+        RegisterSessionTools(registry);RegisterQueryTools(registry);RegisterEscapeTools(registry);
         ServerOptions o;o.systemDir=dir/"System";o.workDir=dir/"work";o.version="test-1";
         o.cancel=[this]{++cancels;stop=true;};
         server=std::make_unique<Server>(registry,fake,o,[this](const std::string& line){std::lock_guard<std::mutex> g(m);out.push_back(Json::parse(line));});
@@ -162,6 +164,15 @@ void Model()
     files.insert("Maps\\OffsD_Recovered_3.sdc");files.insert("MapsEd\\Recovery\\OffsD_Recovered_4");
     Check(Recovery::DefaultName("OffsD",exists)=="OffsD_Recovered_5","a playable copy or a scratch folder");
     Check(Recovery::AssetPackage("9Lives")=="Recovery_9Lives_Assets" && Recovery::AssetPackage("Offs-D")=="Offs_D_Assets","asset package names as the editor makes them");
+    // A source's stem made into a name a map can have, short enough for every number.
+    Check(Recovery::DefaultName("Offs-D v2",{})=="Offs_D_v2_Recovered" && Recovery::DefaultName("9Lives",{})=="Map_9Lives_Recovered" &&
+          Recovery::DefaultName("Caf\xC3\xA9",{})=="Caf___Recovered","other characters become _, a leading digit gets Map_");
+    const std::string longStem(60,'X');
+    Check(Recovery::DefaultBase(longStem).size()+std::string("_Recovered_10000").size()<=40 && Recovery::DefaultBase("")=="Map","bounded, never empty");
+    // Recovery.txt in the ANSI code page (a user folder with an accented letter).
+    const auto ansi=Recovery::Utf8Text("Normal source map: C:\\Users\\Jos\xE9\\OffsD_Recovered.sdc\n");
+    Check(Recovery::ValidUtf8(ansi) && !Recovery::ValidUtf8("Jos\xE9") && Contains(ansi,"OffsD_Recovered.sdc") && Recovery::Utf8Text("Jos\xC3\xA9")=="Jos\xC3\xA9",
+          "read back as UTF-8: "+ansi);
     Check(Recovery::Stem("C:\\Game\\Packages\\Maps\\OffsD.SDC")=="OffsD" && Recovery::Stem("Packages/Maps/OffsD.sdc")=="OffsD" && Recovery::Stem("OffsD")=="OffsD","stems");
 }
 
@@ -178,7 +189,8 @@ void DryRun()
     Check(call->args.at("source")=="OffsD" && call->args.at("discard")==false && call->args.at("keepXboxOnly")==false && call->args.at("maxRows")==200 && !call->args.contains("merge"),
           "the contract's arguments; merge left to the editor's setting");
     Check(Contains(Text(dry),"Dry run") && Contains(Text(dry),"42 imported packages") && Contains(Text(dry),"Nothing was changed"),"what would happen");
-    Check(Contains(Text(dry),"MCP_TOOL_TIMEOUT"),"the client's timeout is mentioned before a long call");
+    Check(Contains(Text(dry),"MCP_TOOL_TIMEOUT") && Contains(Text(dry),"cancels it") && !Contains(Text(dry),"regardless"),"the client's timeout is to be raised before a long call");
+    Check(call->busyMs>0 && call->busyMs<=10000 && call->timeoutMs<=300000,"the preflight does not wait out a busy editor");
     const auto& next=Structured(dry).at("next");
     Check(next[0].at("tool")=="map_recover" && next[0].at("args").at("name")=="OffsD_Recovered_2" && !next[0].at("args").contains("dryRun"),"next runs it for real");
     Check(Structured(dry).at("preflight").at("checks").size()==3 && Structured(dry).at("undo").is_null(),"the editor's checks; nothing to undo");
@@ -194,6 +206,10 @@ void DryRun()
     for(const char* name:{"Offs R","Offs\"R","OffsR.txt"})
         Check(h.Call("map_recover",{{"source","OffsD"},{"name",name},{"dryRun",true}}).at("isError")==true,std::string("name refused: ")+name);
     Check(h.Call("map_recover",{{"source","OffsD.txt"},{"dryRun",true}}).at("isError")==true && h.fake.Count("map.recover")==2,"a source that is not a .sdc never reaches the editor");
+    // A source with characters a map name cannot have gets a default it can.
+    h.fake.Clear("editor.state");h.fake.On("editor.state",Harness::State());
+    auto odd=h.Call("map_recover",{{"source","C:\\Downloads\\Offs-D v2.sdc"},{"dryRun",true}});
+    Check(odd.at("isError")==false && h.fake.Last("map.recover")->args.at("destination")=="Offs_D_v2_Recovered.sdc","the default name is made a map name: "+Text(odd));
 }
 void Success()
 {
@@ -204,7 +220,12 @@ void Success()
         Check(o.timeoutMs>=3u*3600u*1000u,"hours to finish");
         const char* stages[]={"Preparing","Loading the compiled map","Building geometry","Building geometry","Saving"};
         const int percents[]={0,4,51,62,93};
-        for(int i=0;i<5;++i)o.progress({{"t","progress"},{"id",9},{"stage",stages[i]},{"stageIndex",i},{"percent",percents[i]}});
+        for(int i=0;i<5;++i)
+        {
+            o.progress({{"t","progress"},{"id",9},{"stage",stages[i]},{"stageIndex",i},{"percent",percents[i]}});
+            // A long stage without checkpoints: the bridge client's heartbeats.
+            if(i==2)for(unsigned seconds:{15u,30u,754u})o.progress(BridgeClient::Heartbeat(9,seconds));
+        }
         o.progress({{"t","progress"},{"id",9},{"stage","busy"},{"reason","modal"},{"message","A dialog is open."}});
         return Recovered(a);
     });
@@ -239,6 +260,14 @@ void Success()
         if(i)Check(p.at("progress").get<double>()>progress[i-1].at("params").at("progress").get<double>(),"progress rises");
     }
     Check(geometry,"a stage reads with its percent: "+progress[3].dump());
+    // Heartbeats repeat the stage and rise, but stay below the next stage's value.
+    const auto& beat=progress[6].at("params");
+    Check(beat.at("message")=="Recovering OffsD: Building geometry (51%), 12 min in" && beat.at("progress").get<double>()>51 && beat.at("progress").get<double>()<52 &&
+          progress[7].at("params").at("progress")==62,"a heartbeat: "+beat.dump());
+    const auto heartbeat=BridgeClient::Heartbeat(4,20,"t-7");
+    Check(heartbeat.at("heartbeat")==true && heartbeat.at("stage")=="awaiting_approval" && heartbeat.at("ticket")=="t-7" && BridgeClient::Heartbeat(4,20).at("stage")=="running" &&
+          BridgeClient::kHeartbeatMs<=30000,"the heartbeat message");
+    Check(Tools::ProgressText("map.save",BridgeClient::Heartbeat(4,754))=="map.save: still running, 12 min in","any other call shows it too");
     // A clean report.
     h.fake.Clear("map.recover");
     h.fake.On("map.recover",[](const Json& a,const CallOptions& o){if(o.dryRun)return Preflight(a);auto r=Recovered(a);r["rows"]=Json::array();r["rowsTotal"]=0;r["categories"]=Json::object();return r;});
@@ -262,12 +291,25 @@ void Refusals()
     h.Touch("MapsEd\\OffsD_Recovered.sdc");
     auto taken=refuse(Bridge::Code::Refused,"Packages\\MapsEd\\OffsR.sdc already exists.","destination_exists");
     Check(Contains(Text(taken),"another name") && Contains(Text(taken),"OffsR_Assets.usx") && Structured(taken).at("next")[0].at("args").at("name")=="OffsD_Recovered_2","another name is suggested: "+Text(taken));
+    // The editor's own suggestion wins, and the message speaks of name, not destination.
+    auto suggested=refuse(Bridge::Code::Refused,"The destination OffsR is taken: C:\\Game\\Packages\\MapsEd\\OffsR.sdc already exists, and recovery never replaces a file. "
+                                                "Choose another destination, such as \"OffsD_Recovered_7\".","destination_exists",
+                          Json{{"existing",{"C:\\Game\\Packages\\MapsEd\\OffsR.sdc"}},{"suggestion","OffsD_Recovered_7"}});
+    Check(Contains(Text(suggested),"The name OffsR is taken: C:\\Game\\Packages\\MapsEd\\OffsR.sdc already exists") && !Contains(Text(suggested).substr(0,Text(suggested).find("\n\n")),"destination") &&
+          Contains(Text(suggested),"such as \"OffsD_Recovered_7\"") && Structured(suggested).at("next")[0].at("args").at("name")=="OffsD_Recovered_7","one name, the editor's: "+Text(suggested));
     auto unsaved=refuse(Bridge::Code::Refused,"The open map has unsaved changes.","unsaved_changes");
     Check(Contains(Text(unsaved),"MAP NEW") && Contains(Text(unsaved),"discard: true") && Structured(unsaved).at("next")[0].at("tool")=="map_file","unsaved changes");
     auto sourceMap=refuse(Bridge::Code::Refused,"OffsD.sdc is in Packages\\MapsEd.","source_map");
     Check(Contains(Text(sourceMap),"map_file action:\"open\"") && Structured(sourceMap).at("next")[0].at("args").at("path")=="OffsD","a source map is opened, not recovered");
     auto busy=refuse(Bridge::Code::Busy,"A map recovery is running.","rebuild");
     Check(Contains(Text(busy),"Rebuild All Maps") && Structured(busy).at("next")[0].at("tool")=="editor_status" && Structured(busy).at("retryable")==true,"a running recovery");
+    Check(Contains(Text(busy),"before anything ran") && Contains(Text(busy),"Nothing was started"),"the preflight says nothing ran: "+Text(busy));
+    auto modal=refuse(Bridge::Code::Busy,"The editor did not take the call within 10 seconds: A dialog is open in the editor; ask the user to close it.","modal");
+    const auto modalText=Text(modal).substr(0,Text(modal).find("\n\n"));
+    Check(modalText.find("ask the user to close it")==modalText.rfind("ask the user to close it") && Contains(modalText,"leave its progress window open"),"the hint once: "+modalText);
+    auto checkTimeout=refuse(Bridge::Code::Timeout,"map.recover did not finish within 300 s; the editor was asked to cancel it.","");
+    Check(Contains(Text(checkTimeout),"did not take the checks") && Contains(Text(checkTimeout),"Nothing was started") && !Contains(Text(checkTimeout),"may still be running"),
+          "a check that timed out is not a recovery that may be running: "+Text(checkTimeout));
     // Failures of the recovery itself, after the preflight passed.
     auto failing=[&](const std::string& code,const std::string& message,const Json& extra=Json::object())
     {
@@ -283,8 +325,28 @@ void Refusals()
     Check(!Contains(Text(unmerged),"try again with merge: false") && Structured(unmerged).at("next").size()==1,"not when merging was already off");
     auto cancelled=failing(Bridge::Code::Cancelled,"map.recover was cancelled; it may still have run.");
     Check(Structured(cancelled).at("code")=="cancelled" && Contains(Text(cancelled),"new, empty map") && Contains(Text(cancelled),"were removed"),"a cancelled recovery says what is left: "+Text(cancelled));
-    auto slow=failing(Bridge::Code::Timeout,"map.recover did not finish within 10800 s.");
-    Check(Contains(Text(slow),"MapRecovery") && Structured(slow).at("next")[0].at("tool")=="editor_log","a timeout points at the log");
+    // The editor's own account of a cancel: no new map, or files that remain.
+    auto unreset=failing(Bridge::Code::Cancelled,"Recovery was cancelled. The editor could not start a new map; restart it before opening another map. The files it had written were removed.");
+    Check(Contains(Text(unreset),"could not start a new map") && !Contains(Text(unreset),"new, empty map") && Structured(unreset).at("next")[0].at("tool")=="editor_restart",
+          "a failed reset asks for a restart: "+Text(unreset));
+    auto remain=failing(Bridge::Code::Cancelled,"Recovery was cancelled. The editor now has a new empty map; nothing was saved. Some files were in use and remain: C:\\Game\\Packages\\MapsEd\\Recovery\\OffsR.");
+    Check(Contains(Text(remain),"remain: C:\\Game") && !Contains(Text(remain),"were removed") && Contains(Text(remain),"another name") &&
+          Structured(remain).at("next")[1].at("tool")=="map_recover" && Structured(remain).at("next")[1].at("args").at("name")!="OffsR","files that remain keep the name taken: "+Text(remain));
+    auto slow=failing(Bridge::Code::Timeout,"map.recover did not finish within 10800 s; the editor was asked to cancel it.");
+    Check(Contains(Text(slow),"next stage") && !Contains(Text(slow),"may still be running") && Structured(slow).at("next")[1].at("args").at("contains")=="MapRecovery","a timeout says the recovery stops: "+Text(slow));
+    // An unknown dialog stopped the call: after it began saving the recovery finished; before, it stopped.
+    auto saved=failing(Bridge::Code::DialogBlocked,"A dialog opened and was answered with its most cautious button.");
+    Check(Contains(Text(saved),"so it finished") && Contains(Text(saved),"Do not run map_recover again") && Structured(saved).at("next")[0].at("args").at("file")=="OffsR",
+          "a dialog while saving: "+Text(saved));
+    h.fake.Clear("map.recover");
+    h.fake.On("map.recover",[](const Json& a,const CallOptions& o)->Json
+    {
+        if(o.dryRun)return Preflight(a);
+        throw Bridge::Error(Bridge::Code::DialogBlocked,"A dialog opened.","unknown_dialog",
+                            {{"cause",{{"code","cancelled"},{"message","Recovery was cancelled. The editor now has a new empty map; nothing was saved. The files it had written were removed."}}}});
+    });
+    auto early=h.Call("map_recover",{{"source","OffsD"},{"name","OffsR"}});
+    Check(Contains(Text(early),"stopped at the dialog") && Contains(Text(early),"new empty map") && Structured(early).at("code")=="dialog_blocked","a dialog before saving: "+Text(early));
     // A failed recovery that left its files: those names stay taken, so the retry gets another.
     h.fake.Clear("map.recover");
     h.fake.On("map.recover",[](const Json& a,const CallOptions& o)->Json
@@ -352,8 +414,21 @@ void OpenCompiled()
     Check(Structured(h.Call("map_file",{{"action","open"},{"path",inGame}})).at("reason")=="compiled_map" && h.fake.Count("map.open")==0,"this game's Packages\\Maps in full: "+inGame);
     h.fake.Fail("map.open",Bridge::Code::Refused,"D:\\Other\\Packages\\Maps\\OffsD.sdc is a compiled map.","compiled_map");
     auto bridge=h.Call("map_file",{{"action","open"},{"path","D:\\Other\\Packages\\Maps\\OffsD.sdc"},{"dryRun",true}});
-    Check(bridge.at("isError")==true && Contains(Text(bridge),"is a compiled map.") && Contains(Text(bridge),"map_recover (source \"D:\\Other\\Packages\\Maps\\OffsD.sdc\""),
+    Check(bridge.at("isError")==true && Contains(Text(bridge),"is a compiled map") && Contains(Text(bridge),"map_recover (source \"D:\\Other\\Packages\\Maps\\OffsD.sdc\""),
           "the bridge's refusal names map_recover too: "+Text(bridge));
+    // The bridge's wording (map.open, destination) is replaced, and the path it resolved is the source.
+    h.fake.Clear("map.open");
+    h.fake.Fail("map.open",Bridge::Code::Refused,"D:\\Other\\Packages\\Maps\\OffsD.sdc is a compiled map. Use map.recover, such as {\"source\": \"OffsD\", \"destination\": \"OffsD_Recovered\"}.",
+                "compiled_map",Json{{"path","D:\\Other\\Packages\\Maps\\OffsD.sdc"}});
+    auto relative=h.Call("map_file",{{"action","open"},{"path","..\\Maps\\OffsD.sdc"}});
+    Check(!Contains(Text(relative),"destination") && !Contains(Text(relative),"map.open") && Structured(relative).at("next")[0].at("args").at("source")=="D:\\Other\\Packages\\Maps\\OffsD.sdc",
+          "in the tools' terms, from the resolved path: "+Text(relative));
+    h.fake.Clear("map.open");
+    // A bare name only Packages\Maps has is the compiled map.
+    h.Touch("Maps\\XyzD.sdc");
+    const auto asked=h.fake.Count("map.open");
+    auto bare=h.Call("map_file",{{"action","open"},{"path","XyzD"}});
+    Check(Structured(bare).at("reason")=="compiled_map" && h.fake.Count("map.open")==asked && Contains(Text(bare),"map_recover"),"a bare compiled name: "+Text(bare));
     // A stock map's editable source in Packages\MapsEd comes first: the original file.
     h.Touch("MapsEd\\OffsD.sdc");
     auto twin=h.Call("map_file",{{"action","open"},{"path","Packages\\Maps\\OffsD.sdc"}});
@@ -364,6 +439,19 @@ void OpenCompiled()
     h.fake.On("map.open",Harness::State(false,"C:\\Game\\Packages\\MapsEd\\OffsD.sdc"));
     const auto opens=h.fake.Count("map.open");
     Check(h.Call("map_file",{{"action","open"},{"path","OffsD"}}).at("isError")==false && h.fake.Count("map.open")==opens+1,"a source map opens as before");
+    Check(h.fake.Last("map.open")->args.at("path")=="OffsD.sdc","a bare name is the .sdc in Packages\\MapsEd");
+}
+// workflow_request does not run map.recover: its timeout would cancel it, and in a plan no cancel reaches it.
+void RequestRefused()
+{
+    Harness h;
+    h.fake.On("map.recover",Json::object());
+    auto direct=h.Call("workflow_request",{{"op","map.recover"},{"args",{{"source","OffsD"},{"destination","OffsR"}}}});
+    Check(direct.at("isError")==true && Structured(direct).at("reason")=="use_map_recover" && Structured(direct).at("next")[0].at("tool")=="map_recover","map.recover on its own: "+Text(direct));
+    auto planned=h.Call("workflow_request",{{"op","mcp.plan"},{"args",{{"pre",{{{"id","rec"},{"op","map.recover"},{"args",{{"source","OffsD"},{"destination","OffsR"}}}}}},
+                                                                       {"post",{{{"op","map.save"}}}}}}});
+    Check(planned.at("isError")==true && Structured(planned).at("reason")=="not_in_plan" && Contains(Text(planned),"step \"rec\""),"map.recover in a plan: "+Text(planned));
+    Check(h.fake.Count("map.recover")==0 && h.fake.Count("mcp.plan")==0,"neither reached the editor");
 }
 void QueryRecovery()
 {
@@ -376,6 +464,13 @@ void QueryRecovery()
     Check(s.at("categories").size()==6 && s.at("categories")[0].at("category")=="Actor left out" && s.at("categories")[0].at("count")==2 && s.at("categories")[0].contains("meaning"),"the tally");
     Check(s.at("rows")[4].at("actor")=="RecoveredVolume12" && s.at("facts").at("Retained actors")==1311 && Contains(s.at("assetPackage").get<std::string>(),"_Assets.usx"),"rows, facts, asset package");
     Check(Contains(Text(offline),"9 items: 2 Actor left out") && Contains(Text(offline),"To do:") && Contains(Text(offline),"[Thin brush] RecoveredVolume12"),"the text: "+Text(offline));
+    Check(!Contains(Text(offline),"\"rows\"") && !Contains(Text(offline),"\"categories\"") && Contains(Text(offline),"\"facts\""),"the text block does not repeat the rows as JSON");
+    // A report whose paths are in the ANSI code page still reads.
+    fs::create_directories(h.dir/"ansi");
+    std::ofstream(h.dir/"ansi"/"Recovery.txt",std::ios::binary)<<"Normal source map: C:\\Users\\Jos\xE9\\OffsD_Recovered.sdc\r\n\r\nBrushes: 1 cell\r\n\r\nItems that did not come back cleanly (1):\r\n"
+                                                                  "Thin brush\tRecoveredVolume1\tJos\xE9\r\n";
+    auto ansi=h.Call("map_query",{{"what","recovery"},{"file",PathText(h.dir/"ansi"/"Recovery.txt")}});
+    Check(ansi.at("isError")==false && Structured(ansi).at("rowsAll")==1,"an ANSI path does not fail the report: "+Text(ansi));
     auto thin=h.Call("map_query",{{"what","recovery"},{"file",PathText(fixture)},{"category","thin BRUSH"},{"limit",1},{"offset",1}});
     Check(Structured(thin).at("rowsTotal")==2 && Structured(thin).at("rows").size()==1 && Structured(thin).at("rows")[0].at("item")=="RecoveredVolume907" && !Structured(thin).contains("nextOffset"),
           "by category, any case, paged");
@@ -418,7 +513,7 @@ void Listed()
 
 int main()
 {
-    try{Model();DryRun();Success();Refusals();Cancel();OpenCompiled();QueryRecovery();Listed();}
+    try{Model();DryRun();Success();Refusals();Cancel();OpenCompiled();RequestRefused();QueryRecovery();Listed();}
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
     std::cout<<"McpRecoverTools passed\n";
     return 0;

@@ -12,6 +12,7 @@
 #include "../Reloaded.Editor/WorkflowModel.h"
 #include <cctype>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <sstream>
@@ -85,15 +86,29 @@ namespace Mcp::Recovery
                 "MapsEd\\Recovery\\" + destinationStem};
     }
     inline std::string ReportFile(const std::string& destinationStem) { return "MapsEd\\Recovery\\" + destinationStem + "\\Recovery.txt"; }
+    // The source's stem as a map name takes it: letters, digits and
+    // underscores (anything else becomes '_', as the bridge's Recover::FreeName
+    // does), "Map_" before a leading digit, and short enough that any
+    // DefaultName stays within 40 characters, well inside the editor's limits
+    // on the map name and its StaticMeshes asset package's path.
+    inline std::string DefaultBase(const std::string& sourceStem)
+    {
+        std::string base;
+        for (unsigned char ch : sourceStem) base += ch < 0x80 && (std::isalnum(ch) || ch == '_') ? static_cast<char>(ch) : '_';
+        if (base.empty()) base = "Map";
+        if (std::isdigit(static_cast<unsigned char>(base.front()))) base.insert(0, "Map_");
+        return base.substr(0, 40 - std::string("_Recovered_10000").size());
+    }
     // The name File > Recover Compiled Map gives its output: <source>_Recovered,
     // then _Recovered_2, _3, ... until none of its outputs exists
-    // (MapRecovery.cpp UniqueRecoveryPath). exists is asked about each
-    // Outputs() path; empty when every name up to _10000 is taken.
+    // (MapRecovery.cpp UniqueRecoveryPath), from DefaultBase. exists is asked
+    // about each Outputs() path; empty when every name up to _10000 is taken.
     inline std::string DefaultName(const std::string& sourceStem, const std::function<bool(const std::string& relative)>& exists)
     {
+        const auto base = DefaultBase(sourceStem);
         for (unsigned index = 0; index < 10000; ++index)
         {
-            const auto name = sourceStem + "_Recovered" + (index ? "_" + std::to_string(index + 1) : std::string());
+            const auto name = base + "_Recovered" + (index ? "_" + std::to_string(index + 1) : std::string());
             bool taken = false;
             if (exists)
                 for (const auto& output : Outputs(name)) taken = taken || exists(output);
@@ -179,6 +194,48 @@ namespace Mcp::Recovery
     }
 
     // ----------------------------------------------------------- the report
+    // Recovery.txt's paths are in the ANSI code page the editor wrote them in
+    // (path::string()), which for a folder with an accented letter is not
+    // UTF-8. Read back through filesystem::path, which takes a narrow string
+    // in that code page on Windows; any byte still not UTF-8 becomes U+FFFD.
+    inline size_t Utf8Length(const std::string& text, size_t at)
+    {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        const size_t length = lead < 0x80 ? 1 : lead >= 0xC2 && lead < 0xE0 ? 2 : lead >= 0xE0 && lead < 0xF0 ? 3 : lead >= 0xF0 && lead < 0xF5 ? 4 : 0;
+        if (!length || at + length > text.size()) return 0;
+        for (size_t i = 1; i < length; ++i)
+            if ((static_cast<unsigned char>(text[at + i]) & 0xC0) != 0x80) return 0;
+        return length;
+    }
+    inline bool ValidUtf8(const std::string& text)
+    {
+        for (size_t at = 0; at < text.size();)
+        {
+            const auto length = Utf8Length(text, at);
+            if (!length) return false;
+            at += length;
+        }
+        return true;
+    }
+    inline std::string Utf8Text(const std::string& text)
+    {
+        if (ValidUtf8(text)) return text;
+        std::string from = text;
+        try
+        {
+            const auto converted = std::filesystem::path(text).u8string();
+            from.assign(converted.begin(), converted.end());
+        }
+        catch (const std::exception&) {}
+        std::string out;
+        for (size_t at = 0; at < from.size();)
+        {
+            const auto length = Utf8Length(from, at);
+            out += length ? from.substr(at, length) : std::string("\xEF\xBF\xBD");
+            at += length ? length : 1;
+        }
+        return out;
+    }
     struct Report
     {
         std::string summary;            // the counts block, lines joined by \n

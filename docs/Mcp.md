@@ -241,9 +241,12 @@ it took). Reads and dry runs are not recorded. The folder is kept under
 
 **Long calls.** A geometry build may take up to 15 minutes, a full build
 (`map_build what:"all"`) up to an hour and a recovery (`map_recover`) up to three
-hours before the server gives up; progress is reported meanwhile. Some MCP
-clients stop waiting sooner on their own (Claude Code's limit is set with the
-`MCP_TOOL_TIMEOUT` environment variable, in milliseconds). A cancelled request
+hours before the server gives up; progress is reported meanwhile, and while
+the editor sends none (one long engine step) the server reports a heartbeat
+every 15 seconds, so a client whose timeout restarts with each progress report
+keeps waiting. Some MCP clients stop waiting sooner on their own (Claude Code's
+limit is set with the `MCP_TOOL_TIMEOUT` environment variable, in
+milliseconds), and a client that stops waiting cancels the request. A cancelled request
 is dropped if it has not started, and taken out of the review window if it is
 waiting there; a change already running in the editor finishes, except a
 recovery, which stops at its next stage until it starts saving. A tool that waits without the editor (`editor_launch`,
@@ -402,7 +405,9 @@ Compiled Map** (see the [README](../README.md)) without its dialogs:
   `Packages\Maps\OffsD.sdc`, or a full path to a `.sdc`. A map in
   `Packages\MapsEd` is already editable: it is refused as `source_map`.
 - **`name`**: the new map in `Packages\MapsEd`. Without it, the name the menu
-  gives: `<source>_Recovered`, then `_Recovered_2` and so on, past the names
+  gives: `<source>_Recovered` (characters other than letters, digits and
+  underscores become `_`, a leading digit gets `Map_`, and the source's part is
+  cut to 24 characters), then `_Recovered_2` and so on, past the names
   whose map, `Packages\Maps` copy, `StaticMeshes\<name>_Assets.usx` or
   `MapsEd\Recovery\<name>` folder exist. Recovery never replaces a file
   (`destination_exists`).
@@ -417,16 +422,23 @@ changes, that no recovery or Rebuild All Maps is running (`busy`), and that
 every package the compiled map imports is installed (`missing_packages`, with
 the names in `details.missing`): a missing package would stop the editor at a
 modal dialog. `dryRun: true` runs only these checks; a real call runs them
-first too, with a short timeout, so a refusal comes back in seconds.
+first too, without retrying a busy editor, so a refusal comes back in seconds
+and a busy editor in about ten. Whatever the checks run into, nothing has
+started and the error says so.
 
 The recovery reports each stage (`Loading the compiled map`, `Merging
 fragmented geometry`, `Building geometry`, `Restoring lighting`, `Saving`, ...)
-as progress, with its percent of the whole. It takes minutes, and an hour or
-more for a big map on a slow PC; raise the client's tool timeout for it
-(`MCP_TOOL_TIMEOUT` for Claude Code). Cancelling the request stops it at the
-next stage until it starts saving, and leaves a new, empty map and none of the
-files it had written (`cancelled`); a cancel during saving is not taken. It is
-not an Undo step.
+as progress, with its percent of the whole, and repeats the stage with the
+time so far at least every 15 seconds. It takes minutes, and an hour or more
+for a big map on a slow PC; raise the client's tool timeout before running it
+(`MCP_TOOL_TIMEOUT` for Claude Code; 10800000 covers the server's three hours).
+Cancelling the request, which a client that stops waiting does too, stops it at
+the next stage until it starts saving, and leaves a new, empty map and none of
+the files it had written (`cancelled`, with the editor's own account when it
+could not start the new map or some files were in use); a cancel during saving
+is not taken. A dialog the bridge does not know (`dialog_blocked`) stops it the
+same way, unless it was saving: then the recovery finished and the error says
+so. It is not an Undo step.
 
 The result has `file`, `seconds`, `counts` (BSP cells, structural brushes,
 faces, polygons, actors, what merging did), `recoverySummary`, `categories`
@@ -440,6 +452,7 @@ profile:"draft"`.
 | Category | What it means | What to do |
 | --- | --- | --- |
 | Actor left out | An Xbox-only actor was not recreated. | Usually nothing; recover again with `keepXboxOnly` to keep them. |
+| Xbox-only actor kept | An Xbox-only actor kept as common content (`keepXboxOnly`). | Look at it: the PC version never showed it. |
 | Reference cleared | A property pointed at an actor left out or deleted; it is now None. | Point it at a suitable actor if gameplay needs it. |
 | Asset moved | An embedded mesh or material moved into `StaticMeshes\<name>_Assets.usx`. | Ship that package with the map. |
 | Thin brush | A sliver brush from the BSP's splits. | Leave it unless you edit there. |
@@ -521,7 +534,10 @@ Arguments of the ops made for the MCP server (the others take the shapes
   overwrite}`, `build.all {}`, `editor.quit {discard}`. `map.open` refuses a
   compiled map in `Packages\Maps` (`refused` / `compiled_map`).
 - `map.recover {source, destination, merge, keepXboxOnly, discard, maxRows}`:
-  never part of a plan, cancellable while it runs. A dry run returns the
+  only on its own, cancellable while it runs. `workflow_request` refuses it
+  (`use_map_recover`: `map_recover` runs it), and so does a plan holding it
+  (`not_in_plan`: the server refuses any such plan, the editor one of more
+  than one step). A dry run returns the
   checks `{dryRun, source, destination, merge, keepXboxOnly, imports, missing,
   sourceBytes, checks}`; a recovery `{ok, file, source, merge, keepXboxOnly,
   seconds, summary, counts, categories, rows, rowsTotal, report, folder}`, with
@@ -1024,13 +1040,13 @@ what follows as the current state, not a promise:
 | `refused` / `unsaved_map` | The map has no file yet, and its packages, `.uas` and release copy are named after it. Save it first (`map_file action:"save_as"`). |
 | `refused` / `denied_command` | `editor_exec` never runs that command (see [Limits and safety](#limits-and-safety)); use the tool that does it with its checks. |
 | A build or `.uas` times out in the client | Raise the client's tool timeout; the editor finishes the build regardless, and `editor_status` shows the result. |
-| `map_recover` times out in the client | A recovery can take an hour or more. Raise the client's tool timeout (Claude Code: `MCP_TOOL_TIMEOUT`, in milliseconds); the editor finishes the recovery regardless, and `editor_status` and `map_query what:"recovery"` show the result. |
+| `map_recover` times out in the client | A recovery can take an hour or more, and a client that stops waiting cancels it: it stops at its next stage, unless it is saving, and leaves a new, empty map. Raise the client's tool timeout before running it again (Claude Code: `MCP_TOOL_TIMEOUT`, in milliseconds); `editor_status` and `map_query what:"recovery"` show whether it finished. |
 | `refused` / `compiled_map` | `map_file open` was given a compiled map from `Packages\Maps`. Recover it with `map_recover` (the error names the call). |
 | `refused` / `missing_packages` | The compiled map imports packages this game does not have (`details.missing`). Install them (`.utx` in Textures, `.usx` StaticMeshes, `.uax` Sounds, `.ukx` Animations, `.u` System), for example from the SCCT-Maps collection, and try again. |
 | `refused` / `destination_exists` | The recovered map's name is taken (its map, `Packages\Maps` copy, asset package or Recovery folder). Pass another `name`; the error suggests one. |
 | `refused` / `source_map` | The source is an editable map in `Packages\MapsEd`: open it with `map_file open`. |
-| `busy` during `map_recover` | A recovery started from the File menu, or Rebuild All Maps, is running. Wait for it to finish. |
-| `cancelled` from `map_recover` | The recovery stopped: the editor has a new, empty map and the files it had written were removed. |
+| `busy` during `map_recover` | A recovery started from the File menu, or Rebuild All Maps, is running (it can show as `modal`, `slow_task` or a timeout of the checks); nothing was started. Wait for it to finish, and leave its progress window open: closing it cancels that recovery. |
+| `cancelled` from `map_recover` | The recovery stopped: the editor has a new, empty map and the files it had written were removed, unless the message says the editor could not start the new map (restart it) or some files remain (recover under another name). |
 | `editor_launch` waits and fails | A startup window (an update offer, crash recovery, a missing package) is waiting for you; answer it, then `editor_status`. `System\Reloaded_Editor.exe.log` says why the launcher failed. |
 | Video frames fail | Install ffmpeg and set `[Mcp] Ffmpeg` to its `ffmpeg.exe`, or put it on `PATH`. |
 | Output paths refused | Leave the path out to write in the work folder, or add the folder to `[Mcp] WriteRoots`. |

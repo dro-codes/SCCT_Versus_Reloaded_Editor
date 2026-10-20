@@ -303,7 +303,8 @@ void Mutations()
     h.fake.On("editor.state",OpenState());
     h.Result("resources/subscribe",{{"uri","scct://editor/state"}});
     h.Result("resources/subscribe",{{"uri","scct://rules"}});
-    h.fake.Progress("design.build",Json::array({{{"t","progress"},{"stage","building"}}}));
+    // A long build's heartbeats (BridgeClient while the editor sends nothing) are progress too.
+    h.fake.Progress("design.build",Json::array({{{"t","progress"},{"stage","building"}},BridgeClient::Heartbeat(3,15),BridgeClient::Heartbeat(3,150)}));
     h.fake.On("design.build",Json(true));
     h.fake.On("mapcheck.run",Json{{"rows",Json::array({{{"severity","warning"},{"message","Brush is not closed"}},{{"severity","error"},{"message","No PlayerStart"}}})},{"summary","1 error"}});
     h.Clear();
@@ -313,6 +314,8 @@ void Mutations()
     auto progress=h.Notes("notifications/progress");
     Check(progress.size()>=2 && progress[0].at("params").at("progressToken")=="p1","progress notifications carry the token");
     for(size_t i=1;i<progress.size();++i)Check(progress[i].at("params").at("progress").get<double>()>progress[i-1].at("params").at("progress").get<double>(),"progress rises");
+    Check(std::any_of(progress.begin(),progress.end(),[](const Json& p){return p.at("params").value("message",std::string())=="design.build: still running, 2 min in";}),
+          "a heartbeat says how long it has run");
     auto updates=h.Notes("notifications/resources/updated");
     Check(updates.size()==1 && updates[0].at("params").at("uri")=="scct://editor/state","subscribers of live resources hear about changes");
     h.Clear();
