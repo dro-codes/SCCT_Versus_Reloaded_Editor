@@ -12,6 +12,9 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
+    <Filter Include="Header Files\Importers">
+      <UniqueIdentifier>{F5FE5A11-4160-447F-93A9-CF4881145DE7}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\Tools">
       <UniqueIdentifier>{1720BBC7-0530-4DDD-AB6C-7E21B754152E}</UniqueIdentifier>
     </Filter>
@@ -29,22 +32,27 @@
     <ClCompile Include="Resources.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="BridgeClient.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="Prompts.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="Media.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="Tools\SessionTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\QueryTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\ValidateTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\SpecTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\IntentTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\EscapeTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\ImportTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\MediaTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\ReleaseTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="..\Reloaded.Editor\WorkflowModel.cpp"><Filter>Shared Files</Filter></ClCompile>
     <ClCompile Include="..\Reloaded.Editor\RecoveredPolygonImport.cpp"><Filter>Shared Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BridgeClient.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="BrushImportModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Embedded.gen.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Embedded.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="FakeBridge.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="GeometricEventModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="GridPlanModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ImageCodec.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LevelRulesModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LevelSpecCompiler.h"><Filter>Header Files</Filter></ClInclude>
@@ -52,9 +60,26 @@
     <ClInclude Include="McpProtocolModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpServer.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpTool.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Media.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PlanRender.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="resource.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Tools\Common.h"><Filter>Header Files\Tools</Filter></ClInclude>
+    <ClInclude Include="Importers\Authoring.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Common.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Csv.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\GeoJson.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Grid.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\ImagePlan.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Import.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Obj.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\PlanShapes.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\QuakeMap.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\R6vPlacements.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Svg.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\T3d.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Tiled.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Vmf.h"><Filter>Header Files\Importers</Filter></ClInclude>
+    <ClInclude Include="Importers\Xml.h"><Filter>Header Files\Importers</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\CameraNetworkModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\LevelSnapshotModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\MagicEventModel.h"><Filter>Shared Files</Filter></ClInclude>

@@ -48,7 +48,7 @@ The rule catalogue is not embedded, to keep this recipe short: read `scct://rule
 
    {{#briefing}}Briefing and legend source: {{briefing}}.{{/briefing}}
 5. **Interface textures.** These go in package `<File>-i`, with no group.
-   - Prepare images (power of two):
+   - Prepare images with `image_convert` (power of two; `slot` sets the size and alpha for each):
      - `Menu` 256 × 256, alpha with the Menu fade mask;
      - `Briefing` 256 × 256, alpha;
      - `LoadingATT0` 512 × 512;

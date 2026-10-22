@@ -41,8 +41,9 @@ const std::vector<std::string> kSlugs = {"home", "spawn-points", "game-modes", "
     "buttons-and-hacking-panels", "level-ingredients", "zones-and-volumes", "softbody-actors", "animated-meshes", "fish", "map-tutorials", "map-packaging"};
 const std::set<std::string> kTools = {"editor_status", "editor_launch", "editor_restart", "editor_undo", "approval_wait", "editor_log", "map_file", "map_build",
     "map_query", "view_screenshot", "plan_render", "map_validate", "level_spec_validate", "level_build", "blockout", "gameplay", "security", "mechanisms",
-    "events", "environment", "geometric_events", "map_settings", "release", "actors_edit", "map_changes_apply", "workflow_request", "editor_exec"};
-const std::set<std::string> kPrompts = {"create_level_from_description", "versus_starter", "add_game_mode",
+    "events", "environment", "geometric_events", "map_settings", "release", "actors_edit", "map_changes_apply", "workflow_request", "editor_exec",
+    "import_to_spec", "media_extract_frames", "media_read_image", "image_convert", "assets_import"};
+const std::set<std::string> kPrompts = {"create_level_from_description", "create_level_from_media", "create_level_from_file", "versus_starter", "add_game_mode",
     "design_security", "ge_pass", "review_map_against_wiki", "fix_validation", "prepare_release"};
 // snake_case words in backticks that are not tools: tool actions, error codes and outside names.
 const std::set<std::string> kOtherWords = {"rename_tag", "copy_properties", "save_as", "awaiting_approval", "not_connected", "protocol_mismatch", "dialog_blocked",
@@ -151,7 +152,7 @@ void RegisteredPrompts()
     RegisterPrompts(registry);
     std::set<std::string> names;
     for (const auto& p : registry.prompts) names.insert(p.name);
-    Check(names == kPrompts, "exactly the eight prompts are registered");
+    Check(names == kPrompts, "exactly the ten prompts are registered");
     NoBridge bridge;
     ToolContext context{bridge, {}, {}};
     for (const auto& t : PromptTemplates::Templates())
@@ -188,6 +189,10 @@ void RegisteredPrompts()
                 Reject([&] { Json missing = full; missing.erase(argument.name); p->messages(missing, context); });
         Reject([&] { Json extra = minimal; extra["no_such_argument"] = "x"; p->messages(extra, context); });
     }
+    // The media prompt explains the division of labour and the scale references.
+    const auto media = registry.FindPrompt("create_level_from_media")->messages({{"media", "clip.mp4"}}, context)[0]["content"]["text"].get<std::string>();
+    for (const char* needle : {"The server does not interpret media. You do.", "media_extract_frames", "measurement grid", "180 uu tall", "100 uu per metre", "96 × 128", "≤ 35 uu"})
+        Check(media.find(needle) != std::string::npos, std::string("create_level_from_media explains: ") + needle);
     const auto described = registry.FindPrompt("create_level_from_description")->messages({{"description", "a dam"}, {"mapName", "HOOVER"}}, context)[0]["content"]["text"].get<std::string>();
     Check(described.find("**Map name:** HOOVER") != std::string::npos && described.find("choose a short evocative name") == std::string::npos, "sections follow the arguments");
 }

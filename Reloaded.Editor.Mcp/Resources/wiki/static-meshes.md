@@ -64,6 +64,7 @@ Placing meshes:
 - Movers, `SGamePlayObject`s and tutorial paths take a `StaticMesh` the same way.
 
 Importing:
+- `assets_import` brings OBJ/ASE models in as static mesh assets in a map-owned `<Map>_STM` package.
 - Converting brushes to static meshes (Convert to Static Mesh) is a manual editor step (spike S7). The tools report the steps instead.
 
 Caution: replacing materials on stock StaticMesh packages modifies those packages. The release checks refuse stock package writes.

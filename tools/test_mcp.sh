@@ -45,12 +45,16 @@ suites=(
     "GeometricEventModelTests|tests/GeometricEventModelTests.cpp"
     "ImageCodecTests|tests/ImageCodecTests.cpp"
     "PlanRenderTests|tests/PlanRenderTests.cpp"
+    "GridPlanModelTests|tests/GridPlanModelTests.cpp $W"
+    "BrushImportModelTests|tests/BrushImportModelTests.cpp $W $P"
+    "ImportersTests|tests/ImportersTests.cpp $W $P"
     "PromptsTests|tests/PromptsTests.cpp $W"
     "McpServerTests|tests/McpServerTests.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/EscapeTools.cpp $W $P -pthread"
     "McpSpecToolsTests|tests/McpSpecToolsTests.cpp $M/Tools/SpecTools.cpp $M/Tools/IntentTools.cpp $M/Tools/ValidateTools.cpp $W $P -pthread"
+    "McpMediaToolsTests|tests/McpMediaToolsTests.cpp $M/Media.cpp $M/Tools/MediaTools.cpp $M/Tools/ImportTools.cpp $W $P -pthread"
     "McpReleaseToolsTests|tests/McpReleaseToolsTests.cpp $M/Tools/ReleaseTools.cpp"
     # The server itself, from the sources Reloaded.Editor.Mcp.vcxproj lists.
-    "Reloaded.Editor.Mcp|$M/main.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Prompts.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/ValidateTools.cpp $M/Tools/SpecTools.cpp $M/Tools/IntentTools.cpp $M/Tools/EscapeTools.cpp $M/Tools/ReleaseTools.cpp $W $P -pthread"
+    "Reloaded.Editor.Mcp|$M/main.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Prompts.cpp $M/Media.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/ValidateTools.cpp $M/Tools/SpecTools.cpp $M/Tools/IntentTools.cpp $M/Tools/EscapeTools.cpp $M/Tools/ImportTools.cpp $M/Tools/MediaTools.cpp $M/Tools/ReleaseTools.cpp $W $P -pthread"
 )
 
 failures=()

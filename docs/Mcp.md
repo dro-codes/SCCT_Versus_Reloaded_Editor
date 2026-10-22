@@ -3,7 +3,7 @@
 `Reloaded.Editor.Mcp.exe` is an [MCP](https://modelcontextprotocol.io) server
 for the RE+ editor. It lets an AI agent such as Claude Code or Claude Desktop
 read, edit, build and check Versus maps in the running editor, and build a
-whole level from a description.
+whole level from a description, a video, a floor plan or another game's map.
 
 The agent does the thinking: it reads the wiki digests, looks at your pictures
 and writes the level down. The server does the exact work: it compiles that
@@ -64,6 +64,7 @@ RequireApproval=0
 AllowRawExec=0
 AllowPlay=0
 HistoryMaxMB=200
+Ffmpeg=
 WriteRoots=
 ```
 
@@ -74,8 +75,9 @@ WriteRoots=
 | `AllowRawExec` | 0 | `editor_exec` may run console commands. Only the INI sets it. |
 | `AllowPlay` | 0 | The `play.level` op may start Play Level. Only the INI sets it. |
 | `HistoryMaxMB` | 200 | The most the call history may take, 1 to 100,000 MB; the oldest files go first. |
-| `WriteRoots` | empty | Extra folders, separated by `;`, that may be written besides the work folder: by a release copy (besides `<Game>\Releases`) and by an `editor_exec` command's `FILE=`. |
-| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder: saved specs. The editor allows a release copy and an `editor_exec` `FILE=` there too. Not written by default: add `WorkDir=<folder>` to move it. |
+| `Ffmpeg` | empty | The `ffmpeg.exe` that `media_extract_frames` may run when Media Foundation cannot read a video. Empty: the one on `PATH`, if any. |
+| `WriteRoots` | empty | Extra folders, separated by `;`, that may be written besides the work folder: by the media and import tools, by a release copy (besides `<Game>\Releases`), and by an `editor_exec` command's `FILE=`. |
+| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder: extracted frames, converted images, imported specs, saved specs. The editor allows a release copy and an `editor_exec` `FILE=` there too. Not written by default: add `WorkDir=<folder>` to move it. |
 
 The editor writes the missing keys (all but `WorkDir`) the first time it starts
 with this version. It reads them when it starts, so edit the INI with the editor
@@ -96,7 +98,7 @@ claude mcp add scct-reloaded -- "C:\Games\SCCT Versus\System\Reloaded.Editor.Mcp
 ```
 
 Add `--scope user` to have it in every project. In Claude Code, `/mcp` lists the
-server with its 27 tools, its resources and its prompts; prompts appear as
+server with its 32 tools, its resources and its prompts; prompts appear as
 `/mcp__scct-reloaded__<prompt>` commands.
 
 **Claude Desktop.** **Settings > Developer > Edit Config** opens
@@ -246,7 +248,8 @@ Code's limit is set with the `MCP_TOOL_TIMEOUT` environment variable, in
 milliseconds). A cancelled request is dropped if it has not started, and taken
 out of the review window if it is waiting there; a change already running in
 the editor finishes. A tool that waits without the editor (`editor_launch`,
-`editor_restart`'s wait for the editor to close, `approval_wait`) stops at its next check or progress report, so the next request
+`editor_restart`'s wait for the editor to close, `approval_wait`, frame
+extraction) stops at its next check or progress report, so the next request
 does not queue behind it.
 
 ### Approval
@@ -270,21 +273,21 @@ answer. While a change waits for approval, other calls get `busy` /
 
 ## Tools
 
-27 tools in seven groups. Each tool's own description, as the client shows it,
+32 tools in eight groups. Each tool's own description, as the client shows it,
 is the full reference; this section gives each one's purpose and its main
 arguments.
 
 Every tool that changes something takes `dryRun` and `label`, and returns
 `summary`, `created`, `changed`, `warnings`, `undo` (`{call, steps}`;
 `editor_undo` takes the `call`) and `next` (suggested follow-up calls).
-Pictures (screenshots, plans) come back as MCP image content.
+Pictures (screenshots, plans, frames) come back as MCP image content.
 Errors come back as tool results marked `isError`, with `code`, `reason`, a
 `hint` and whether retrying can help. An error carries those details as
 `structuredContent` only when they fit the tool's `outputSchema`; otherwise
 (`map_validate`, `level_spec_validate`) they are in the text block, since
 clients validate any `structuredContent` they get, errors included.
 
-To keep `tools/list` small (about 57 KB for the 27 tools), the
+To keep `tools/list` small (about 75 KB for the 32 tools, from 150 KB), the
 descriptions give each argument's shape and point at three documents the
 agent reads as resources: `scct://docs/tools` (the conventions every tool
 shares: units, ids, positions, how the intent tools merge, the two forms of a
@@ -364,6 +367,16 @@ are listed as standing and do not. Each description lists the fields;
 | `map_changes_apply` | A `scct.map-changes` `document` as written by hand ([MapAuthoring.md](MapAuthoring.md)), with `baseDirectory` for relative texture paths. Its `texture` and `save` operations write only the map's own packages, `<Map>_<name>` (or a texture into `MyLevel`): another package is refused as `refused` / `not_map_owned` (or `package_name`, `interface_package`), and any before the map's first save as `unsaved_map`. A `load` alone is allowed. |
 | `workflow_request` | One bridge op by name: `op` and `args`. `scct://docs/ops` lists every op with its policy and arguments; see [Bridge ops](#bridge-ops). |
 | `editor_exec` | One console `command`. Off unless `AllowRawExec=1` (else `refused` / `raw_exec_off`). Even then it is refused (see [Limits and safety](#limits-and-safety) for the whole list) for commands that quit, crash or relaunch the editor, run a file of commands, replace, save, load, import or export the map, packages or files, undo blindly or reach the sound driver (`denied_command`); a `FILE=` outside the work folder and `WriteRoots` (`outside_write_roots`); a `PACKAGE=` other than the map's own (`not_map_owned`); and more than one command (`invalid`). The description lists the editor's deny list. Console commands skip the stale checks and may not be undoable. |
+
+### Import and media
+
+| Tool | Purpose and main arguments |
+| --- | --- |
+| `import_to_spec` | Turns a file into a level spec: `source` (a full path, or `"live"` for the open map), `format` (default `auto`), `options` for the importer, `plan`, `maxEdge`. Returns the spec (also saved in the work folder), a report of warnings and assumptions, the compiler's diagnostics and a plan image. Read-only. See [Importers](#importers). |
+| `assets_import` | Imports textures and static meshes into the map's own packages and saves them: `items` (1-64) of `{kind: texture|staticmesh, file, package, group, name, ...}`, `save`, `overwrite`. OBJ files are converted to ASE first. The map must be saved under its name first. Not undoable. RE+'s own **Import OBJ Mesh** reads an OBJ itself, with hull collision and parts: see [Meshes](#status-and-known-limitations). |
+| `media_extract_frames` | Still frames from a video as PNGs, attached as images: `video`, `mode` (`interval`, `count` or `scene`), `intervalS`, `count`, `start`, `end`, `threshold`, `maxEdge`, `sheet` (a contact sheet), `attach`, `outDir`, `backend`. |
+| `media_read_image` | Opens an image for the agent to look at, with `crop`, `maxEdge`, `enlarge`, a labelled measurement `grid` (`spacingPx`, or `cellUu` with `uuPerPx`, `origin`), its `palette` and occupancy. |
+| `image_convert` | Makes a texture-ready image: power-of-two `size`, or an interface `slot` (Menu, Briefing, LoadingATT0, LoadingDEF0); `fit`, `format` (tga, bmp, png), `alpha`, `background`, `out`, `overwrite`. |
 
 ### Release
 
@@ -500,6 +513,8 @@ points at `scct://rules`, which it no longer embeds (the catalogue alone is
 | Prompt | Arguments (required in bold) | What it does |
 | --- | --- | --- |
 | `create_level_from_description` | **description**, mapName, modes, profile | Designs and builds a complete map from a written description. |
+| `create_level_from_media` | **media**, mapName, modes, knownSize, notes | Rebuilds a place from a video, screenshots, photos or a plan image. |
+| `create_level_from_file` | **path**, format, mapName, options | Imports a structured file and finishes it into a playable map. |
 | `versus_starter` | mapName, roomSize, corridorLength, extras | The RE+ Versus starter layout with the wiki's gaps filled. |
 | `add_game_mode` | **mode**, details | Adds Story, Story sectors, Disk Hunt or Deathmatch with its Map Settings entry. |
 | `design_security` | area, intensity, details | Alarms, detectors, door locks and the CamNet. |
@@ -655,22 +670,24 @@ in the panel. `polygons` makes plain polygon brushes, for per-face textures.
 
 Every example plays all three modes, and all five compile with no errors or
 warnings in both profiles. The meshes and sounds in all but `versus-starter`
-are placeholders in the map's own packages: import real ones before applying
-those examples.
+are placeholders in the map's own packages: import real ones (`assets_import`)
+before applying those examples.
 
 ## Building a level from any input
 
 **What the agent does, and what the server does.** The server never interprets
-pictures, video or prose. The agent looks at the images, reads the
+pictures, video or prose. The agent looks at the frames and images, reads the
 description, decides what the place is (rooms, doors, heights, objectives) and
-writes a spec, recording its sources in `provenance`. The server compiles the
-spec with the wiki's defaults, checks it, builds it and shows the result to
-compare with the source.
+writes a spec, recording its sources in `provenance`. The server extracts
+frames, draws measurement grids, reads exact formats, compiles the spec with
+the wiki's defaults, checks it, builds it and shows the result to compare with
+the source.
 
 The usual loop:
 
 1. `editor_status`; read `scct://wiki/index` and `scct://rules`.
-2. Turn the input into a spec: by hand from a description or from images.
+2. Turn the input into a spec: by hand from a description, from frames and
+   images, or with `import_to_spec`.
 3. Calibrate the scale (below).
 4. `level_spec_validate` and `plan_render`: fix errors, compare the plan with
    the source.
@@ -682,13 +699,67 @@ The usual loop:
 8. `map_file action:"save_as"`, `editor_restart`, then `map_settings`,
    `map_validate profile:"release"` and `release`.
 
-The `create_level_from_description` prompt walks an agent through this.
+The `create_level_from_*` prompts walk an agent through this.
+
+**Video.** `media_extract_frames` takes frames at intervals, a fixed count, or
+at each cut (`scene`), and can tile them into a contact sheet. It reads video
+through Windows Media Foundation, and falls back to ffmpeg (`[Mcp] Ffmpeg`, or
+`PATH`) for files Media Foundation cannot read.
+
+**Images.** `media_read_image` shows an image (or a crop of it) with a labelled
+grid in pixels or Unreal units, its main colours, and a cell-by-cell map of
+what is drawn, which turns a plan into a grid the agent can transcribe.
 
 **Scale.** Find something of known size and measure it in pixels: a standing
 player is about 180 units tall and 96 wide, a door about 96 by 128, a metre
 about 100 units, a stair riser at most 35. Then `uuPerPx` = its size in units
 divided by its size in pixels. A spec can also be written in metres or feet
 (`units`).
+
+### Importers
+
+`import_to_spec` reads these formats, chosen by extension and contents or by
+`format`:
+
+| Format | Files | What it becomes |
+| --- | --- | --- |
+| `level-spec` | `.json` | Checked and returned with its defaults filled in. |
+| `map-changes` | `.json` | Its operations become `extra.operations`. |
+| `map-authoring` | `.json`, or `"live"` | A map export (**View > Export Map to JSON**, or the open map): `existing.refs` to extend the map in place (`mode: "refs"`, the default) or a spec that rebuilds it (`mode: "recreate"`). |
+| `grid` | `.txt`, `.grid`, `.csv` | An ASCII or CSV grid, one character per cell (below). |
+| `image` | `.png`, `.bmp`, `.tga` | A raster floor plan read by colour into the grid importer, with an overlay of how each cell was read. JPEG, GIF and TIFF are decoded with Windows' codecs first. |
+| `svg` | `.svg` | Rects and polygons are rooms; `data-kind` or `class` marks starts, objectives, cameras, doors and GEs; layers are storeys. |
+| `tiled` | `.tmj`, `.tmx` | Tile layers become the grid, object layers rooms and markers. |
+| `geojson` | `.geojson`, `.json` | Polygons are rooms (holes are pillars), Points markers, by `properties.kind`. |
+| `csv` | `.csv`, `.tsv` | A table of actors (class, x, y, z, yaw, id, tag, event, then any properties). |
+| `t3d` | `.t3d` | Unreal T3D: CSG brushes as polygon brushes, volumes, starts, lights, meshes and other actors. |
+| `vmf` | `.vmf` | A Hammer map. SCCT's world is solid, so a hull is carved and the brushes are added back; scale 2.5 and Y mirrored by default. |
+| `quake` | `.map` | Quake, Half-Life, Quake 3 and Doom 3 maps, the same way; scale 3.2 by default. |
+| `obj`, `ase` | `.obj`, `.ase` | A mesh's size and parts, as an asset for `assets_import` (never level geometry). |
+| `r6v` | `.json` | R6 Vegas converter placements as StaticMeshActor props. |
+
+The grid legend (`options.legend` changes it):
+
+```
+#  solid              .  floor             S  spy start      M  merc start
+O  terminal objective F  flag              Z  flag drop zone B  bomb target
+K  disk               D  door              V  vent           C  camera
+L  light              A  ammo              H  infirmary      N  CamNet camera
+X  laser
+```
+
+Row 1 is the north edge. Each cell is 128 units (`cell`); `--- storey N ---`
+starts another floor 384 units up (`storeyHeight`). Floor cells are cut into
+the fewest large rectangles, each a Room 320 tall (`roomHeight`), or a
+Corridor when its short side is 256 or less (`corridorMax`); V cells are vents.
+
+A raster plan uses the same meanings by colour: black solid, white floor, blue
+spy, red merc, green terminal, magenta door, cyan vent and so on
+(`options.colors {"#rrggbb": meaning}` changes them; `media_read_image`'s
+palette shows a plan's colours).
+
+An import is a starting point. Read its report's assumptions and warnings,
+compare the plan with the source, then check and build as above.
 
 ## Validation
 
@@ -760,6 +831,8 @@ What the server and the editor never do, whatever the agent asks:
   work folder or `WriteRoots`, compared after `..` and links are resolved
   (else `refused` / `outside_write_roots`), so its `overwrite` only ever
   replaces files there; the Optimise Map Assets window still takes any folder.
+  The media and import tools write only in the work folder and `WriteRoots`,
+  and run only the ffmpeg you configured.
 - **Run console commands.** `editor_exec` is off unless `AllowRawExec=1`. Even
   then the editor refuses a command that starts with any of these, read word
   by word as its console reads them (any case, blanks skipped, a word ending
@@ -781,7 +854,7 @@ What the server and the editor never do, whatever the agent asks:
   other than `MyLevel` or the map's own `<Map>_<name>`, `<Map>-i` or
   `Amb_<Map>`, and any but `MyLevel` before the map's first save
   (`not_map_owned`); and anything but one command of up to 4,096 characters on
-  one line, without `|` (`invalid`). The map, package and undo tools
+  one line, without `|` (`invalid`). The map, package, import and undo tools
   do these things with their checks.
 - **Open windows or skip checks.** Ops that open windows, undo blindly or
   write without a stale check are blocked over the pipe.
@@ -791,8 +864,8 @@ computer, one client at a time.
 
 ## Status and known limitations
 
-The server, the level spec compiler and the rules are covered by the model and
-server test suites (`tools/test_mcp.cmd`,
+The server, the level spec compiler, the rules, the importers and the media
+helpers are covered by the model and server test suites (`tools/test_mcp.cmd`,
 [tests/README.md](../tests/README.md#mcp-server)). The editor side (the pipe,
 the ops and the menu) has been checked against a stubbed editor; **the native
 probe and the end-to-end run in a real editor have not passed yet**, so treat
@@ -810,9 +883,22 @@ what follows as the current state, not a promise:
 - **Restarting the editor.** `editor_restart` needs the editor to close without
   a question; if one appears (for example about unsaved changes), answer it,
   or restart the editor yourself when told.
-- **Meshes.** `asset.mesh` imports ASE files with `STATICMESH IMPORT`;
-  collision can only be checked, not set. Mesh packages are saved as
-  `Packages\StaticMeshes\<Map>_STM.usx`.
+- **Video.** Media Foundation reading has not run on Windows yet; ffmpeg is the
+  fallback (`[Mcp] Ffmpeg` or `PATH`). Windows N editions without Media
+  Foundation need ffmpeg.
+- **Meshes.** `asset.mesh` imports ASE files with `STATICMESH IMPORT`; the
+  ASE that OBJ files are converted to has not been tried in the editor's
+  importer yet, and collision can only be checked, not set. Mesh packages are
+  saved as `Packages\StaticMeshes\<Map>_STM.usx`. RE+'s own **File > Import
+  OBJ Mesh** is the other way for an OBJ, and the one to use for collision:
+  `workflow_request` with `objimport.preview` (what it would make), then
+  `objimport.import` into `MyLevel` or `<Map>_STM`, builds convex hulls and
+  splits a mesh past the game's 5,512 collision triangles into parts. Over
+  MCP it imports, with the `.mtl`'s textures, only into `MyLevel` or the
+  map's own `<Map>_<name>` package (else `refused` / `not_map_owned`,
+  `package_name`, or `unsaved_map` before the map's first save). It does not
+  save: `map_file` saves `MyLevel` with the map, `package.save` a
+  `<Map>_STM`.
 - **Other unsupported ops.** `object.inspect` and `object.set` (non-actor
   objects) refuse with manual steps. Brush movers are not supported; movers
   are static meshes.
@@ -833,6 +919,8 @@ what follows as the current state, not a promise:
   answer or the client goes away.
 - The DLL sends no change events of its own yet: live resources are marked
   updated after each change the server makes, not after your own edits.
+- `tools/list` is about 75 KB; the import and media tools' descriptions
+  (about 20 KB) are now its largest part.
 
 ## Troubleshooting
 
@@ -859,6 +947,8 @@ what follows as the current state, not a promise:
 | `refused` / `denied_command` | `editor_exec` never runs that command (see [Limits and safety](#limits-and-safety)); use the tool that does it with its checks. |
 | A build or `.uas` times out in the client | Raise the client's tool timeout; the editor finishes the build regardless, and `editor_status` shows the result. |
 | `editor_launch` waits and fails | A startup window (an update offer, crash recovery, a missing package) is waiting for you; answer it, then `editor_status`. `System\Reloaded_Editor.exe.log` says why the launcher failed. |
+| Video frames fail | Install ffmpeg and set `[Mcp] Ffmpeg` to its `ffmpeg.exe`, or put it on `PATH`. |
+| Output paths refused | Leave the path out to write in the work folder, or add the folder to `[Mcp] WriteRoots`. |
 
 The bridge's own messages go to RE+'s log as lines starting `MCP:`;
 `editor_log` shows the engine's lines to the agent, and the history folder has

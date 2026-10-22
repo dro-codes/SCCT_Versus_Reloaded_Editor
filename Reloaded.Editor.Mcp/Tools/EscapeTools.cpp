@@ -344,7 +344,7 @@ void RegisterEscapeTools(Registry& registry)
         t.description =
             "Runs one editor console command and returns its output. Off unless the user sets [Mcp] AllowRawExec=1 in System\\Reloaded_Editor.ini. Refused "
             "(code refused): commands that quit, run files of commands, replace, save, load, import or export the map, packages or files, or undo blindly: " + denied +
-            " (reason denied_command; use map_file, editor_undo and the other tools); any FILE= outside the work folder and [Mcp] "
+            " (reason denied_command; use map_file, editor_undo, assets_import and the other tools); any FILE= outside the work folder and [Mcp] "
             "WriteRoots (outside_write_roots); any PACKAGE= other than the map's own <Map>_<name>, <Map>-i, Amb_<Map> or MyLevel (not_map_owned); and "
             "more than one command (| or a line break: code invalid). Console commands bypass the staleness checks and may not be undoable: a last resort.";
         t.inputSchema = S::Mutating(S::Input({{"command", S::String("The console command, one line.")}}, {"command"}));

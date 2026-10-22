@@ -48,8 +48,8 @@ namespace
         std::error_code ignored;
         return std::filesystem::absolute(argv0 ? argv0 : ".", ignored).parent_path();
     }
-    // [Mcp] WorkDir, else %ProgramData%\REPlusMcp: where the tools keep their
-    // files.
+    // [Mcp] WorkDir, else %ProgramData%\REPlusMcp: where media helpers and
+    // imports keep their files.
     std::filesystem::path WorkFolder(const std::filesystem::path& system)
     {
         const auto mcp = Mcp::Tools::IniSection(system / "Reloaded_Editor.ini", "Mcp");

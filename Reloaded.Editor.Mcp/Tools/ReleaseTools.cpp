@@ -507,7 +507,8 @@ namespace
             if (found == s.files.end())
             {
                 if (mine)
-                    f.Add("error", "release.dependencies", "map-packaging", "The map uses its own package " + name + ", but no file of it is in Packages: save it (package.save, or the browser's Save) or the map cannot load.");
+                    f.Add("error", "release.dependencies", "map-packaging", "The map uses its own package " + name + ", but no file of it is in Packages: save it (package.save, or the browser's Save) or the map cannot load.",
+                          Fix("assets_import", {{"save", true}}, "Import into it again and save it."));
                 else
                     f.Add("error", "release.dependencies", "map-packaging", "The map uses " + name + ", but no package of that name is in Packages, so the game cannot load the map. Restore the package, or replace what the map takes from it.");
                 continue;

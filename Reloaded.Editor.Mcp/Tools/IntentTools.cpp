@@ -323,7 +323,7 @@ namespace
                 std::error_code error;
                 if (path.is_relative() && !c.workDir.empty() && std::filesystem::exists(c.workDir / path, error)) it.value() = PathText(c.workDir / path);
                 else if (!std::filesystem::exists(path, error))
-                    notes.push_back("interface." + it.key() + ": " + text + " is not a file on this machine; give the image's full path.");
+                    notes.push_back("interface." + it.key() + ": " + text + " is not a file on this machine; give the image's full path (image_convert prepares one).");
             }
         if (Has(a, "minimap"))
         {

@@ -123,6 +123,7 @@ Writing the settings:
 
 Interface textures:
 - `map_settings` with `interface` (bridge op `interface.texture`) imports `Menu`/`Briefing` (256, DXT5, alpha) and `LoadingATT0`/`LoadingDEF0` (512, DXT1) into `<Map>-i`.
+- `image_convert` prepares power-of-two images first.
 
 Order of operations:
 - Map Settings needs the save → exit → reopen cycle. Run `map_file action:"save_as"`, then `editor_restart`, before `map_settings`.

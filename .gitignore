@@ -63,3 +63,6 @@ __pycache__/
 /artifacts/
 /notify.log
 /tools/SCDAMapConverter/
+
+# Wavefront OBJ test fixtures (not compiled objects)
+!/tests/mcp/fixtures/*.obj

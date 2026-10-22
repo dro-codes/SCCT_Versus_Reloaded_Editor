@@ -93,7 +93,7 @@ The dialogs are image-only.
 - When the headless build is not available, the tool returns the manual Sound Browser steps above.
 
 Importing sounds:
-- Import WAV files in the Sound Browser by hand, into the map-owned `Amb_<Map>` package. Set `Stream` for long loops and music.
+- `assets_import` imports only textures and static meshes. Import WAV files in the Sound Browser by hand, into the map-owned `Amb_<Map>` package. Set `Stream` for long loops and music.
 
 Release checks:
 - `release` and `map_validate profile:"release"` check that `Sounds\<MapFile>.uas` exists and includes `Interface` (and the map's own `Amb_` package when there is one).

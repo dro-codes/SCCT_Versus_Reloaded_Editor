@@ -882,12 +882,16 @@ the built header with the Python script's output.
 | `GeometricEventModelTests` | GE kinds, point order and the wiki's measurements. |
 | `ImageCodecTests` | PNG (every colour type), BMP and TGA decoding against `tests/mcp/fixtures/*.rgba`, inflate and gzip, PNG encoding round trips. |
 | `PlanRenderTests` | Plan size, colours at known points, the golden starter render. |
+| `GridPlanModelTests` | The grid legend, rectangle decomposition, doorways and the golden `grid-basic` spec. |
+| `BrushImportModelTests` | Hammer and Quake brushes clipped to polygons that pass the editor's own polygon check and wind outward. |
+| `ImportersTests` | Every importer on `tests/mcp/fixtures`; each result is a valid spec that compiles with no errors. `--render <dir>` writes the plans as PNGs. |
 | `McpSpecToolsTests` | `level_spec_validate`, `level_build` and the intent tools on all five examples, against a FakeBridge that runs plans as the editor does. |
+| `McpMediaToolsTests` | The media and import tools: frame sampling and scene picking, grids and palettes, `image_convert`, OBJ to ASE, `import_to_spec`, `assets_import`. Video extraction runs only when ffmpeg is on `PATH` (the last line says with or without ffmpeg). |
 | `McpReleaseToolsTests` | The `release` tool against a temporary game folder with a real MapsEd import table and a compressed `<Map>-i.utc`. |
 | `PromptsTests` | The embedded files, every prompt filled, and every tool name and rule id the digests and prompts cite. |
 
-The fixture generator `tests/mcp/fixtures/make_image_fixtures.py` rebuilds the
-binary fixtures.
+The fixture generators `tests/mcp/fixtures/make_image_fixtures.py` and
+`make_import_fixtures.py` rebuild the binary and computed fixtures.
 
 What only a running editor can show is checked in a disposable copy of the game,
 as the native suites above are (see

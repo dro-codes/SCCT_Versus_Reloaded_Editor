@@ -1,8 +1,8 @@
 #pragma once
 // What Reloaded.Editor.Mcp.exe publishes over MCP (tools, resources, prompts)
 // and the editor connection the tools use. Portable C++: everything here
-// builds and is tested without Windows; only BridgeClient.cpp (the pipe)
-// needs it.
+// builds and is tested without Windows; only BridgeClient.cpp (the pipe) and
+// Media.cpp (Media Foundation, WIC) need it.
 #include "../Reloaded.Editor/McpBridgeModel.h"
 #include <filesystem>
 #include <functional>
@@ -184,6 +184,8 @@ namespace Mcp
     void RegisterSpecTools(Registry&);     // level_spec_validate, level_build
     void RegisterIntentTools(Registry&);   // blockout, gameplay, security, mechanisms, events, environment, geometric_events, map_settings
     void RegisterEscapeTools(Registry&);   // actors_edit, map_changes_apply, workflow_request, editor_exec
+    void RegisterImportTools(Registry&);   // import_to_spec, assets_import
+    void RegisterMediaTools(Registry&);    // media_extract_frames, media_read_image, image_convert
     void RegisterReleaseTools(Registry&);  // release
     void RegisterResources(Registry&);     // scct:// resources
     void RegisterPrompts(Registry&);
@@ -195,6 +197,8 @@ namespace Mcp
         RegisterSpecTools(registry);
         RegisterIntentTools(registry);
         RegisterEscapeTools(registry);
+        RegisterImportTools(registry);
+        RegisterMediaTools(registry);
         RegisterReleaseTools(registry);
         RegisterResources(registry);
         RegisterPrompts(registry);

@@ -543,7 +543,7 @@ void RegisterQueryTools(Registry& registry)
             "A PNG of an editor viewport, returned as an image. viewport perspective (default) or top; maxEdge caps the longer side (64-2048, default 1024). "
             "camera {location:[x,y,z], rotation:[pitch,yaw,roll]} places the viewport camera for the shot; frame [actors] points it at those actors; presets: "
             "overview (the top view), spawn:spy, spawn:merc (that team's player starts), objective:<name, Tag or path> (an objective and its devices). The "
-            "camera is put back afterwards. Needs the editor window restored, not minimised.";
+            "camera is put back afterwards. Compare with the source images when building a level from media. Needs the editor window restored, not minimised.";
         t.inputSchema = S::Input({{"viewport", S::Enum({"perspective", "top"}, "Default perspective (top for overview).")},
                                   {"maxEdge", S::Integer("Longer side in pixels. Default 1024.", 64, 2048)},
                                   {"camera", S::Object({{"location", S::Vector3({})}, {"rotation", S::Vector3("Pitch, yaw, roll: 65536 per turn.")}})},

@@ -1,0 +1,14 @@
+{"type":"FeatureCollection","name":"warehouse",
+ "features":[
+  {"type":"Feature","properties":{"kind":"room","id":"Hall","name":"Main hall","storey":0},
+   "geometry":{"type":"Polygon","coordinates":[[[2.3500,48.8500],[2.3504,48.8500],[2.3504,48.8503],[2.3500,48.8503],[2.3500,48.8500]]]}},
+  {"type":"Feature","properties":{"kind":"room","id":"Wing","storey":0},
+   "geometry":{"type":"Polygon","coordinates":[[[2.3504,48.8500],[2.3508,48.8500],[2.3508,48.8502],[2.3506,48.8502],[2.3506,48.8503],[2.3504,48.8503],[2.3504,48.8500]],
+                                                [[2.35065,48.85005],[2.35070,48.85005],[2.35070,48.85010],[2.35065,48.85010],[2.35065,48.85005]]]}},
+  {"type":"Feature","properties":{"kind":"spy","storey":0},"geometry":{"type":"MultiPoint","coordinates":[[2.35005,48.85005],[2.35010,48.85005],[2.35015,48.85005]]}},
+  {"type":"Feature","properties":{"kind":"merc","storey":0,"yaw":180},"geometry":{"type":"MultiPoint","coordinates":[[2.35035,48.85025],[2.35030,48.85025],[2.35025,48.85025]]}},
+  {"type":"Feature","properties":{"kind":"terminal","name":"Ledger","storey":0},"geometry":{"type":"Point","coordinates":[2.35020,48.85015]}},
+  {"type":"Feature","properties":{"kind":"laser","storey":0},"geometry":{"type":"LineString","coordinates":[[2.35002,48.85020],[2.35002,48.85028]]}},
+  {"type":"Feature","properties":{"storey":0},"geometry":{"type":"Point","coordinates":[2.35020,48.85020]}},
+  {"type":"Feature","properties":{"kind":"room","storey":1},"geometry":null}
+ ]}

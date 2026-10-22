@@ -127,6 +127,7 @@ A map that loads and plays in all three modes without softlocks. Each item names
 | Level Properties (`Song`, `fDeathPawnHeight`, `Event`/`SendAtTime`, `MTVOffset`/`MTVSlope`, `GEActivationMask`; `SnapshotCamera`/`MapFloors` through `minimap`) | `level-properties` | `map_settings` (`level`, `minimap`) |
 | `SMapSettings`, interface textures, minimap | `map-settings` | `map_settings` (`settings`, `interface`) |
 | `.uas`, package checks, release archive | `sound-browser`, `map-packaging` | `release` (`release`) |
+| Textures and static meshes from files (sounds are imported by hand in the Sound Browser) | `material-classes`, `static-meshes`, `sound-browser` | `assets_import` |
 | Anything else / direct property edits | (any) | `actors_edit`, `map_changes_apply` |
 
 ## How the MCP tools apply this

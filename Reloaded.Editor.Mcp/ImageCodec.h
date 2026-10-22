@@ -1,7 +1,8 @@
 #pragma once
 // Images without Windows or zlib: PNG, BMP and TGA decoded to 8-bit RGBA,
-// PNG, BMP and TGA encoded, and resizing. The exe uses it for plan renders.
-// Engine-free and Windows-free.
+// PNG, BMP and TGA encoded, and resizing. The exe uses it for plan renders,
+// raster floor plans and texture preparation; WIC (Media.cpp) is only needed
+// for JPEG and video frames. Engine-free and Windows-free.
 //
 // PNG: every colour type (grey, RGB, palette, grey+alpha, RGBA) at the bit
 // depths the format allows (1/2/4/8 for grey and palette, 8 and 16 for the
@@ -988,7 +989,7 @@ namespace Mcp::Image
         if (format == "bmp") return DecodeBmp(bytes);
         if (format == "tga") return DecodeTga(bytes);
         if (format.empty()) throw std::runtime_error("The file is not a PNG, BMP or TGA image.");
-        throw std::runtime_error("The image is " + format + ", which this reader does not decode; convert it to PNG first (any image editor).");
+        throw std::runtime_error("The image is " + format + ", which this reader does not decode; convert it to PNG first (image_convert or any image editor).");
     }
 
     // --- Resizing ------------------------------------------------------------

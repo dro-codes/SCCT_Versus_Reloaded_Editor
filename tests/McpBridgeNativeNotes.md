@@ -140,7 +140,7 @@ code 0. The transcript (`mcp_e2e_transcript.txt`, long strings cut) and the
 exe's stderr (`mcp_stderr.log`) stay in the test folder.
 
 `tests/mcp/e2e/versus-starter.jsonl` follows the plan's end-to-end list:
-initialize, tools/list (27 tools, schemas, annotations), resources and
+initialize, tools/list (32 tools, schemas, annotations), resources and
 prompts, `editor_status`, `map_file new`, `level_build` apply of
 `Resources/examples/versus-starter.level.json`, `map_build all`, `map_validate
 release` (no errors), `map_query summary`, `map_file save_as` (`VersD`),

@@ -105,7 +105,7 @@ Texturing:
 - Per-face textures come from `geometry.surfaces`, or map-changes `surface` ops after a geometry build.
 
 Creating and setting materials:
-- New textures come in with map-changes v2 `texture` + `save` ops.
+- New textures come in with `assets_import`, or map-changes v2 `texture` + `save` ops.
 - Package names must be map-owned (`<Map>_TXT`); stock packages are never written.
 - Setting `bClimbable` or other Echelon flags on a texture is an object edit (bridge `object.set`, via `workflow_request`), followed by saving that map-owned package.
 

@@ -3,7 +3,7 @@
 `Reloaded.Editor.Mcp.exe` lets an agent inspect, edit, build and validate SCCT Versus maps in the running RE+ editor, and build whole levels from a declarative spec.
 - The exe talks to the editor over a named pipe. It lives in the game's `System` folder, beside `Reloaded.Editor.dll`.
 - **The user must enable it:** RE+ Tools > MCP > Enable MCP server, or `[Mcp] Enabled=1` in `System\Reloaded_Editor.ini`. An agent cannot turn it on, nor allow raw commands (`AllowRawExec`) or Play Level (`AllowPlay`).
-- The server never interprets pictures, video or prose. You look, decide what the place is and write it down as a spec; the server compiles, checks and builds.
+- The server never interprets pictures, video or prose. You look, decide what the place is and write it down as a spec; the server extracts, measures, compiles, checks and builds.
 
 ## Ground rules
 
@@ -27,10 +27,10 @@
   - deleting actors without `allowDeletes`;
   - discarding unsaved work unless the user asked (`discardUnsaved`);
   - overwriting files without `overwrite`;
-  - writing outside the work folder and `[Mcp] WriteRoots` (`editor_exec` `FILE=`), or a release copy outside `<Game>\Releases`, the work folder and `WriteRoots`;
+  - writing outside the work folder and `[Mcp] WriteRoots` (media and import tools; `editor_exec` `FILE=`), or a release copy outside `<Game>\Releases`, the work folder and `WriteRoots`;
   - raw console commands, unless the user set `AllowRawExec=1`. Even then `editor_exec` refuses (reason denied_command) any command that starts with QUIT, EXIT, RELAUNCH, DEBUG, EXEC, MAP NEW/LOAD/SAVE/IMPORT/EXPORT, OBJ SAVEPACKAGE/EXPORT/IMPORT/LOAD, SAVEMAPPROP, LOADMAPPROP, TEXTURE IMPORT/EXPORT, STATICMESH IMPORT/EXPORT, MESH IMPORT, BRUSH IMPORT/EXPORT, DUMPINT, TRANSACTION or AUDIO, read as the console reads it (any case; `QUIT;` and `EXEC"x"` count); a `FILE=` anywhere outside the work folder and WriteRoots (`outside_write_roots`); a `PACKAGE=` other than MyLevel or the map's own (not_map_owned); and more than one command. Use the tool that does the job with its checks.
 
-## Tools (27)
+## Tools (32)
 
 | Group | Tools |
 |---|---|
@@ -41,6 +41,7 @@
 | Intent | `blockout`, `gameplay`, `security`, `mechanisms`, `events`, `environment`, `geometric_events`, `map_settings`: each takes its part of the spec at the top level, lays it over the spec the map was built from (matched by id; `remove` takes ids out) and builds only what changed, as `level_build` with `sync:"incremental"` does, so the wiki defaults always apply. `mode` defaults to apply here; `mode:"preview"` or `dryRun` changes nothing |
 | Release | `release` (`action`: check, sounds, optimise, package or interface; a release copy's `folder` must be inside `<Game>\Releases`, the work folder or `[Mcp] WriteRoots`) |
 | Escape hatches | `actors_edit` (`edits` of set, move, turn, copy, drop, delete, `copy_properties`, `rename_tag`; deletes need `allowDeletes`), `map_changes_apply` (a raw `scct.map-changes` `document`), `workflow_request` (one bridge `op` with `args`; `scct://docs/ops` lists them), `editor_exec` (one console `command`; off by default) |
+| Import / media | `import_to_spec` (`source`: a full path or "live"; `format`: auto, level-spec, map-changes, map-authoring, grid, image, svg, tiled, geojson, csv, t3d, vmf, quake, obj, ase or r6v; `options`), `media_extract_frames` (`video`; `mode`: interval, count or scene), `media_read_image` (`path`; `grid`, `crop`, `palette`), `image_convert` (`file`; `size` or `slot`), `assets_import` (`items` of textures and static meshes into `<Map>_TXT` / `<Map>_STM`); an OBJ that needs collision hulls or parts: `workflow_request` `objimport.preview`, then `objimport.import` (RE+'s Import OBJ Mesh; only into `MyLevel` or the map's own `<Map>_STM`, else not_map_owned) |
 
 Mutating tools return `{summary, created[], changed[], warnings[], validation[], undo, next[]}`.
 - `next` suggests the follow-up calls.
@@ -121,7 +122,7 @@ Sync:
 1. **`editor_status`.** Is an editor connected, which map is open, is approval on? With no editor, try `editor_launch`, or ask the user to start RE+ and enable the server.
 2. **Read** `scct://wiki/index`, the pages for the features involved, and `scct://rules`.
 3. **Start or open a map.** Use `map_file action:"new"` (or `open`). Never discard unsaved work unless asked (`discardUnsaved`).
-4. **Write the spec.** Use a prompt (`create_level_from_description`, `versus_starter`).
+4. **Write the spec.** Use a prompt (`create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`) or `import_to_spec`.
    - Record where it came from in `provenance`.
    - Calibrate scale: a standing player is 180 uu tall and 96 wide; ≈100 uu/m; doors 96 × 128; stair risers ≤35 uu (the blockout uses ≤24 rise, ~32 run). `uuPerPx` = known size in uu / its size in pixels.
 5. **Check offline.** Run `level_spec_validate` (errors at JSON pointers, rule findings with wiki pages, fixes as edits of the spec) and `plan_render`; compare the plan PNG with the source. Both take `spec` or `path` (a spec saved to a file), as does `map_validate`.
@@ -158,7 +159,7 @@ Known gaps to work around:
 
 ## Prompts
 
-`create_level_from_description`, `versus_starter`, `add_game_mode`, `design_security`, `ge_pass`, `review_map_against_wiki`, `fix_validation` and `prepare_release`.
+`create_level_from_description`, `create_level_from_media`, `create_level_from_file`, `versus_starter`, `add_game_mode`, `design_security`, `ge_pass`, `review_map_against_wiki`, `fix_validation` and `prepare_release`.
 
 Each prompt is a step-by-step recipe that embeds the wiki pages it needs and points at `scct://rules`.
 

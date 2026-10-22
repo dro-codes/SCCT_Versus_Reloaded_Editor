@@ -73,6 +73,15 @@ jobs:
         "%TEMP%\GridSizeShortcutTests.exe"
         if errorlevel 1 exit /b 1
 
+    # The media tests read video through Media Foundation, which Windows Server
+    # only has as an optional feature; the 32-bit tests need the SysWOW64 copy.
+    - name: Media Foundation for the MCP media tests
+      shell: powershell
+      continue-on-error: true
+      run: |
+        if (Test-Path "$env:SystemRoot\SysWOW64\mfplat.dll") { 'Media Foundation is installed.'; exit 0 }
+        Install-WindowsFeature Server-Media-Foundation | Format-List | Out-String | Write-Output
+
     - name: Test the MCP server
       shell: cmd
       run: |
