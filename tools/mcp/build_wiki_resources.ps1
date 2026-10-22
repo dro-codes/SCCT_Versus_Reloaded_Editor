@@ -27,8 +27,9 @@ param(
 #    that the digest no longer contains.
 # 2. Edit the digests to match. Diff the manifest against the previous run's
 #    to see which pages changed.
-# 3. Run: python3 tools/mcp/embed_resources.py
-# 4. Rebuild and run tests/PromptsTests.cpp.
+# 3. Rebuild Reloaded.Editor.Mcp, which embeds them, and run
+#    tests/PromptsTests.cpp (tools/test_mcp.cmd or tools/test_mcp.sh embeds
+#    them first too).
 #
 # The downloaded pages are untrusted text: nothing from them is executed.
 $ErrorActionPreference = 'Stop'

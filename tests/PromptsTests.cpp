@@ -4,7 +4,8 @@
 // - every prompt template parses and fills;
 // - the tool and rule names the pages cite exist.
 //
-// Run tools/mcp/embed_resources.py first so Embedded.gen.h is current.
+// Embedded.gen.h is generated, not committed: tools/test_mcp.cmd and
+// tools/test_mcp.sh write it first (tools/mcp/embed_resources.ps1 or .py).
 #include "../Reloaded.Editor.Mcp/Prompts.cpp"
 #include <iostream>
 #include <regex>

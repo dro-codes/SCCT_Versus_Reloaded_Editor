@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The MCP server's test suites with g++ (or $CXX), for contributors without
-# MSVC: every suite is built with the warnings the project requires and run,
-# then the whole server is linked and runs --self-test, and the embedded
-# resources are checked against Reloaded.Editor.Mcp/Resources. It is the same
-# list as tools/test_mcp.cmd; keep the two in step.
+# MSVC: Reloaded.Editor.Mcp/Embedded.gen.h is generated from
+# Reloaded.Editor.Mcp/Resources, every suite is built with the warnings the
+# project requires and run, then the whole server is linked and runs
+# --self-test. With pwsh on PATH it also checks that embed_resources.ps1, which
+# the Visual Studio build runs, writes the same header as embed_resources.py.
+# It is the same list as tools/test_mcp.cmd; keep the two in step.
 #   tools/test_mcp.sh [-j jobs] [-k] [build dir]
 # -k keeps going after a failure. Without a build dir the binaries go to a
 # temporary folder that is removed afterwards. Needs bash 4.3 or later.
@@ -73,6 +75,10 @@ report()
     return 1
 }
 
+# Embedded.gen.h is generated, not committed; the script rewrites it only when
+# a resource changed.
+"$PYTHON" tools/mcp/embed_resources.py || { echo "test_mcp: FAILED: embed_resources.py" >&2; exit 1; }
+
 # Build in parallel, each into its own log, then run one at a time.
 declare -A pids
 for suite in "${suites[@]}"; do
@@ -105,6 +111,15 @@ for suite in "${suites[@]}"; do
     fi
 done
 
-"$PYTHON" tools/mcp/embed_resources.py --check || fail "embed_resources(--check)"
+if command -v pwsh > /dev/null 2>&1; then
+    if pwsh -NoProfile -File tools/mcp/embed_resources.ps1 -Output "$out/Embedded.ps.h" > "$out/embed_resources.ps1.log" 2>&1 \
+        && cmp -s "$out/Embedded.ps.h" Reloaded.Editor.Mcp/Embedded.gen.h; then
+        echo "embed_resources.ps1: the same header as embed_resources.py"
+    else
+        echo "--- embed_resources.ps1 failed or wrote a different header than embed_resources.py" >&2
+        tail -n 40 "$out/embed_resources.ps1.log" >&2
+        fail "embed_resources.ps1"
+    fi
+fi
 
 report

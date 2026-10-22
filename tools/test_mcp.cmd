@@ -5,6 +5,10 @@ rem for Visual Studio. tools/test_mcp.sh is the same list for g++; keep the two
 rem in step. /bigobj: the spec compiler's units exceed 65,279 sections; /utf-8:
 rem the server is built with it, and the tests compare UTF-8 text.
 pushd "%~dp0.."
+rem Embedded.gen.h is generated, not committed: write it from
+rem Reloaded.Editor.Mcp\Resources the way the Visual Studio build does.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\mcp\embed_resources.ps1
+if not "%errorlevel%"=="0" goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpBridgeModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpBridgeModelTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpBridgeModelTests.exe"

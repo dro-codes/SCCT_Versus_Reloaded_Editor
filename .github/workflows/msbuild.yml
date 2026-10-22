@@ -58,6 +58,7 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       # Add additional options to the MSBuild command line here (like platform or verbosity level).
       # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
+      # Reloaded.Editor.Mcp's build writes its Embedded.gen.h from Resources first.
       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=x86 /p:PlatformToolset=v143 ${{env.SOLUTION_FILE_PATH}} /t:Rebuild
     
     - name: Test recovery and grid shortcuts
@@ -102,8 +103,15 @@ jobs:
         python-version: '3.12'
 
     - name: Check the embedded MCP resources
-      # Embedded.gen.h is committed; it must match Reloaded.Editor.Mcp/Resources.
-      run: python tools/mcp/embed_resources.py --check
+      # The Build step wrote Embedded.gen.h with embed_resources.ps1; the
+      # Python script, which tools/test_mcp.sh uses, must write the same header.
+      run: |
+        python tools/mcp/embed_resources.py --output "$env:RUNNER_TEMP\Embedded.py.h"
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        if ((Get-FileHash "$env:RUNNER_TEMP\Embedded.py.h").Hash -ne (Get-FileHash Reloaded.Editor.Mcp\Embedded.gen.h).Hash) {
+          Write-Error 'embed_resources.py and embed_resources.ps1 wrote different headers.'
+          exit 1
+        }
 
     - name: Get current date
       id: date

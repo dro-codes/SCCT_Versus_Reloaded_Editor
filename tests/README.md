@@ -798,14 +798,20 @@ list (keep them in step):
 - `tools/test_mcp.sh [-j jobs] [-k] [build dir]` does the same with g++ (or
   `$CXX`) and `-Wall -Wextra -Wshadow -Werror`, for contributors without MSVC:
   it builds in parallel, runs one suite at a time, and keeps going after a
-  failure with `-k`. It also runs `python3 tools/mcp/embed_resources.py
-  --check`, which fails when `Reloaded.Editor.Mcp/Embedded.gen.h` no longer
-  matches `Reloaded.Editor.Mcp/Resources`; run the script without `--check` and
-  commit the header after changing a resource.
+  failure with `-k`.
 
 Both run from the repository root, since several suites read fixtures and
 sources relative to it. CI runs `test_mcp.cmd`, the built exe's `--self-test`
-and the embed check.
+and the embed comparison below.
+
+`Reloaded.Editor.Mcp/Embedded.gen.h`, the server's embedded copy of
+`Reloaded.Editor.Mcp/Resources`, is generated, not committed. The
+Reloaded.Editor.Mcp build writes it before compiling with
+`tools/mcp/embed_resources.ps1` (Windows PowerShell), rewriting it only when a
+resource changed; `test_mcp.cmd` runs the same script first, and `test_mcp.sh`
+runs its Python twin, `tools/mcp/embed_resources.py`. The two must write the
+same bytes: `test_mcp.sh` compares them when `pwsh` is on PATH, and CI compares
+the built header with the Python script's output.
 
 | Suite | What it covers |
 | --- | --- |

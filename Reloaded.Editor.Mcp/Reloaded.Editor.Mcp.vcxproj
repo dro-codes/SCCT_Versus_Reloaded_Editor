@@ -206,7 +206,20 @@
   <ItemGroup>
     <ResourceCompile Include="Reloaded.Editor.Mcp.rc" />
   </ItemGroup>
+  <!-- Visual Studio's fast up-to-date check knows the compiler's inputs, not
+       the Resources that EmbedMcpResources reads; listed here, a changed
+       resource still builds the exe. -->
+  <ItemGroup>
+    <UpToDateCheckInput Include="Resources\**\*" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- Embedded.gen.h is generated, not committed: Resources\** compiled into
+       arrays by tools\mcp\embed_resources.ps1 (Windows PowerShell, so the build
+       needs no Python). It runs on every build and rewrites the header only
+       when its content changed, so an unchanged build recompiles nothing. -->
+  <Target Name="EmbedMcpResources" BeforeTargets="ClCompile;ResourceCompile">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\tools\mcp\embed_resources.ps1&quot; -Output &quot;$(MSBuildProjectDirectory)\Embedded.gen.h&quot;" />
+  </Target>
 </Project>
