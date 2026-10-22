@@ -1,5 +1,6 @@
 // Included by NativeMapRecoveryProbe after its existing fixture helpers.
 #include "../Reloaded.Editor/Include/nlohmann/json.hpp"
+#include "../Reloaded.Editor/MapRecoveryModel.h"
 #include "mcp/McpPipeClient.h"
 #include <stdexcept>
 #include <functional>
@@ -1104,6 +1105,158 @@ void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=f
             client.Close();
             if(!enabledAtStart)SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
         };
+        // map.recover over the bridge (run_native_map_recovery_test.ps1
+        // -McpRecoverSource <compiled .sdc>, copied to the disposable
+        // Packages\Maps): map.open refusing the compiled file, the refusals
+        // and dry runs that change nothing, a cancel at an early stage that
+        // leaves nothing behind, then a real recovery and its report.
+        auto mcpRecover=[&](const std::filesystem::path& source)
+        {
+            constexpr UINT enableServer=41720,requireApproval=41721; // McpBridge::kEnable, kRequireApproval
+            const auto ini=(directory/"Reloaded_Editor.ini").string();
+            auto setting=[&](const char* key){return GetPrivateProfileIntA("Mcp",key,0,ini.c_str())!=0;};
+            auto pick=[](const J& value,const char* pointer){const J::json_pointer at(pointer);return value.contains(at)?value.at(at):J();};
+            auto text=[&](const J& value,const char* pointer){const auto found=pick(value,pointer);return found.is_string()?found.get<std::string>():std::string();};
+            auto has=[](const std::string& whole,const std::string& part){return whole.find(part)!=std::string::npos;};
+            const bool enabledAtStart=setting("Enabled");
+            if(!enabledAtStart)SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+            if(setting("RequireApproval"))SendMessageW(frameWindow,WM_COMMAND,requireApproval,0);
+            require(setting("Enabled") && !setting("RequireApproval"),"the MCP server is on, without approval");
+            McpPipe::Client client;McpPipe::Worker worker;
+            auto onWorker=[&](std::function<void()> job,DWORD budget){worker.Run(std::move(job),budget);};
+            auto bridge=[&](const std::string& op,const J& args,const J& options=J::object(),DWORD timeout=600000)
+            {
+                Record("workflow",("mcp "+op+" "+args.dump().substr(0,200)).c_str());
+                J reply;onWorker([&]{reply=client.Call(op,args,options,timeout);},timeout+60000);
+                Record("mcp_reply",reply.dump().substr(0,4000).c_str());
+                return reply;
+            };
+            onWorker([&]{client.Open(GetCurrentProcessId(),20000);client.Hello("native-probe","1",10000);},60000);
+            const auto packages=directory.parent_path()/"Packages";
+            const auto stem=source.stem().string();
+            auto outputs=[&](const std::string& name)
+            {
+                return std::vector<std::filesystem::path>{packages/"MapsEd"/(name+".sdc"),packages/"Maps"/(name+".sdc"),packages/"MapsEd"/"Recovery"/name,
+                                                          packages/"StaticMeshes"/(name+"_Assets.usx")};
+            };
+            auto untouched=[&](const std::string& name){for(const auto& path:outputs(name))if(std::filesystem::exists(path))return false;return true;};
+            auto refused=[&](const J& reply,const char* reason){return McpPipe::Code(reply)=="refused" && McpPipe::Reason(reply)==reason;};
+            require(std::filesystem::exists(source) && source.parent_path().filename()=="Maps","the compiled map is in the disposable Packages\\Maps");
+            bridge("map.new",{{"discard",true}});
+
+            // map.open of a compiled map is refused, naming map.recover.
+            const auto opened=bridge("map.open",{{"path","Packages\\Maps\\"+source.filename().string()},{"discard",true}});
+            require(refused(opened,"compiled_map") && has(text(opened,"/error/message"),"map.recover"),"map.open refuses a compiled map (compiled_map) and names map.recover");
+
+            // Refusals and dry runs change nothing.
+            const std::string cancelled=stem+"_McpCancel",target=stem+"_Mcp";
+            const J dry{{"dryRun",true}};
+            require(McpPipe::Code(bridge("map.recover",{{"source","NoSuchCompiledMap"},{"destination",target}},dry))=="invalid","a compiled map that is not there is invalid");
+            require(McpPipe::Code(bridge("map.recover",{{"source",stem},{"destination","Not a name"}},dry))=="invalid","a destination the editor cannot name a map after is invalid");
+            {
+                const auto copy=packages/"MapsEd"/(stem+"_McpSource.sdc");
+                std::filesystem::copy_file(source,copy,std::filesystem::copy_options::overwrite_existing);
+                const auto reply=bridge("map.recover",{{"source","Packages\\MapsEd\\"+copy.filename().string()},{"destination",target}},dry);
+                require(refused(reply,"source_map") && has(text(reply,"/error/message"),"map.open"),"a map in Packages\\MapsEd is refused (source_map), pointing at map.open");
+                std::filesystem::remove(copy);
+            }
+            {
+                const auto taken=packages/"MapsEd"/"Recovery"/(stem+"_McpTaken");
+                std::filesystem::create_directories(taken);
+                const auto reply=bridge("map.recover",{{"source",stem},{"destination",stem+"_McpTaken"}},dry);
+                require(refused(reply,"destination_exists") && pick(reply,"/error/details/existing").size()==1 && pick(reply,"/error/details/suggestion").is_string(),
+                    "a destination whose recovery folder is left from an earlier run is refused (destination_exists), with a free name");
+                std::filesystem::remove_all(taken);
+            }
+            {
+                // Unsaved work: refused unless discarded.
+                const J room{{"kind","Room"},{"construction","Carve"},{"width",512},{"length",512},{"height",256},{"thickness",16},{"ceiling",true},{"portal",false},{"name","MCP recover unsaved"}};
+                const auto placed=bridge("design.block",{{"spec",room},{"position",{0,0,0}},{"rotation",{0,0,0}}});
+                require(McpPipe::Ok(placed) && pick(bridge("editor.state",J::object()),"/result/dirty")==true,"a placed piece leaves unsaved changes");
+                require(refused(bridge("map.recover",{{"source",stem},{"destination",target}},dry),"unsaved_changes"),"unsaved changes are refused (unsaved_changes)");
+            }
+            const auto checked=bridge("map.recover",{{"source",stem},{"destination",target},{"discard",true}},dry);
+            const auto& d=checked.value("result",J::object());
+            Record("mcp_recover_dry_run",d.dump().c_str());
+            require(McpPipe::Ok(checked) && d.value("dryRun",false) && has(d.value("source",std::string()),source.filename().string()) && has(d.value("destination",std::string()),target+".sdc"),
+                "a dry run names the compiled map and the new one");
+            require(d.value("missing",J()).is_array() && d.value("missing",J()).empty() && d.value("imports",0)>0 && d.value("sourceBytes",std::uint64_t{0})==std::filesystem::file_size(source) &&
+                    d.value("checks",J()).is_array() && !d.value("checks",J()).empty(),"it checked the imports and the file, and lists its checks");
+            const auto inArgs=bridge("map.recover",{{"source",stem},{"destination",target},{"discard",true},{"dryRun",true}});
+            require(McpPipe::Ok(inArgs) && pick(inArgs,"/result/dryRun")==true && pick(inArgs,"/undo/steps")==0,"dryRun in the arguments is a dry run too");
+            require(untouched(target) && pick(bridge("editor.state",J::object()),"/result/dirty")==true,"the dry runs wrote nothing and left the open map alone");
+
+            // A cancel at an early stage: a new empty map, and none of its files.
+            {
+                J reply;std::vector<J> progress;
+                onWorker([&]
+                {
+                    const auto id=client.Post("map.recover",{{"source",stem},{"destination",cancelled},{"discard",true}},{{"label","probe recover cancel"}});
+                    const auto first=client.Until(id,"recovering",600000);
+                    progress.push_back(first);
+                    client.Cancel(id);
+                    reply=client.Wait(id,1800000,[&](const J& message){progress.push_back(message);});
+                },1900000);
+                Record("mcp_recover_cancel",reply.dump().substr(0,4000).c_str());
+                const auto state=bridge("editor.state",J::object());
+                require(McpPipe::Code(reply)=="cancelled" && McpPipe::Reason(reply)=="cancelled" && has(text(reply,"/error/message"),"new empty map"),
+                    "a cancel while it runs stops the recovery (cancelled), saying the editor has a new empty map");
+                require(pick(reply,"/error/details/stageIndex").is_number() && pick(reply,"/error/details/stageIndex").get<int>()<static_cast<int>(MapRecoveryModel::Stage::Saving),
+                    "it stopped before saving, and says where");
+                require(untouched(cancelled),"the cancelled recovery left none of its files");
+                require(text(state,"/result/mapFile").empty() && pick(state,"/result/dirty")==false,"the editor holds a new map with no file");
+            }
+
+            // The recovery itself.
+            {
+                J reply;std::vector<J> progress;
+                onWorker([&]{reply=client.Call("map.recover",{{"source",stem},{"destination",target},{"discard",true},{"maxRows",5}},{{"label","probe recover"}},3600000,&progress);},3700000);
+                Record("mcp_recover",reply.dump().substr(0,8000).c_str());
+                const auto r=reply.value("result",J::object());
+                require(McpPipe::Ok(reply) && r.value("ok",false),"map.recover recovers the compiled map");
+                const auto file=r.value("file",std::string());
+                require(has(file,target+".sdc") && std::filesystem::exists(packages/"MapsEd"/(target+".sdc")) && std::filesystem::exists(packages/"Maps"/(target+".sdc")),
+                    "the new map and its playable copy are written");
+                const auto report=r.value("report",std::string());
+                require(std::filesystem::exists(report) && std::filesystem::is_directory(r.value("folder",std::string())),"Recovery.txt and the recovery folder are there");
+                const auto& c=r.value("counts",J::object());
+                require(c.value("cells",0)>0 && c.value("brushes",0)>0 && c.value("polygons",0)>0 && c.value("actors",0)>0,"the counts describe the recovered map");
+                size_t categorised=0;for(const auto& entry:r.value("categories",J::object()).items())categorised+=entry.value().get<size_t>();
+                require(r.value("rows",J()).is_array() && r.value("rows",J()).size()<=5 && categorised==r.value("rowsTotal",size_t{0}) &&
+                        r.value("rows",J()).size()==(std::min)(size_t{5},r.value("rowsTotal",size_t{0})),"the first maxRows rows come inline and every row is counted");
+                require(!has(r.value("summary",std::string()),"\r") && has(r.value("summary",std::string()),"structural brushes") && r.value("seconds",0.0)>0,"the summary in plain lines, and the time taken");
+                {
+                    std::ifstream in(report);std::stringstream all;all<<in.rdbuf();
+                    const auto rows=r.value("rowsTotal",size_t{0});
+                    require(rows==0 ? has(all.str(),"Nothing to report") : has(all.str(),"Items that did not come back cleanly ("+std::to_string(rows)+")"),"Recovery.txt lists the same rows");
+                }
+                int lastPercent=-1,lastStage=-1;bool ordered=true;size_t messages=0;
+                for(const auto& message:progress)
+                {
+                    if(message.value("stage",std::string())!="recovering")continue;
+                    ++messages;
+                    const int stage=message.value("stageIndex",-1),percent=message.value("percent",-1);
+                    if(stage<lastStage || percent<0 || percent>100)ordered=false;
+                    lastStage=stage;lastPercent=percent;
+                }
+                Record("mcp_recover_progress",(std::to_string(messages)+" messages, last "+std::to_string(lastPercent)+"%").c_str());
+                require(messages>=5 && messages<=200 && ordered && lastPercent>=90,"progress comes stage by stage, a message per change of stage or percent");
+                const auto state=bridge("editor.state",J::object());
+                require(has(text(state,"/result/mapFile"),target+".sdc") && pick(state,"/result/dirty")==false,"the recovered map is open, saved");
+                const auto again=bridge("map.recover",{{"source",stem},{"destination",target}},dry);
+                require(refused(again,"destination_exists") && pick(again,"/error/details/existing").size()>=3,"recovering into the same name again is refused");
+                const auto playable=bridge("map.open",{{"path","Packages\\Maps\\"+target+".sdc"}});
+                require(refused(playable,"compiled_map") && has(text(playable,"/error/details/source"),target+".sdc"),"map.open of its playable copy points at the editable map");
+            }
+            client.Close();
+            if(!enabledAtStart)SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+        };
+        if(mcpOnly)
+        {
+            char recoverSource[MAX_PATH]{};
+            GetPrivateProfileStringA("test","mcp_recover_source","",recoverSource,MAX_PATH,(directory/"native_recovery_test.ini").string().c_str());
+            if(*recoverSource){mcpRecover(recoverSource);finish("MCP map.recover: map.open refused, refusals and dry runs, an early cancel, a recovery and its report");return;}
+        }
         if(mcpOnly){mcpBridge();finish("MCP bridge: handshake, refusals, busy and stale replies, plans with rollback and Undo, blobs, map files, design records, builds, pictures and approval");return;}
         auto checkSurfaceBrushSelection=[&](size_t minimumBrushes)
         {

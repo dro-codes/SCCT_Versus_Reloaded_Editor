@@ -1,7 +1,8 @@
 // Session tools: the editor connection, starting and restarting the editor,
-// Undo, approval, the log, map files and builds.
+// Undo, approval, the log, map files, recovering compiled maps and builds.
 #include "Common.h"
 #include "../BridgeClient.h"
+#include "../RecoveryReportModel.h"
 #include "../../Reloaded.Editor/Version.h"
 #include <chrono>
 #include <set>
@@ -66,6 +67,12 @@ namespace
         return text;
     }
     Json State(ToolContext& c) { return Call(c, "editor.state"); }
+    // map.open's path: a bare name ("AquaD": no folder, no extension) is
+    // Packages\MapsEd\AquaD.sdc, which the editor finds only with its .sdc.
+    std::string MapOpenPath(const std::string& path)
+    {
+        return !path.empty() && path.find_first_of("\\/:.") == std::string::npos ? path + ".sdc" : path;
+    }
 
     // Starts the editor with -reMcp and waits until its pipe answers hello.
     // Reloaded_Editor.exe is only the launcher: it starts ChaosTheory_Editor.exe
@@ -218,7 +225,7 @@ namespace
         auto launched = Launch(c, waitSeconds, force);
         if (Has(a, "map"))
         {
-            try { launched["state"] = Call(c, "map.open", {{"path", RequireString(a, "map")}}, Label(a, "editor_launch"), false, 600000); }
+            try { launched["state"] = Call(c, "map.open", {{"path", MapOpenPath(RequireString(a, "map"))}}, Label(a, "editor_launch"), false, 600000); }
             catch (const std::exception& e) { o.warnings.push_back(std::string("The editor started, but the map did not open: ") + e.what()); }
         }
         o.summary = "The editor is running (process " + std::to_string(launched.value("pid", 0ul)) + ") and connected: " + MapText(launched.value("state", Json::object())) + ".";
@@ -485,12 +492,10 @@ namespace
         if (letters.empty()) throw std::runtime_error("The map name \"" + mapName + "\" has no ASCII letters to name the file after; pass path, such as \"AquaD\".");
         return letters + "D";
     }
-    std::string MapFileName(const Json& a)
+    // A map file name as map.save takes it (Packages\MapsEd, ASCII letters,
+    // digits and underscores), with .sdc added when it has none.
+    std::string CheckedMapName(std::string name)
     {
-        std::string name;
-        if (Has(a, "path")) name = RequireString(a, "path");
-        else if (Has(a, "mapName")) name = FileStem(RequireString(a, "mapName"));
-        else throw std::runtime_error("save_as needs path (\"AquaD\" or \"AquaD.sdc\", saved in Packages\\MapsEd) or mapName (the file is then named after its first four letters plus D, as the wiki's map-packaging page recommends).");
         if (!Bridge::EngineSafePath(name))
             throw std::runtime_error("Map file names and paths are plain ASCII without quotes (the engine reads only that): \"" + name + "\".");
         const std::filesystem::path file(name);
@@ -501,6 +506,399 @@ namespace
             throw std::runtime_error("A map's file name is letters, digits and underscores with no spaces (its packages and loading screens are named after it; "
                                      "the wiki: four letters and D, such as AquaD): \"" + stem + "\".");
         return name;
+    }
+    std::string MapFileName(const Json& a)
+    {
+        if (Has(a, "path")) return CheckedMapName(RequireString(a, "path"));
+        if (Has(a, "mapName")) return CheckedMapName(FileStem(RequireString(a, "mapName")));
+        throw std::runtime_error("save_as needs path (\"AquaD\" or \"AquaD.sdc\", saved in Packages\\MapsEd) or mapName (the file is then named after its first four letters plus D, as the wiki's map-packaging page recommends).");
+    }
+
+    // ---------------------------------------------------------- map_recover
+    // Recovery runs every editor build and saves twice; the slowest maps take
+    // well over an hour on a slow PC.
+    constexpr unsigned kRecoverMs = 3u * 3600u * 1000u;
+    // The editable map File > Recover Compiled Map would make from source:
+    // <stem>_Recovered (the stem made a map name, Recovery::DefaultBase),
+    // numbered past what is in Packages when the server can see the game's
+    // folder.
+    std::string RecoveryName(const ToolContext& c, const std::string& source)
+    {
+        const auto stem = Recovery::Stem(source);
+        std::error_code error;
+        if (!std::filesystem::is_directory(GamePackages(c), error)) return Recovery::DefaultBase(stem) + "_Recovered";
+        const auto name = Recovery::DefaultName(stem, [&](const std::string& relative) { std::error_code e; return std::filesystem::exists(InPackages(c, relative), e); });
+        return name.empty() ? Recovery::DefaultBase(stem) + "_Recovered" : name;
+    }
+    // A plain MAP LOAD of a compiled map (Packages\Maps) loses alignment in
+    // its cooked BSP, so the bridge refuses map.open of one (compiled_map);
+    // asked here first for paths the server can tell are compiled: relative
+    // to the game ("Packages\Maps\OffsD.sdc") or in this game's Packages\Maps.
+    bool CompiledMapPath(const ToolContext& c, const std::string& path)
+    {
+        auto folded = [](std::string text)
+        {
+            for (auto& ch : text) if (ch == '/') ch = '\\';
+            return Lower(text);
+        };
+        const auto file = folded(path);
+        if (file.size() < 5 || file.compare(file.size() - 4, 4, ".sdc") != 0) return false;
+        const auto maps = folded(PathText(GamePackages(c) / "Maps")) + "\\";
+        const std::string folders[] = {"packages\\maps\\", ".\\packages\\maps\\", maps};
+        for (const auto& folder : folders)
+            if (file.size() > folder.size() && file.compare(0, folder.size(), folder) == 0 && file.find('\\', folder.size()) == std::string::npos) return true;
+        return false;
+    }
+    Json RecoverArgs(const ToolContext& c, const std::string& source) { return {{"source", source}, {"name", RecoveryName(c, source)}}; }
+    // The refusal in the tools' terms, whether the server or the bridge found
+    // it: the bridge's own message speaks of map.open and destination; its
+    // details give the path it resolved and the MapsEd source if there is one.
+    ToolResult CompiledMapRefusal(const ToolContext& c, const std::string& path, const Json& details = Json())
+    {
+        const auto args = RecoverArgs(c, path);
+        // A stock map's editable source has the same name in Packages\MapsEd:
+        // the original file, which recovery can only approach.
+        std::string twin;
+        if (details.is_object() && details.contains("source") && details.at("source").is_string()) twin = details.at("source").get<std::string>();
+        else
+        {
+            std::error_code error;
+            const auto candidate = GamePackages(c) / "MapsEd" / (Recovery::Stem(path) + ".sdc");
+            if (std::filesystem::is_regular_file(candidate, error)) twin = PathText(candidate);
+        }
+        Json next = Json::array();
+        std::string text = path + " is a compiled map (Packages\\Maps): opened as a source map its geometry loses alignment, so it was not opened.";
+        if (!twin.empty())
+        {
+            text += " Packages\\MapsEd has " + Recovery::Stem(path) + ".sdc, normally its original editable source: open that instead (exact, nothing rebuilt).";
+            next.push_back(Next("map_file", "Open the original editable source of this map.", {{"action", "open"}, {"path", twin}}));
+        }
+        next.push_back(Next("map_recover", "Recover the compiled map as an editable source map.", args));
+        return Fail(text + " To turn the compiled map itself into an editable map, use map_recover (source \"" + path + "\", name \"" + args.at("name").get<std::string>() +
+                        "\"; dryRun: true checks it first).",
+                    {{"code", Bridge::Code::Refused}, {"reason", "compiled_map"}, {"retryable", false}, {"next", next}});
+    }
+
+    // A refused or failed recovery: the bridge's code and reason, a message
+    // that says what to do, and the calls that do it.
+    ToolResult RecoverFailure(const Bridge::Error& e, const std::string& message, const Json& next = Json::array())
+    {
+        Json details{{"code", e.code}, {"retryable", Bridge::Retryable(e.code)}};
+        if (!e.reason.empty()) details["reason"] = e.reason;
+        if (!e.details.is_null()) details["details"] = e.details;
+        if (!next.empty()) details["next"] = next;
+        return Fail(message, details);
+    }
+    ToolResult RecoverError(const Bridge::Error& e, const ToolContext& c, const Json& args, const std::string& destination)
+    {
+        namespace C = Bridge::Code;
+        const auto& source = args.at("source").get<std::string>();
+        const auto stem = Recovery::Stem(destination);
+        Json retry = Json{{"source", source}, {"name", stem}};
+        if (args.contains("merge")) retry["merge"] = args.at("merge");
+        if (args.value("keepXboxOnly", false)) retry["keepXboxOnly"] = true;
+        if (args.value("legacy", false)) retry["legacy"] = true;
+        auto with = [&](const char* key, const Json& value) { Json out = retry; out[key] = value; return out; };
+        // A name for a retry: the editor's own suggestion when it made one
+        // (destination_exists), else the next default name.
+        auto another = [&]
+        {
+            if (e.details.is_object() && e.details.contains("suggestion") && e.details.at("suggestion").is_string() && !e.details.at("suggestion").get<std::string>().empty())
+                return e.details.at("suggestion").get<std::string>();
+            const auto other = RecoveryName(c, source);
+            return Lower(other) == Lower(stem) ? stem + "_2" : other;
+        };
+        // A recovery that stopped before saving: the editor says whether it
+        // started a new map and which files were in use and remain
+        // (MapRecovery.cpp FinishCancelledRecovery).
+        auto stopped = [&](const std::string& said, const std::string& before)
+        {
+            const auto low = Lower(said);
+            const bool reset = low.find("could not start a new map") == std::string::npos, remain = low.find("remain") != std::string::npos;
+            std::string text = before + (low.find("new empty map") != std::string::npos || !reset || remain
+                                             ? said : std::string("The recovery was cancelled. The editor now has a new, empty map, and the files the recovery had written were removed."));
+            Json next = Json::array();
+            if (!reset)
+            {
+                text += " Restart the editor (editor_restart) before opening or recovering another map.";
+                next.push_back(Next("editor_restart", "Restart the editor, as it asked."));
+            }
+            else next.push_back(Next("editor_status", "See which map the editor has now."));
+            if (remain)
+            {
+                const auto other = another();
+                text += " Those files keep the name " + stem + " taken: recover again under another name, such as \"" + other + "\".";
+                next.push_back(Next("map_recover", "Recover under a name nothing uses yet.", with("name", other)));
+            }
+            return RecoverFailure(e, text + " A cancel is not taken once it is saving (Saving, Reopening and verifying): then it finishes, so check editor_status before starting again.", next);
+        };
+        if (e.reason == "missing_packages")
+        {
+            std::vector<std::string> missing;
+            if (e.details.is_object())
+            {
+                const Json list = e.details.value("missing", Json::array());
+                for (const auto& name : list) missing.push_back(name.is_string() ? name.get<std::string>() : name.dump());
+            }
+            return RecoverFailure(e, source + " uses " + (missing.empty() ? std::string("packages") : Count(missing.size(), "package") + " (" + Join(missing) + ")") +
+                                         " that this game does not have, and loading it would stop the editor at a missing-package dialog, so nothing was changed. "
+                                         "Ask the user to install them: each into its Packages folder (.utx Textures, .usx StaticMeshes, .uax Sounds, .ukx Animations; "
+                                         ".u into System), from wherever the map came from, such as the SCCT-Maps collection. Then run map_recover again (dryRun: true checks first).",
+                                  Json::array({Next("map_recover", "Check again once the packages are installed.", with("dryRun", true))}));
+        }
+        if (e.reason == "destination_exists")
+        {
+            // In the tool's terms (name, not the bridge's destination), with one suggestion.
+            std::vector<std::string> existing;
+            if (e.details.is_object())
+            {
+                const Json list = e.details.value("existing", Json::array());
+                for (const auto& path : list) if (path.is_string()) existing.push_back(path.get<std::string>());
+            }
+            const auto other = another();
+            return RecoverFailure(e, "The name " + stem + " is taken" + (existing.empty() ? std::string() : ": " + Join(existing) + (existing.size() > 1 ? " already exist" : " already exists")) +
+                                         ". Recovery never replaces files (the map, its Packages\\Maps copy, StaticMeshes\\" + Recovery::AssetPackage(stem) + ".usx or MapsEd\\Recovery\\" +
+                                         stem + "), so nothing was changed. Pass another name, such as \"" + other + "\".",
+                                  Json::array({Next("map_recover", "Recover under a name nothing uses yet.", with("name", other))}));
+        }
+        if (e.reason == "unsaved_changes")
+            return RecoverFailure(e, "Recovery replaces the open map (it starts with MAP NEW), and the open map has unsaved changes, so nothing was changed. Save it first "
+                                     "(map_file action:\"save\", or save_as for a map with no file yet), or pass discard: true to lose them.",
+                                  Json::array({Next("map_file", "Save the open map first.", {{"action", "save"}})}));
+        // A file in Packages\MapsEd is normally an editable map already; a legacy
+        // recovered map (compiled layout, older RE+) or a compiled copy put
+        // there is recovered with legacy, as File > Convert Legacy Recovered Map does.
+        if (e.reason == "source_map")
+            return RecoverFailure(e, source + " is in Packages\\MapsEd, where maps are normally editable already: open it with map_file action:\"open\". "
+                                     "Only if it is a legacy recovered map (saved in compiled layout by an older RE+) or a compiled map copied there, recover it with legacy: true.",
+                                  Json::array({Next("map_file", "Open the source map.", {{"action", "open"}, {"path", source}}),
+                                               Next("map_recover", "Recover it as a legacy recovered map or compiled copy.", with("legacy", true))}));
+        if (e.code == C::Busy && e.reason != "approval_pending" && e.reason != "another_client")
+        {
+            std::string said = e.what();
+            if (const auto hint = Guard::BusyHint(e.reason); said.find(hint) == std::string::npos) said += " " + hint;
+            return RecoverFailure(e, said + " A recovery started from the File menu, or Rebuild All Maps, has to finish before map_recover can start: wait for it "
+                                     "(editor_status shows the editor; leave its progress window open, since closing it cancels that recovery), then try again.",
+                                  Json::array({Next("editor_status", "See whether the editor is free.")}));
+        }
+        if (e.code == C::Cancelled) return stopped(e.what(), {});
+        if (e.code == C::Timeout && e.reason != "awaiting_approval")
+            return RecoverFailure(e, std::string(e.what()) + " It stops at its next stage and leaves a new, empty map, unless it was already saving, which then finishes: "
+                                     "editor_status, and editor_log with contains \"MapRecovery\", show which happened.",
+                                  Json::array({Next("editor_status", "See which map the editor has now."),
+                                               Next("editor_log", "The recovery's own log lines.", {{"contains", "MapRecovery"}})}));
+        // An unknown dialog: the bridge answered it with its most cautious
+        // button and stopped the call. details.cause is set only when the
+        // recovery itself failed; from Saving on a recovery no longer stops,
+        // so without a cause it finished and saved.
+        Json cause = e.code == C::DialogBlocked && e.details.is_object() ? e.details.value("cause", Json()) : Json();
+        if (!cause.is_object()) cause = Json();
+        if (e.code == C::DialogBlocked && cause.is_null())
+            return RecoverFailure(e, std::string(e.what()) + " The dialog came once the recovery was saving, when it no longer stops, so it finished: " + destination +
+                                         ", its Packages\\Maps copy and its Recovery Report were saved, and the map is open. Do not run map_recover again; read the report, "
+                                         "and ask the user what the dialog said.",
+                                  Json::array({Next("map_query", "The finished recovery's report.", {{"what", "recovery"}, {"file", stem}}),
+                                               Next("editor_status", "The map the editor has open.")}));
+        if (e.code == C::DialogBlocked && cause.value("code", std::string()) == C::Cancelled)
+            return stopped(cause.value("message", std::string()), std::string(e.what()) + " The recovery stopped at the dialog. ");
+        if (e.code == C::EditorError || e.code == C::DialogBlocked)
+        {
+            const std::string failure = cause.is_null() ? e.what() : std::string(e.what()) + " " + cause.value("message", std::string());
+            Json next = Json::array({Next("editor_log", "The recovery's own log lines, stage by stage.", {{"contains", "MapRecovery"}})});
+            std::string advice;
+            const auto what = Lower(failure);
+            if (args.value("merge", true) && (what.find("solid/empty") != std::string::npos || what.find("bsp rebuild") != std::string::npos))
+            {
+                advice = " Merging may be what the BSP build could not reproduce: try again with merge: false (only cells sharing whole faces are joined).";
+                next.push_back(Next("map_recover", "Recover without merging.", with("merge", false)));
+            }
+            // What the failed recovery left for inspection (details.left): those
+            // names stay taken, so a retry needs another name.
+            std::vector<std::string> left;
+            if (e.details.is_object())
+            {
+                const Json list = e.details.value("left", Json::array());
+                for (const auto& path : list) if (path.is_string()) left.push_back(path.get<std::string>());
+            }
+            std::string kept = " Nothing was saved as " + destination + ".";
+            if (!left.empty())
+            {
+                const auto other = another();
+                kept = " Nothing usable was saved as " + destination + "; it left " + Join(left) + " for inspection, so recover again under another name, such as \"" + other + "\".";
+                for (auto& step : next) if (step.value("tool", std::string()) == "map_recover") step["args"]["name"] = other;
+            }
+            return RecoverFailure(e, "The recovery failed: " + failure + kept +
+                                         " The editor may be left with an unsaved working map, which map_file action:\"new\" with discardUnsaved: true clears." + advice,
+                                  next);
+        }
+        return ErrorResult(e);
+    }
+    // The preflight's own failures. Refusals read as RecoverError says; for
+    // anything else the checks never finished, and nothing of the recovery
+    // ran. A busy editor comes back within seconds (CallOptions::busyMs).
+    ToolResult CheckError(const Bridge::Error& e, const ToolContext& c, const Json& args, const std::string& destination)
+    {
+        namespace C = Bridge::Code;
+        for (const char* reason : {"missing_packages", "destination_exists", "unsaved_changes", "source_map"})
+            if (e.reason == reason) return RecoverError(e, c, args, destination);
+        std::string text = std::string("map_recover's checks found this before anything ran: ") + e.what();
+        Json next = Json::array();
+        if (e.code == C::Timeout || (e.code == C::Busy && e.reason != "approval_pending" && e.reason != "another_client"))
+        {
+            if (e.code == C::Busy)
+                if (const auto hint = Guard::BusyHint(e.reason); text.find(hint) == std::string::npos) text += " " + hint;
+            text += " The editor did not take the checks: a recovery started from the File menu, or Rebuild All Maps, holds it until it is done (leave its progress "
+                    "window open, since closing it cancels that recovery). Wait for it, then try again.";
+            next.push_back(Next("editor_status", "See whether the editor is free."));
+        }
+        else if (const auto hint = Hint(e); !hint.empty() && text.find(hint) == std::string::npos) text += " " + hint;
+        return RecoverFailure(e, text + " Nothing was started or changed.", next);
+    }
+
+    // The tool's arguments as the bridge op takes them.
+    Json RecoverRequest(const Json& a, const std::string& source, const std::string& destination)
+    {
+        Json args{{"source", source}, {"destination", destination}, {"keepXboxOnly", Bool(a, "keepXboxOnly")}, {"discard", Bool(a, "discard")},
+                  {"maxRows", Integer(a, "maxRows", 200, 0, 2000)}};
+        if (Bool(a, "legacy")) args["legacy"] = true;
+        // Absent: the editor's File > Merge Recovered Geometry setting.
+        if (Has(a, "merge")) args["merge"] = Bool(a, "merge");
+        return args;
+    }
+    std::string OnOff(bool value) { return value ? "on" : "off"; }
+
+    ToolResult MapRecover(const Json& a, ToolContext& c)
+    {
+        const auto source = RequireString(a, "source");
+        const auto sourceStem = Recovery::Stem(source);
+        if (sourceStem.empty() || sourceStem.find('.') != std::string::npos)
+            return Fail("source is the compiled map: \"OffsD\" or \"OffsD.sdc\" (in Packages\\Maps), \"Packages\\Maps\\OffsD.sdc\", or a full path to a .sdc.");
+        const auto destination = CheckedMapName(Has(a, "name") ? RequireString(a, "name") : RecoveryName(c, source));
+        const auto label = Label(a, "map_recover " + sourceStem);
+        const bool dry = DryRun(a), discard = Bool(a, "discard");
+        auto args = RecoverRequest(a, source, destination);
+        const auto state = State(c);
+        const bool dirty = state.value("dirty", false) && !discard;
+        Outcome o;
+        Json preflight;
+        // Always checked first, with a short timeout and a busy editor not
+        // retried: a refusal comes back in seconds and a busy editor in about
+        // ten (the bridge's pickup time) instead of waiting out the
+        // recovery's hours. With unsaved changes the check runs as if
+        // discarding, so a dry run reports everything else too.
+        try
+        {
+            auto check = args;
+            if (dirty) check["discard"] = true;
+            check["dryRun"] = true;
+            CallOptions options;
+            options.label = label;
+            options.dryRun = true;
+            options.timeoutMs = 300000;
+            options.busyMs = 5000;
+            options.progress = [&c](const Json& m) { c.progress(0, 100, ProgressText("map.recover", m)); };
+            preflight = c.bridge.Call("map.recover", check, options);
+        }
+        catch (const Bridge::Error& e) { return CheckError(e, c, args, destination); }
+        const auto missing = preflight.value("missing", Json::array());
+        if (missing.is_array() && !missing.empty())
+            return CheckError(Bridge::Error(Bridge::Code::Refused, "Packages are missing.", "missing_packages", Json{{"missing", missing}}), c, args, destination);
+        const bool merge = preflight.value("merge", args.value("merge", true));
+        const bool keep = preflight.value("keepXboxOnly", args.at("keepXboxOnly").get<bool>());
+        Json retry{{"source", source}, {"name", Recovery::Stem(destination)}};
+        if (Has(a, "merge")) retry["merge"] = merge;
+        if (keep) retry["keepXboxOnly"] = true;
+        if (Bool(a, "legacy")) retry["legacy"] = true;
+        if (dry)
+        {
+            const bool checked = preflight.contains("checks") || preflight.contains("imports");
+            o.summary = "Dry run: map_recover would recover " + preflight.value("source", source) + " into " + preflight.value("destination", destination) + " (merging " +
+                        OnOff(merge) + ", Xbox-only actors " + (keep ? "kept" : "left out") + ")" +
+                        (checked ? "; " + Count(preflight.value("imports", size_t{0}), "imported package") + ", none missing" : "") + ". Nothing was changed.";
+            if (!checked) o.warnings.push_back("The editor did not report its checks for this dry run; the recovery checks again when it starts.");
+            if (dirty)
+            {
+                o.warnings.push_back("The open map has unsaved changes and recovery starts with MAP NEW: save it (map_file action:\"save\") or pass discard: true.");
+                o.next.push_back(Next("map_file", "Save the open map first.", {{"action", "save"}}));
+            }
+            o.warnings.push_back("A recovery takes minutes, an hour or more for a big map on a slow PC, and holds the editor until it is done. Progress is reported, "
+                                 "every 15 s at least. A client that stops waiting sooner cancels it, so raise the tool timeout before running it (Claude Code: "
+                                 "MCP_TOOL_TIMEOUT, in ms; 10800000 for the server's 3 hours).");
+            o.extra = {{"preflight", preflight}, {"destination", destination}, {"merge", merge}, {"keepXboxOnly", keep}};
+            o.next.push_back(Next("map_recover", "Run the recovery.", retry));
+            return Done(c, o, false);
+        }
+        if (dirty)
+            return RecoverError(Bridge::Error(Bridge::Code::Refused, "The open map has unsaved changes.", "unsaved_changes"), c, args, destination);
+
+        // The recovery itself: its stages as progress, percent of the whole.
+        // A heartbeat (a stage that runs long without a checkpoint) repeats
+        // the stage with the time so far; the server keeps the value rising.
+        auto percent = std::make_shared<double>(0);
+        auto stage = std::make_shared<std::string>("Recovering " + sourceStem + " into " + destination);
+        CallOptions options;
+        options.label = label;
+        options.timeoutMs = kRecoverMs;
+        options.progress = [&c, percent, stage, sourceStem](const Json& m)
+        {
+            if (m.contains("percent") && m.at("percent").is_number())
+            {
+                *percent = std::clamp(m.at("percent").get<double>(), 0.0, 100.0);
+                *stage = "Recovering " + sourceStem + ": " + m.value("stage", std::string("working")) + " (" + std::to_string(static_cast<int>(*percent)) + "%)";
+                c.progress(*percent, 100, *stage);
+            }
+            else if (m.value("heartbeat", false) && m.value("stage", std::string()) != "awaiting_approval") c.progress(*percent, 100, *stage + ", " + RunTime(m.value("seconds", 0u)) + " in");
+            else c.progress(*percent, 100, ProgressText("map.recover", m));
+        };
+        c.progress(0, 100, *stage);
+        Json result;
+        try { result = c.bridge.Call("map.recover", args, options); }
+        catch (const Bridge::Error& e) { return RecoverError(e, c, args, destination); }
+        if (!result.is_object()) result = Json::object();
+
+        const auto file = result.value("file", destination);
+        auto summary = result.value("summary", std::string());
+        summary.erase(std::remove(summary.begin(), summary.end(), '\r'), summary.end());
+        const Json rows = result.value("rows", Json::array());
+        const auto total = result.value("rowsTotal", rows.size());
+        const Json counted = result.contains("categories") && result.at("categories").is_object() ? result.at("categories") : Recovery::Counts(rows);
+        const auto tally = Recovery::Tally(counted);
+        const auto counts = result.value("counts", Json::object());
+        const auto newStem = Recovery::Stem(file);
+        o.summary = "Recovered " + result.value("source", source) + " into " + file;
+        if (result.contains("seconds")) o.summary += " in " + result.at("seconds").dump() + " s";
+        o.summary += " (merging " + OnOff(result.value("merge", merge)) + ", Xbox-only actors " + (result.value("keepXboxOnly", keep) ? "kept" : "left out") + ")";
+        if (counts.contains("brushes"))
+            o.summary += ": " + Count(counts.value("brushes", size_t{0}), "structural brush", "structural brushes") + " from " + Count(counts.value("cells", size_t{0}), "BSP cell") + ", " +
+                         Count(counts.value("actors", size_t{0}), "actor");
+        o.summary += total ? ". The Recovery Report lists " + Count(total, "item") + ": " + Recovery::TallyLine(tally) + "." : ". The Recovery Report lists nothing: everything came back cleanly.";
+        if (rows.size() < total)
+            o.summary += (rows.empty() ? std::string(" ") : " The first " + std::to_string(rows.size()) + " are below; ") + "map_query what:\"recovery\" pages through all of them.";
+        o.created.push_back(file);
+        // The playable copy (Packages\Maps) and the asset package the editor wrote beside it.
+        if (result.contains("playable") && result.at("playable").is_string()) o.created.push_back(result.at("playable").get<std::string>());
+        if (result.contains("assetPackage") && result.at("assetPackage").is_string()) o.created.push_back(result.at("assetPackage").get<std::string>());
+        o.changed.push_back("the open map: now " + file);
+        if (result.contains("assetPackage") || counted.contains("Asset moved"))
+            o.warnings.push_back("Embedded assets moved into Packages\\StaticMeshes\\" + Recovery::AssetPackage(newStem) + ".usx: ship it with the map.");
+        o.warnings.push_back("The recovered map keeps the compiled map's baked lighting. Ordinary builds (map_build, Build All) keep it too, so new or moved lights do not show until a "
+                             "re-bake; Build > Recalculate Lighting re-bakes the whole map and changes the recovered look. For listed surfaces and meshes, the user selects them "
+                             "and runs Build > Recalculate Selected Lighting.");
+        o.extra = {{"file", file}, {"source", result.value("source", source)}, {"merge", result.value("merge", merge)}, {"keepXboxOnly", result.value("keepXboxOnly", keep)},
+                   {"seconds", result.value("seconds", Json())}, {"recoverySummary", summary}, {"counts", counts}, {"categories", tally}, {"rows", rows},
+                   {"rowsTotal", total}, {"report", result.value("report", PathText(InPackages(c, Recovery::ReportFile(newStem))))},
+                   {"folder", result.value("folder", Json())},
+                   {"limits", Json::array({"Brushes are rebuilt from the compiled BSP's convex cells (RecoveredVolume<n>): the original brushes, their grouping and history are gone.",
+                                                "Xbox-only actors are left out unless keepXboxOnly; references to them are cleared (Reference cleared rows).",
+                                                "Lighting is the compiled bake carried over; rows say where it could not be."})}};
+        if (total) o.next.push_back(Next("map_query", "Every row of the Recovery Report, by category.", {{"what", "recovery"}}));
+        Json frame = Json::array();
+        for (const auto& row : rows)
+            if (row.contains("actor") && frame.size() < 8) frame.push_back(row.at("actor"));
+        if (!frame.empty()) o.next.push_back(Next("view_screenshot", "Look at the actors the report names.", {{"frame", frame}}));
+        o.next.push_back(Next("map_validate", "Check the recovered map against the wiki rules.", {{"profile", "draft"}}));
+        o.next.push_back(Next("map_query", "See what the recovered map holds (spawns, missions, cameras).", {{"what", "summary"}}));
+        return Done(c, o, false);
     }
 
     ToolResult MapFile(const Json& a, ToolContext& c)
@@ -528,9 +926,30 @@ namespace
         }
         if (action == "open")
         {
-            const auto path = RequireString(a, "path");
+            const auto given = RequireString(a, "path");
+            const auto path = MapOpenPath(given);
+            if (CompiledMapPath(c, path)) return CompiledMapRefusal(c, path);
+            // A bare name only Packages\Maps has: the compiled map, which the
+            // editor would not find in Packages\MapsEd.
+            if (path != given)
+            {
+                std::error_code error;
+                const auto compiled = GamePackages(c) / "Maps" / path;
+                if (!std::filesystem::exists(GamePackages(c) / "MapsEd" / path, error) && std::filesystem::is_regular_file(compiled, error))
+                    return CompiledMapRefusal(c, PathText(compiled));
+            }
             if (const auto why = unsaved("open another map"); !why.empty()) return Fail(why, {{"state", state}});
-            const auto result = Call(c, "map.open", {{"path", path}, {"discard", discard}}, label, dry, 600000);
+            Json result;
+            try { result = Call(c, "map.open", {{"path", path}, {"discard", discard}}, label, dry, 600000); }
+            catch (const Bridge::Error& e)
+            {
+                if (e.reason == "compiled_map")
+                {
+                    const bool resolved = e.details.is_object() && e.details.contains("path") && e.details.at("path").is_string();
+                    return CompiledMapRefusal(c, resolved ? e.details.at("path").get<std::string>() : path, e.details);
+                }
+                throw;
+            }
             o.summary = dry ? "Dry run: would open " + path + "." : "Opened " + result.value("mapFile", path) + ".";
             o.extra = {{"state", result}};
             for (const auto& w : result.value("warnings", Json::array())) o.warnings.push_back(w);
@@ -544,7 +963,18 @@ namespace
             else if (state.value("mapFile", std::string()).empty())
                 return Fail("The map has no file yet. Use action save_as with mapName (named after its first four letters plus D, such as AquaD) or path.");
             if (Bool(a, "overwrite")) args["overwrite"] = true;
-            const auto result = Call(c, "map.save", args, label, dry, 900000);
+            Json result;
+            try { result = Call(c, "map.save", args, label, dry, 900000); }
+            catch (const Bridge::Error& e)
+            {
+                // Saving under a compiled-only map's name would replace that
+                // original in Packages\Maps (every save writes the playable copy).
+                if (e.reason != "compiled_original") throw;
+                const auto stem = Recovery::Stem(args.value("path", state.value("mapFile", std::string())));
+                return Fail(std::string(e.what()) + " Save under another name, such as \"" + stem + "_Edit\".",
+                            {{"code", e.code}, {"reason", e.reason}, {"retryable", false}, {"details", e.details},
+                             {"next", Json::array({Next("map_file", "Save under a name no compiled map has.", {{"action", "save_as"}, {"path", stem + "_Edit.sdc"}})})}});
+            }
             const auto file = result.value("file", args.value("path", state.value("mapFile", std::string())));
             o.summary = dry ? "Dry run: would save the map as " + file + "." : "Saved the map to " + file + ".";
             o.changed.push_back(file);
@@ -725,7 +1155,8 @@ void RegisterSessionTools(Registry& registry)
             "Map files. action new starts an empty map; open loads a .sdc (a bare name such as \"AquaD\" is looked up in Packages\\MapsEd); save writes the current "
             "file; save_as names it: Packages\\MapsEd, ASCII without spaces, by the wiki (map-packaging) the first four letters of the map name plus D (Aquarius -> "
             "AquaD), which save_as makes from mapName. new and open refuse to drop unsaved changes unless discardUnsaved; save_as refuses to replace another map's "
-            "file unless overwrite. After the first save of a new map, editor_restart comes before Map Settings. Files are not undoable.";
+            "file unless overwrite. After the first save of a new map, editor_restart comes before Map Settings. A compiled map (Packages\\Maps) is refused: "
+            "use map_recover. Files are not undoable.";
         t.inputSchema = S::Mutating(S::Input(
             {{"action", S::Enum({"new", "open", "save", "save_as"}, "What to do.")},
              {"path", S::String("open: the map. save_as: the file name (\"AquaD\") or a full path in Packages\\MapsEd.")},
@@ -736,6 +1167,28 @@ void RegisterSessionTools(Registry& registry)
         t.outputSchema = S::MutationOutput();
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return MapFile(a, c); }); };
+        registry.Add(std::move(t));
+    }
+    {
+        Tool t;
+        t.name = "map_recover";
+        t.title = "Recover a compiled map";
+        t.description =
+            "File > Recover Compiled Map: turns a compiled Versus .sdc (source: \"OffsD\" is Packages\\Maps\\OffsD.sdc, or a path) into an editable map in "
+            "Packages\\MapsEd (name, default <source>_Recovered), replacing the open map (discard drops unsaved changes). Missing packages, a taken name or a "
+            "running recovery are refused first; dryRun only checks. Takes minutes to an hour, with progress; cancelling works until it saves. Returns counts, "
+            "the Recovery Report's categories (meaning, what to do) and rows (maxRows; map_query what:\"recovery\" has all). Not undoable.";
+        t.inputSchema = S::Mutating(S::Input({{"source", S::String("The compiled map: a name in Packages\\Maps, or a path.")},
+                                              {"name", S::String("The new file in Packages\\MapsEd. Default <source>_Recovered.")},
+                                              {"merge", S::Boolean("Merge BSP fragments into fewer brushes. Default: File > Merge Recovered Geometry.")},
+                                              {"keepXboxOnly", S::Boolean("Keep Xbox-only actors.")},
+                                              {"legacy", S::Boolean("The source is a legacy recovered map in Packages\\MapsEd.")},
+                                              {"discard", S::Boolean("Drop unsaved changes.")},
+                                              {"maxRows", S::Integer("Rows to return. Default 200.", 0, 2000)}},
+                                             {"source"}));
+        t.outputSchema = S::MutationOutput();
+        t.destructive = true;
+        t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return MapRecover(a, c); }); };
         registry.Add(std::move(t));
     }
     {

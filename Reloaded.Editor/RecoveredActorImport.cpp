@@ -1011,7 +1011,8 @@ namespace
 bool RecoveredActorImport::Prepare(std::string_view exportedMap, PreparedMap& prepared,
                                    std::string& error, std::string_view externalAssetPackage,
                                    const std::vector<std::string>& confirmedDeletedActorPaths,
-                                   const std::vector<std::string>& confirmedPcActorPaths)
+                                   const std::vector<std::string>& confirmedPcActorPaths,
+                                   bool keepXboxOnlyActors)
 {
     prepared = {};
     error.clear();
@@ -1050,6 +1051,25 @@ bool RecoveredActorImport::Prepare(std::string_view exportedMap, PreparedMap& pr
             return false;
         }
     }
+    // Removes only the root platform property, leaving nested components
+    // intact: the native default is common content, included in PC saves.
+    auto makeCommon = [](Actor& common)
+    {
+        std::size_t depth = 0;
+        for (auto& line : common.lines)
+        {
+            std::string verb, kind;
+            if (Boundary(Trim(line), verb, kind))
+            {
+                if (verb == "begin") ++depth; else --depth;
+                continue;
+            }
+            const auto equals = line.find('=');
+            if (depth == 1 && equals != std::string::npos
+                && Lower(Trim(std::string_view(line).substr(0, equals))) == "platform")
+                line.clear();
+        }
+    };
     for (auto& actor : parsed)
     {
         if (!actor.className.empty() && actor.className.front() != '$'
@@ -1074,22 +1094,8 @@ bool RecoveredActorImport::Prepare(std::string_view exportedMap, PreparedMap& pr
         if (platform != properties.end() && Lower(Trim(platform->second)) == "plf_xbox_only"
             && pcActors.count(Lower("MyLevel." + actor.name)))
         {
-            // This object is actually in the compiled PC level. Correct only
-            // its root platform property, leaving nested components intact.
-            std::size_t depth = 0;
-            for (auto& line : actor.lines)
-            {
-                std::string verb, kind;
-                if (Boundary(Trim(line), verb, kind))
-                {
-                    if (verb == "begin") ++depth; else --depth;
-                    continue;
-                }
-                const auto equals = line.find('=');
-                if (depth == 1 && equals != std::string::npos
-                    && Lower(Trim(std::string_view(line).substr(0, equals))) == "platform")
-                    line.clear(); // Native default: common content, included in PC saves.
-            }
+            // This object is actually in the compiled PC level.
+            makeCommon(actor);
             ++prepared.correctedPcActorPlatformCount;
         }
         else if (platform != properties.end() && Lower(Trim(platform->second)) == "plf_xbox_only")
@@ -1098,6 +1104,15 @@ bool RecoveredActorImport::Prepare(std::string_view exportedMap, PreparedMap& pr
             {
                 error = "The compiled map's LevelInfo is Xbox-only and cannot define a PC source map.";
                 return false;
+            }
+            if (keepXboxOnlyActors)
+            {
+                // Asked for: the Xbox build's own content becomes common.
+                makeCommon(actor);
+                ++prepared.keptXboxActorCount;
+                prepared.keptXboxActorNames.push_back(actor.name);
+                kept.push_back(Sanitize(std::move(actor), prepared.removedRuntimePropertyCount));
+                continue;
             }
             skippedXboxActors.insert(Lower("MyLevel." + actor.name));
             ++prepared.skippedXboxActorCount;

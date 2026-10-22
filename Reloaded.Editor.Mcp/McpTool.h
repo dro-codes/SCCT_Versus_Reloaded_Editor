@@ -16,18 +16,20 @@ namespace Mcp
     using Json = Workflow::Json;
 
     // One bridge call's options. expect makes the editor refuse the call as
-    // stale when the map moved on since the caller read it.
+    // stale when the map moved on since the caller read it. busyMs: how long
+    // a busy editor is retried, 0 for the whole timeout.
     struct CallOptions
     {
         std::string label;
         bool dryRun = false;
         Bridge::Expect expect;
         unsigned timeoutMs = 120000;
+        unsigned busyMs = 0;
         std::function<void(const Json& progress)> progress;
     };
     // The editor, through the pipe (BridgeClient) or a recording (FakeBridge).
     // Call returns the op's result and throws Bridge::Error carrying the
-    // bridge's code (busy is retried inside Call until timeoutMs).
+    // bridge's code (busy is retried inside Call until timeoutMs, or busyMs).
     class IBridge
     {
     public:
@@ -80,12 +82,15 @@ namespace Mcp
     };
     inline Content TextContent(const std::string& text) { Content c; c.text = text; return c; }
     inline Content ImageContent(const std::string& base64, const std::string& mime = "image/png") { Content c; c.type = "image"; c.data = base64; c.mimeType = mime; return c; }
+    // Indented JSON for a text block; a byte that is not UTF-8 (a path in the
+    // ANSI code page) becomes U+FFFD instead of failing the whole result.
+    inline std::string Pretty(const Json& value) { return value.dump(2, ' ', false, Json::error_handler_t::replace); }
     // A result whose text block is the summary (or the JSON) of structured.
     inline ToolResult Ok(const Json& structured, const std::string& summary = {})
     {
         ToolResult r;
         r.structured = structured.is_object() ? structured : Json{{"result", structured}};
-        r.content.push_back(TextContent(summary.empty() ? r.structured.dump(2) : summary + "\n\n" + r.structured.dump(2)));
+        r.content.push_back(TextContent(summary.empty() ? Pretty(r.structured) : summary + "\n\n" + Pretty(r.structured)));
         return r;
     }
     inline ToolResult Fail(const std::string& message, const Json& details = Json::object())
@@ -94,7 +99,7 @@ namespace Mcp
         r.isError = true;
         r.structured = details.is_object() ? details : Json{{"details", details}};
         r.structured["error"] = message;
-        r.content.push_back(TextContent(message + (details.empty() ? std::string() : "\n\n" + details.dump(2))));
+        r.content.push_back(TextContent(message + (details.empty() ? std::string() : "\n\n" + Pretty(details))));
         return r;
     }
 
@@ -178,7 +183,7 @@ namespace Mcp
     }
 
     // Each Tools/*.cpp contributes its part; Register calls them all.
-    void RegisterSessionTools(Registry&);  // editor_status, editor_launch, editor_restart, editor_undo, approval_wait, editor_log, map_file, map_build
+    void RegisterSessionTools(Registry&);  // editor_status, editor_launch, editor_restart, editor_undo, approval_wait, editor_log, map_file, map_recover, map_build
     void RegisterQueryTools(Registry&);    // map_query, view_screenshot, plan_render
     void RegisterValidateTools(Registry&); // map_validate
     void RegisterSpecTools(Registry&);     // level_spec_validate, level_build

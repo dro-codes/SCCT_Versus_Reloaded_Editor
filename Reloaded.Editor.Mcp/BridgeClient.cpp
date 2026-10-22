@@ -12,6 +12,13 @@
 
 namespace Mcp
 {
+Json BridgeClient::Heartbeat(uint64_t id, unsigned seconds, const std::string& ticket)
+{
+    Json message{{"t", "progress"}, {"id", id}, {"stage", ticket.empty() ? "running" : "awaiting_approval"}, {"heartbeat", true}, {"seconds", seconds}};
+    if (!ticket.empty()) message["ticket"] = ticket;
+    return message;
+}
+
 #ifdef _WIN32
 namespace
 {
@@ -246,10 +253,21 @@ struct BridgeClient::Impl
     {
         std::string ticket;
         Clock::time_point approvalDeadline{};
+        const auto sent = Clock::now();
         for (;;)
         {
             Json message;
-            const auto waited = Read(ticket.empty() ? deadline : approvalDeadline, true, message);
+            // Read in slices, so a long silence shows as a heartbeat. A
+            // partial frame stays in reader, and a read cut short keeps
+            // what it had (Transfer).
+            const auto target = ticket.empty() ? deadline : approvalDeadline;
+            const auto waited = Read(std::min(target, Clock::now() + std::chrono::milliseconds(BridgeClient::kHeartbeatMs)), true, message);
+            if (waited == Waited::TimedOut && Clock::now() < target)
+            {
+                const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - sent).count();
+                if (call.progress) try { call.progress(BridgeClient::Heartbeat(id, static_cast<unsigned>(seconds), ticket)); } catch (const std::exception&) {}
+                continue;
+            }
             if (waited == Waited::TimedOut)
             {
                 if (!ticket.empty())
@@ -375,6 +393,7 @@ Json BridgeClient::Call(const std::string& op, const Json& args, const CallOptio
     if (op == "approval.status") sent.erase("waitMs");
     const unsigned timeoutMs = call.timeoutMs ? call.timeoutMs : 120000;
     const auto deadline = Clock::now() + std::chrono::milliseconds(timeoutMs);
+    const auto busyDeadline = call.busyMs ? std::min(deadline, Clock::now() + std::chrono::milliseconds(call.busyMs)) : deadline;
     const auto* policy = Bridge::FindPolicy(op);
     const bool reading = policy && policy->policy == Bridge::Policy::Read;
     unsigned backoff = kBackoffFirstMs;
@@ -404,7 +423,7 @@ Json BridgeClient::Call(const std::string& op, const Json& args, const CallOptio
                         if (!it->second.empty()) { details["ticket"] = it->second; break; }
                 throw Bridge::Error(error.code, error.what(), error.reason, details.empty() ? Json() : details);
             }
-            if (error.code == Busy && Clock::now() + std::chrono::milliseconds(backoff) < deadline)
+            if (error.code == Busy && Clock::now() + std::chrono::milliseconds(backoff) < busyDeadline)
             {
                 // The wait shows as progress, so the client sees why the call is slow.
                 if (call.progress)

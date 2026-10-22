@@ -1,0 +1,32 @@
+Normal source map: C:\Games\SCCT Versus\Packages\MapsEd\OffsD_Recovered.sdc
+Playable map: C:\Games\SCCT Versus\Packages\Maps\OffsD_Recovered.sdc
+Target platform: PC (common and PC-only actors)
+Reconstructed structural brushes: 2104
+Retained actors: 1311
+Preserved and verified original baked mesh colour streams: 640
+Recalculated incompatible mesh colour streams: 1
+Excluded Xbox-only actors: 2
+Corrected stale platform labels on active PC actors: 0
+Cleared references to excluded Xbox actors: 1
+Cleared references to confirmed deleted actors: 0
+Regenerated and verified procedural soft bodies: 0
+Verified solid/empty samples: 48211
+Normal import, geometry/BSP/lighting/path builds, save and reopening verified.
+Include this asset dependency when distributing the map: C:\Games\SCCT Versus\Packages\StaticMeshes\OffsD_Recovered_Assets.usx
+Original construction-brush grouping/history is not retained. Inspect the reconstructed map and test gameplay before distribution.
+Compatible original baked mesh colours are preserved during conversion; mismatched vertex counts use verified recalculated lighting. Original BSP lighting is resampled onto matching rebuilt surfaces, with atlas-content checks after saving and reopening. Unmatched chart texels retain recalculated lighting. Ordinary builds preserve the existing bake. Use Build > Recalculate Lighting explicitly to replace it; a fresh bake may differ from the original.
+
+Brushes: 18,422 cells from the compiled BSP -> 2,104 structural brushes (89% fewer), plus 12 sheet brushes.
+Brush faces: 110,532 -> 14,980 (86% fewer); 16,204 polygons written after restoring materials.
+Merging: 9,870 cells joined along shared faces, 1,204 brushes grown over neighbours (3,410 more absorbed), 1,877 matching surfaces combined.
+
+Items that did not come back cleanly (9):
+Actor left out	SPickupXbox3	Xbox-only in the compiled map; the recovered map is for PC.
+Actor left out	STriggerXbox12	Xbox-only in the compiled map; the recovered map is for PC.
+Reference cleared	SMover7	Pointed at an actor that was left out or had been deleted; that property is now None.
+Asset moved	MyLevel.Props.Crate01	Embedded in the compiled map; now OffsD_Recovered_Assets.Props.Crate01 in StaticMeshes\OffsD_Recovered_Assets.usx. Ship that package with the map.
+Thin brush	RecoveredVolume12	Only 0.5 units across (31.2 cubic units): a sliver left by the compiled BSP's splits.
+Thin brush	RecoveredVolume907	Only 0.75 units across (60 cubic units): a sliver left by the compiled BSP's splits.
+Mesh lighting recalculated	StaticMeshActor233	Its vertex layout changed, so the original baked colours could not be kept; it has freshly built lighting.
+BSP lighting not preserved	Surface 42	300 of 512 lighting texels (58%) found no original lighting and kept the new bake.
+BSP lighting not preserved	More surfaces	3 further surfaces are not listed.

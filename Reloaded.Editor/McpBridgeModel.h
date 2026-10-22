@@ -109,7 +109,7 @@ namespace Mcp::Bridge
             {"undo.call", P::Undoable, false}, {"undo.steps", P::Undoable, false}, {"redo.steps", P::Undoable, false},
             {"exec", P::Raw, false},
             // Map lifecycle and builds.
-            {"map.new", P::File, false}, {"map.open", P::File, false}, {"map.save", P::File, false},
+            {"map.new", P::File, false}, {"map.open", P::File, false}, {"map.save", P::File, false}, {"map.recover", P::File, false},
             {"build.all", P::Build, false}, {"design.build", P::Build, false},
             {"editor.quit", P::Process, false}, {"play.level", P::Process, false},
             // Reading.
@@ -194,6 +194,13 @@ namespace Mcp::Bridge
         for (const auto& entry : OpPolicies()) if (op == entry.name) return &entry;
         return nullptr;
     }
+    // A call the bridge has started runs to its end, except for these ops: a
+    // cancel message sets a flag they read at their checkpoints, and they stop
+    // where stopping is safe (map.recover: before it starts saving).
+    inline bool Cancellable(const std::string& op) { return op == "map.recover"; }
+    // Ops whose dry run is their own: a plan's dry run runs their checks (the
+    // handler sees McpOps::Current().dryRun) instead of only listing them.
+    inline bool PreviewsItself(const std::string& op) { return op == "map.recover"; }
 
     // Error codes a result can carry; the busy reasons say what to wait for.
     namespace Code

@@ -1,6 +1,7 @@
 // Reading the map: map_query, view_screenshot, plan_render.
 #include "Common.h"
 #include "../Embedded.h"
+#include "../RecoveryReportModel.h"
 #include <set>
 #if !defined(RE_MCP_STANDALONE) && __has_include("../PlanRender.h")
 #include "../PlanRender.h"
@@ -92,10 +93,91 @@ namespace
         return out;
     }
 
+    // ------------------------------------------------- map_query recovery
+    // Recovery.txt of the open map, or of file: a Recovery.txt, the folder
+    // holding one, or a map (name or .sdc path) whose report is in
+    // Packages\MapsEd\Recovery\<map>. Read from disk, so with file it works
+    // without the editor.
+    std::filesystem::path RecoveryFile(const Json& a, ToolContext& c, std::string& map)
+    {
+        namespace fs = std::filesystem;
+        if (!Has(a, "file"))
+        {
+            const auto state = Call(c, "editor.state");
+            const auto open = state.value("mapFile", std::string());
+            if (open.empty())
+                throw std::runtime_error("The open map has no file, so it has no Recovery Report. Pass file: the recovered map's name (such as \"OffsD_Recovered\") or its Recovery.txt.");
+            map = Recovery::Stem(open);
+            return InPackages(c, Recovery::ReportFile(map));
+        }
+        const auto given = RequireString(a, "file");
+        auto path = fs::path(std::u8string(given.begin(), given.end()));
+        std::error_code error;
+        if (const auto folded = Lower(given); folded.rfind("packages\\", 0) == 0 || folded.rfind("packages/", 0) == 0) path = InPackages(c, given.substr(9));
+        if (Lower(PathText(path.extension())) == ".txt") { map = PathText(path.parent_path().filename()); return path; }
+        if (fs::is_directory(path, error)) { map = PathText(path.filename()); return path / "Recovery.txt"; }
+        map = Recovery::Stem(given);
+        // A map file elsewhere keeps its report beside it, as Packages\MapsEd does.
+        if (path.has_parent_path() && Lower(PathText(path.extension())) == ".sdc") return path.parent_path() / "Recovery" / fs::path(std::u8string(map.begin(), map.end())) / "Recovery.txt";
+        return InPackages(c, Recovery::ReportFile(map));
+    }
+    ToolResult RecoveryReport(const Json& a, ToolContext& c)
+    {
+        std::string map;
+        const auto file = RecoveryFile(a, c, map);
+        std::ifstream in(file, std::ios::binary);
+        if (!in)
+            return Fail("There is no Recovery Report at " + PathText(file) + ": " + (Has(a, "file") ? "check the name" : "the open map was not made by map_recover or File > Recover Compiled Map") +
+                        ", or its Recovery folder was removed. file takes the recovered map's name, the folder or the Recovery.txt.");
+        std::string text;
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        if (text.size() > 64u * 1024 * 1024) return Fail(PathText(file) + " is larger than a Recovery Report can be.");
+        const auto report = Recovery::Parse(Recovery::Utf8Text(text));
+        std::set<std::string> wanted;
+        for (const auto& name : Strings(a, "category")) wanted.insert(Lower(name));
+        Json rows = Json::array();
+        for (const auto& row : report.rows)
+            if (wanted.empty() || wanted.count(Lower(row.value("category", std::string())))) rows.push_back(row);
+        const auto limit = static_cast<size_t>(Integer(a, "limit", 200, 1, 5000));
+        const auto offset = static_cast<size_t>(Integer(a, "offset", 0, 0, 10000000));
+        Json page = Json::array();
+        for (size_t i = offset; i < rows.size() && page.size() < limit; ++i) page.push_back(rows[i]);
+        const auto tally = Recovery::Tally(Recovery::Counts(report.rows));
+        Json out{{"file", PathText(file)}, {"map", map}, {"summary", report.summary}, {"facts", report.facts}, {"notes", report.notes}, {"categories", tally},
+                 {"rows", page}, {"rowsTotal", rows.size()}, {"rowsAll", report.rows.size()}, {"offset", offset}};
+        if (!report.assetPackage.empty()) out["assetPackage"] = report.assetPackage;
+        if (report.declared >= 0) out["declared"] = report.declared;
+        if (offset + page.size() < rows.size()) out["nextOffset"] = offset + page.size();
+        std::string line = "Recovery Report of " + map + " (" + PathText(file) + "): ";
+        if (report.rows.empty()) line += report.clean ? "nothing to report, everything came back cleanly." : "no rows.";
+        else
+        {
+            line += Count(report.rows.size(), "item") + ": " + Recovery::TallyLine(tally) + ".";
+            if (!wanted.empty()) line += " " + Count(rows.size(), "row") + " in the categories asked for.";
+            if (!page.empty()) line += " Rows " + std::to_string(offset + 1) + "-" + std::to_string(offset + page.size()) + " of " + std::to_string(rows.size()) + " below";
+            else line += " No rows at offset " + std::to_string(offset);
+            line += out.contains("nextOffset") ? "; pass offset " + out.at("nextOffset").dump() + " for more." : ".";
+        }
+        if (!wanted.empty() && rows.empty())
+            for (const auto& name : wanted)
+                if (!Recovery::FindCategory(name)) line += " \"" + name + "\" is not a report category (they are listed in categories).";
+        if (!report.summary.empty()) line += "\n" + report.summary;
+        if (!tally.empty()) line += "\n" + Recovery::TallyText(tally);
+        line += Recovery::RowsText(page);
+        // The text holds the summary, the tally and the rows already: the JSON
+        // after it adds the rest, and structuredContent carries everything.
+        Json rest = out;
+        for (const char* key : {"summary", "categories", "rows"}) rest.erase(key);
+        auto result = Ok(rest, line);
+        result.structured = out;
+        return result;
+    }
+
     // ------------------------------------------------------------ map_query
     ToolResult Query(const Json& a, ToolContext& c)
     {
         const auto what = RequireString(a, "what");
+        if (what == "recovery") return RecoveryReport(a, c);
         const auto limit = static_cast<size_t>(Integer(a, "limit", what == "actors" ? 200 : 500, 1, 5000));
         const bool schema = Bool(a, "includeSchema");
         Json meta = Json::object();
@@ -512,9 +594,11 @@ void RegisterQueryTools(Registry& registry)
             "before that actors_edit and map-changes updates must match.\n"
             "- level (Level Properties), schema (property schemas, enum choices, writability of classes), assets (loaded assets of kind matching query), wiring "
             "(Tag/Event links, with the unresolved ones), spawns, missions, security, cameras, lights, stages (story sectors), design (blockout brushes with "
-            "bounds), ges, spec (the level spec last applied).";
+            "bounds), ges, spec (the level spec last applied).\n"
+            "- recovery: map_recover's Recovery Report for the open map or file (a recovered map or its Recovery.txt; offline): categories with what to do, "
+            "rows by category, limit (200) and offset.";
         t.inputSchema = S::Input(
-            {{"what", S::Enum({"summary", "actors", "actor", "level", "schema", "assets", "wiring", "spawns", "missions", "security", "cameras", "lights", "stages", "design", "ges", "spec"},
+            {{"what", S::Enum({"summary", "actors", "actor", "level", "schema", "assets", "wiring", "spawns", "missions", "security", "cameras", "lights", "stages", "design", "ges", "spec", "recovery"},
                               "What to read.")},
              {"classes", S::Array({{"type", "string"}}, "actors: class names or paths (IsA). schema: the classes.")},
              {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
@@ -528,7 +612,10 @@ void RegisterQueryTools(Registry& registry)
              {"actor", S::Actor("actor, wiring: the actor.")},
              {"includeSchema", {{"type", "boolean"}}},
              {"kind", S::Enum({"staticmesh", "material", "texture", "sound", "class"}, "assets: default staticmesh.")},
-             {"query", S::String("assets: text in the asset path.")}},
+             {"query", S::String("assets: text in the asset path.")},
+             {"file", S::String("recovery: the map or Recovery.txt.")},
+             {"category", {{"anyOf", Json::array({{{"type", "string"}}, {{"type", "array"}, {"items", {{"type", "string"}}}}})}}},
+             {"offset", {{"type", "integer"}, {"minimum", 0}}}},
             {"what"});
         t.readOnly = true;
         t.idempotent = true;

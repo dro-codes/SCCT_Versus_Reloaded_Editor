@@ -268,6 +268,19 @@ namespace
         }
         catch (const std::exception&) { return false; } // mcp.plan itself says what is wrong.
     }
+    // A client's plan holding an op that runs only as its own call.
+    void RefuseNotInPlan(const Json& args)
+    {
+        std::string refusal;
+        try
+        {
+            Json plan = args;
+            plan.erase("op");
+            refusal = Plan::NotInPlan(Plan::Parse(plan));
+        }
+        catch (const std::exception&) { return; } // mcp.plan itself says what is wrong.
+        if (!refusal.empty()) throw Bridge::Error(Bridge::Code::Refused, refusal, "not_in_plan");
+    }
 
     // The call in the bridge, and the frames waiting for the pipe thread.
     enum class Stage { Queued, Running, Approval };
@@ -299,6 +312,7 @@ namespace
     bool stopRequested = false, reviewing = false;
     int depth = 0;
     unsigned callCounter = 0;
+    PendingCall* runningCall = nullptr; // the call RunCall is running, for OpProgress and OpCancelRequested
 
     // A message as a frame; one too large for a frame becomes an error saying so.
     std::string Frame(const Json& message)
@@ -679,7 +693,7 @@ namespace
             if (message.contains("args") && !message.at("args").is_null()) call->args = message.at("args");
             if (!call->args.is_object()) throw Bridge::Error(Bridge::Code::Invalid, "A call's \"args\" is a JSON object.");
             call->label = Text(message, "label").substr(0, 200);
-            call->dryRun = Flag(message, "dryRun") || (call->op == "mcp.plan" && Flag(call->args, "dryRun"));
+            call->dryRun = Flag(message, "dryRun") || ((call->op == "mcp.plan" || Bridge::PreviewsItself(call->op)) && Flag(call->args, "dryRun"));
             call->expect = Bridge::ReadExpect(message);
             const auto current = McpBridge::Current();
             if (!current.enabled) throw Bridge::Error(Bridge::Code::Disabled, "The MCP server is off in this editor: RE+ Tools > MCP > Enable MCP server.");
@@ -693,6 +707,7 @@ namespace
                 throw Bridge::Error(Bridge::Code::Refused, "Raw editor commands are off. The user can allow them with [Mcp] AllowRawExec=1 in Reloaded_Editor.ini.", "raw_exec_off");
             if (call->op == "play.level" && !current.allowPlay)
                 throw Bridge::Error(Bridge::Code::Refused, "Play Level over the bridge is off. The user can allow it with [Mcp] AllowPlay=1 in Reloaded_Editor.ini.", "play_off");
+            if (call->op == "mcp.plan") RefuseNotInPlan(call->args);
             if (call->op == "mcp.plan" && ReadOnlyPlan(call->args)) call->policy = &kReadPlan;
             std::optional<Json> answer;
             {
@@ -743,9 +758,11 @@ namespace
                 {
                     if (slot->stage == Stage::Queued) { slot.reset(); dropped = true; }
                     else if (slot->stage == Stage::Approval) { slot->cancelRequested = true; review = true; }
+                    // An op that reads the flag at its checkpoints (Bridge::Cancellable).
+                    else if (Bridge::Cancellable(slot->op)) slot->cancelRequested = true;
                 }
             }
-            // A running call cannot be stopped; its result still comes.
+            // Any other running call cannot be stopped; either way its result still comes.
             if (dropped) Send(Bridge::ErrorMessage(id, Bridge::ErrorBody(Bridge::Code::Cancelled, "The call was cancelled before it ran.")));
             if (review) Notify(kCancelReview);
         }
@@ -1496,6 +1513,14 @@ namespace
         }
 
         struct Depth { Depth() { ++depth; } ~Depth() { --depth; } } inside;
+        struct Running
+        {
+            PendingCall* previous = runningCall;
+            explicit Running(PendingCall& now) { runningCall = &now; }
+            ~Running() { runningCall = previous; }
+            Running(const Running&) = delete;
+            Running& operator=(const Running&) = delete;
+        } current(call);
         const unsigned n = ++callCounter;
         const auto label = Label(call);
         const auto prefix = "MCP " + std::to_string(n) + ": ";
@@ -1532,6 +1557,10 @@ namespace
             // A one-step plan answers as the op itself would.
             if (Wrapped(call) && !call.dryRun && value.is_object() && value.contains("steps") && value.at("steps").is_object() && value.at("steps").contains("s1"))
                 value = Json(value.at("steps").at("s1"));
+            // So does the dry run of an op whose dry run is its own (its row's preview).
+            else if (Wrapped(call) && call.dryRun && Bridge::PreviewsItself(call.op) && value.is_object() && value.contains("preview") && value.at("preview").is_array() &&
+                     value.at("preview").size() == 1 && value.at("preview")[0].is_object() && value.at("preview")[0].contains("preview"))
+                value = Json(value.at("preview")[0].at("preview"));
             result = std::move(value);
         }
         catch (...) { failure = Classify(call.op); }
@@ -1824,6 +1853,18 @@ std::vector<std::filesystem::path> McpBridge::WriteRoots()
 }
 
 bool McpBridge::DialogBlocked() { return watch && watch->blocked; }
+
+void McpBridge::OpProgress(const std::string& stage, const Json& extra)
+{
+    if (runningCall) Push(runningCall->client, Bridge::ProgressMessage(runningCall->id, stage, extra));
+}
+
+bool McpBridge::OpCancelRequested()
+{
+    if (!runningCall) return false;
+    std::lock_guard lock(callLock);
+    return runningCall->cancelRequested;
+}
 
 std::vector<McpBridge::CallRecord> McpBridge::Records()
 {

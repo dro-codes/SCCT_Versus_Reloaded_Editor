@@ -16,6 +16,11 @@ param(
     [string]$OptimiseExtraMap,
     # Only the MCP bridge section (tests/McpBridgeNativeNotes.md).
     [switch]$McpBridgeOnly,
+    # Only map.recover over the bridge, on this compiled map (copied into the
+    # disposable Packages\Maps): map.open refused, refusals and dry runs, a
+    # cancel at an early stage, then a real recovery and its report. A large
+    # map takes minutes: raise TimeoutSeconds.
+    [string]$McpRecoverSource,
     [switch]$ImportBaseline,
     [switch]$ReopenOnly,
     [switch]$RootOutside,
@@ -52,6 +57,10 @@ param(
     [ValidateRange(0, 10)][int]$CancelAtStage = -1
 )
 $ErrorActionPreference = 'Stop'
+if ($McpRecoverSource) {
+    if ($SourceMap -or $GenerateFixture -or $ReopenOnly) { throw 'McpRecoverSource is the source map of its own test.' }
+    $SourceMap = $McpRecoverSource
+}
 if ($VerifyPreservedLighting -and !$ReopenOnly) { throw 'VerifyPreservedLighting requires ReopenOnly and a recovered source with nontrivial lighting.' }
 if ($VerifySelectedLighting -and (!$ReopenOnly -or !$VerifyPreservedLighting)) { throw 'VerifySelectedLighting requires ReopenOnly and VerifyPreservedLighting.' }
 if ($MatchLightingAfterLoad -and (!$ReopenOnly -or !$LightingBrush)) { throw 'MatchLightingAfterLoad requires ReopenOnly and LightingBrush.' }
@@ -151,12 +160,13 @@ source=$inputMap
 destination=$outputMap
 editor_dll=$injectedDll
 generate_fixture=$([int][bool]$GenerateFixture)
-workflow_tools=$([int][bool]($WorkflowTools -or $BrushGridSnapOnly -or $CharacterPreviewOnly -or $StairSmoothOnly -or $OptimiseAssetsOnly -or $McpBridgeOnly))
+workflow_tools=$([int][bool]($WorkflowTools -or $BrushGridSnapOnly -or $CharacterPreviewOnly -or $StairSmoothOnly -or $OptimiseAssetsOnly -or $McpBridgeOnly -or $McpRecoverSource))
 brush_grid_snap_only=$([int][bool]$BrushGridSnapOnly)
 character_preview_only=$([int][bool]$CharacterPreviewOnly)
 stair_smooth_only=$([int][bool]$StairSmoothOnly)
 optimise_only=$([int][bool]$OptimiseAssetsOnly)
-mcp_bridge_only=$([int][bool]$McpBridgeOnly)
+mcp_bridge_only=$([int][bool]($McpBridgeOnly -or $McpRecoverSource))
+mcp_recover_source=$(if ($McpRecoverSource) { $inputMap } else { '' })
 import_baseline=$([int][bool]$ImportBaseline)
 reopen_only=$([int][bool]$ReopenOnly)
 root_outside=$([int][bool]$RootOutside)
@@ -238,7 +248,7 @@ try {
                 $failed = @($lines | Where-Object { $_ -match '^workflow_fail ' })
                 if ($failed.Count) { Write-Output ('' + $failed.Count + ' check(s) failed:'); $failed | ForEach-Object { Write-Output ('  ' + $_.Substring(14)) } }
                 if ($result -match '(?m)^FAIL ') { throw 'Native map recovery test failed.' }
-                if ($WorkflowTools -and !$BrushGridSnapOnly -and !$CharacterPreviewOnly -and !$StairSmoothOnly -and !$OptimiseAssetsOnly -and !$McpBridgeOnly -and !$workflowRestarted) {
+                if ($WorkflowTools -and !$BrushGridSnapOnly -and !$CharacterPreviewOnly -and !$StairSmoothOnly -and !$OptimiseAssetsOnly -and !$McpBridgeOnly -and !$McpRecoverSource -and !$workflowRestarted) {
                     $owned = Get-Process -Id $editorProcessId -ErrorAction Stop
                     if ($owned.Path -ne $testExecutable) { throw 'Unexpected isolated editor path.' }
                     Stop-Process -Id $editorProcessId -Force

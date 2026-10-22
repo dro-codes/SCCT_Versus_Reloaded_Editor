@@ -46,6 +46,7 @@ namespace Mcp::Guard
         if (reason == "startup_dialog") return "A window is open in the editor (an update offer or crash recovery); ask the user to answer it.";
         if (reason == "modal") return "A dialog is open in the editor; ask the user to close it.";
         if (reason == "rebuild") return "Rebuild All Maps is running.";
+        if (reason == "recovery") return "A map recovery is running (File > Recover Compiled Map).";
         if (reason == "slow_task") return "The editor is busy with a long task.";
         if (reason == "minimised") return "The editor is minimised; screenshots need it restored.";
         if (reason == "menu") return "A menu is open in the editor.";

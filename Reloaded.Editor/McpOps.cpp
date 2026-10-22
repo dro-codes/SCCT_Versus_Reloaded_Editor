@@ -337,10 +337,28 @@ namespace
                     results[step.id]=std::move(shown);
                     continue;
                 }
+                // An op whose dry run is its own (map.recover) makes its checks,
+                // told it is a dry run whoever runs the plan.
+                if(Bridge::PreviewsItself(step.op))
+                {
+                    Context dry=Current();dry.dryRun=true;
+                    Json shown;
+                    {
+                        Scope scope(dry);
+                        shown=WorkflowTools::Request(request);
+                    }
+                    auto line=row(shown.is_object()?shown.value("note",std::string("runs on apply")):std::string("runs on apply"));line["preview"]=shown;
+                    preview.push_back(std::move(line));
+                    results[step.id]=std::move(shown);
+                    continue;
+                }
                 preview.push_back(row("runs on apply"));
             }
             catch(const std::exception& e)
             {
+                // Its failure, when it is the plan's only step, is the call's
+                // own answer, with its code and reason.
+                if(Bridge::PreviewsItself(step.op) && Plan::Ordered(plan).size()==1)throw;
                 auto line=row("fails as the map is now");line["error"]=e.what();
                 preview.push_back(std::move(line));errors[step.id]=e.what();
             }
@@ -379,8 +397,16 @@ namespace
         // pre: package loads, imports and saves, which Undo does not reach.
         for(const auto& step:plan.pre)
         {
-            try{results[step.id]=WorkflowTools::Request(StepRequest(step,results));finished(step,Plan::Section::Pre);}
-            catch(const std::exception& e){if(skippable(step)){errors[step.id]=e.what();continue;}Fail(step,Plan::Section::Pre,e,false,ran>0,results,errors,done,wrote,built);}
+            bool answered=false;
+            try{results[step.id]=WorkflowTools::Request(StepRequest(step,results));answered=true;finished(step,Plan::Section::Pre);}
+            catch(const std::exception& e)
+            {
+                if(skippable(step)){errors[step.id]=e.what();continue;}
+                // An op whose dry run is its own fails alone as that dry run
+                // would: its refusal's details stay its own, not a plan's.
+                if(!answered && Bridge::PreviewsItself(step.op) && Plan::Ordered(plan).size()==1)throw;
+                Fail(step,Plan::Section::Pre,e,false,ran>0,results,errors,done,wrote,built);
+            }
         }
         if(!plan.steps.empty())
         {

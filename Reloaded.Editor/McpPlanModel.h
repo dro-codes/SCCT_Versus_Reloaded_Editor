@@ -253,4 +253,16 @@ namespace Mcp::Plan
         }
         return false;
     }
+    // Ops that run only as their own call, never in a plan a client sends:
+    // only that call can cancel them (Bridge::Cancellable) and waits as long
+    // as they take. Single's plan of such a call is that call, so Check takes
+    // it; the bridge refuses a client's plan by this. "" when none is there.
+    inline std::string NotInPlan(const Parsed& plan)
+    {
+        for (const auto& [section, step] : Ordered(plan))
+            if (Bridge::Cancellable(step->op))
+                return step->op + " cannot run inside a plan (step \"" + step->id + "\" in " + SectionName(section) +
+                       "): only its own call can cancel it or wait as long as it takes. Call it on its own (map.recover: the map_recover tool).";
+        return {};
+    }
 }

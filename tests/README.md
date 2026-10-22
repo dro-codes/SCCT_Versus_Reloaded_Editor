@@ -12,7 +12,11 @@ I3DL2 reverb preset a `ZoneInfo.ZoneEffect` can name — the whole standard set,
 not the presets that happened to turn up in the maps recovered so far, since a
 map-local object whose class is not recognised stops recovery rather than being
 moved to the dependency package. Anything else map-local, an `ESBPatch` among
-them, is still refused.
+them, is still refused. Asked to keep Xbox-only actors (`map.recover`'s
+`keepXboxOnly`), the actor tests check each one comes back as common content,
+its root platform label removed and its nested components' kept, with the
+references to it intact; an Xbox-only LevelInfo and unsupported data still
+fail.
 
 The native recovery harness with `-SourceMap <HELI02.sdc>` additionally checks
 the map's duplicate portal outlines (cooked surfaces 1165 and 1168), recovery,
@@ -873,6 +877,7 @@ the built header with the Python script's output.
 | `McpBridgeModelTests` | The pipe's framing and limits, the hello handshake and protocol versions, op policies and error codes. |
 | `McpPlanModelTests` | `mcp.plan` checks: section order, `$bind` pointers, single ops wrapped as plans, refused ops. |
 | `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). The bridge's refusals in `Reloaded.Editor/McpSafetyModel.h`: map-owned packages for imports and Map JSON `texture`/`save`, release folders inside `Releases`, the work folder and `WriteRoots`, and `exec`'s deny list read word by word as the console reads it, with its `FILE=`, `PACKAGE=` and one-command rules. The dialog watchdog's button (by control id, translated labels, OK only alone, closed when none is safe). No DLL source calls `std::min`/`std::max` while `windows.h`'s macros are live, and every Level Properties name the level spec compiler writes is one `settings.edit` accepts. |
+| `McpRecoverModelTests` | `map.recover`'s pure part (`Reloaded.Editor/McpRecoverModel.h`): the source and destination a request names (bare names, `Packages\...`, full paths, `..` folded), the compiled-map test `map.open` refuses by, every file a recovery writes and a free name when one is taken, imported packages nothing installed provides, the request's checks, one progress message per change of stage or percent, and the replies (counts, rows capped at `maxRows`, categories, the dry run). Also run by `tools\test_workflow_tools.cmd`. |
 | `MapCheckJsonModelTests` | Map Check rows and summary as JSON (`mapcheck.run`). |
 | `McpProtocolModelTests` | JSON-RPC messages, protocol version negotiation, capabilities, tool and resource JSON, argument checking against schemas. |
 | `McpServerTests` | The server over strings against a FakeBridge: handshake, lists, the session, query and escape tools, resources, prompts, progress, approval, busy and stale replies, cancellation, launch and restart. |
@@ -885,6 +890,7 @@ the built header with the Python script's output.
 | `GridPlanModelTests` | The grid legend, rectangle decomposition, doorways and the golden `grid-basic` spec. |
 | `BrushImportModelTests` | Hammer and Quake brushes clipped to polygons that pass the editor's own polygon check and wind outward. |
 | `ImportersTests` | Every importer on `tests/mcp/fixtures`; each result is a valid spec that compiles with no errors. `--render <dir>` writes the plans as PNGs. |
+| `McpRecoverToolsTests` | Recovering compiled maps: the Recovery Report's categories (each one `Reloaded.Editor/MapRecovery.cpp` writes is explained), the menu's default names (made map names from any source), `tests/mcp/fixtures/Recovery.txt` read back, also in the ANSI code page; `map_recover` against a FakeBridge (the preflight and its busy budget, dry runs, progress and heartbeats, every refusal, cancels and dialogs as the editor reports them, a cancel sent to the bridge), `map_file open` of a compiled map (by path, a bare name, or the bridge's refusal), `workflow_request` refusing `map.recover` alone and in a plan, and `map_query what:"recovery"` with and without the editor. |
 | `McpSpecToolsTests` | `level_spec_validate`, `level_build` and the intent tools on all five examples, against a FakeBridge that runs plans as the editor does. |
 | `McpMediaToolsTests` | The media and import tools: frame sampling and scene picking, grids and palettes, `image_convert`, OBJ to ASE, `import_to_spec`, `assets_import`. Video extraction runs only when ffmpeg is on `PATH` (the last line says with or without ffmpeg). |
 | `McpReleaseToolsTests` | The `release` tool against a temporary game folder with a real MapsEd import table and a compressed `<Map>-i.utc`. |
@@ -918,6 +924,23 @@ one Undo step, `undo.call`, `spec.material`, `build.all`, `mapcheck.run`,
 the `map.new`/`map.save`/`map.open` round trip, `design.register`, approval
 (approve, cancel, client cancel, busy while the review is open), Disconnect and
 turning the server off and on.
+
+`-McpRecoverSource <compiled .sdc>` runs `map.recover` over the same pipe
+instead, on a copy of that map in the disposable `Packages\Maps`: `map.open`
+of the compiled file is refused (`compiled_map`); a missing source, a bad
+name, a source in `MapsEd` (`source_map`), a destination whose recovery
+folder is left over (`destination_exists`, with a free name) and unsaved
+changes (`unsaved_changes`) are refused; the dry run, given as the call's
+`dryRun` or in the arguments, lists its checks and writes nothing; a cancel
+sent after the first progress message stops the recovery before it saves,
+leaving a new empty map and none of its files; then the recovery itself, with
+its counts, rows capped at `maxRows`, Recovery.txt, progress messages and the
+map left open and saved, and `map.open` of its playable copy pointing at the
+editable map. A large map takes minutes: raise `-TimeoutSeconds`.
+
+```powershell
+./tools/run_native_map_recovery_test.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpRecoverSource <Game>/Packages/Maps/OffsD.sdc -TimeoutSeconds 3600
+```
 
 The end-to-end run starts the editor through the launcher with `-reMcp` in the
 disposable install (`[Mcp] Enabled=1`, approval, raw commands and Play off), runs

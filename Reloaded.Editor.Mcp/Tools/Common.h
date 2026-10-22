@@ -288,12 +288,16 @@ namespace Mcp::Tools
     }
 
     // --------------------------------------------------------- editor calls
+    // "45 s", "12 min": how long a call has run, for heartbeats.
+    inline std::string RunTime(unsigned seconds) { return seconds < 120 ? std::to_string(seconds) + " s" : std::to_string(seconds / 60) + " min"; }
     inline std::string ProgressText(const std::string& op, const Json& message)
     {
         const auto stage = message.value("stage", std::string());
         if (stage == "awaiting_approval")
             return "Waiting for the user to approve the change in the editor (ticket " +
                    (message.contains("ticket") ? (message.at("ticket").is_string() ? message.at("ticket").get<std::string>() : message.at("ticket").dump()) : std::string("?")) + ").";
+        // BridgeClient's own while the editor sends nothing (BridgeClient.h).
+        if (message.value("heartbeat", false)) return op + ": still running, " + RunTime(message.value("seconds", 0u)) + " in";
         std::string text = op + (stage.empty() ? std::string() : ": " + stage);
         if (message.contains("message") && message.at("message").is_string()) text += " - " + message.at("message").get<std::string>();
         if (message.contains("step") && message.at("step").is_string()) text += " (" + message.at("step").get<std::string>() + ")";
@@ -653,6 +657,27 @@ namespace Mcp::Tools
     }
 
     // ---------------------------------------------------------------- files
+    // The game's Packages folder (the exe lives in System), and a path in it
+    // written as the editor writes them, "MapsEd\\Recovery\\OffsD".
+    inline std::filesystem::path GamePackages(const ToolContext& c)
+    {
+        auto system = c.systemDir;
+        if (!system.has_filename()) system = system.parent_path();
+        return system.parent_path() / "Packages";
+    }
+    inline std::filesystem::path InPackages(const ToolContext& c, const std::string& relative)
+    {
+        auto path = GamePackages(c);
+        std::string part;
+        const std::string parts = relative + "\\";
+        for (const char ch : parts)
+        {
+            if (ch != '\\' && ch != '/') { part += ch; continue; }
+            if (!part.empty()) path /= std::filesystem::path(std::u8string(part.begin(), part.end()));
+            part.clear();
+        }
+        return path;
+    }
     // One section of an INI file (Reloaded_Editor.ini), keys lower-cased.
     // The editor writes it through the profile API, so ANSI or UTF-16.
     inline std::map<std::string, std::string> IniSection(const std::filesystem::path& file, const std::string& section)

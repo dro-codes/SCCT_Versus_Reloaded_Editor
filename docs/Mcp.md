@@ -98,7 +98,7 @@ claude mcp add scct-reloaded -- "C:\Games\SCCT Versus\System\Reloaded.Editor.Mcp
 ```
 
 Add `--scope user` to have it in every project. In Claude Code, `/mcp` lists the
-server with its 32 tools, its resources and its prompts; prompts appear as
+server with its 33 tools, its resources and its prompts; prompts appear as
 `/mcp__scct-reloaded__<prompt>` commands.
 
 **Claude Desktop.** **Settings > Developer > Edit Config** opens
@@ -241,13 +241,17 @@ it took). Reads and dry runs are not recorded. The folder is kept under
 `HistoryMaxMB`. Large replies (a whole-map export) travel through files in
 `System\ReloadedEditor\Mcp\blobs`, which are deleted once read.
 
-**Long calls.** A geometry build may take up to 15 minutes and a full build
-(`map_build what:"all"`) up to an hour before the server gives up; progress is
-reported meanwhile. Some MCP clients stop waiting sooner on their own (Claude
-Code's limit is set with the `MCP_TOOL_TIMEOUT` environment variable, in
-milliseconds). A cancelled request is dropped if it has not started, and taken
-out of the review window if it is waiting there; a change already running in
-the editor finishes. A tool that waits without the editor (`editor_launch`,
+**Long calls.** A geometry build may take up to 15 minutes, a full build
+(`map_build what:"all"`) up to an hour and a recovery (`map_recover`) up to three
+hours before the server gives up; progress is reported meanwhile, and while
+the editor sends none (one long engine step) the server reports a heartbeat
+every 15 seconds, so a client whose timeout restarts with each progress report
+keeps waiting. Some MCP clients stop waiting sooner on their own (Claude Code's
+limit is set with the `MCP_TOOL_TIMEOUT` environment variable, in
+milliseconds), and a client that stops waiting cancels the request. A cancelled request
+is dropped if it has not started, and taken out of the review window if it is
+waiting there; a change already running in the editor finishes, except a
+recovery, which stops at its next stage until it starts saving. A tool that waits without the editor (`editor_launch`,
 `editor_restart`'s wait for the editor to close, `approval_wait`, frame
 extraction) stops at its next check or progress report, so the next request
 does not queue behind it.
@@ -273,7 +277,7 @@ answer. While a change waits for approval, other calls get `busy` /
 
 ## Tools
 
-32 tools in eight groups. Each tool's own description, as the client shows it,
+33 tools in eight groups. Each tool's own description, as the client shows it,
 is the full reference; this section gives each one's purpose and its main
 arguments.
 
@@ -287,7 +291,7 @@ Errors come back as tool results marked `isError`, with `code`, `reason`, a
 (`map_validate`, `level_spec_validate`) they are in the text block, since
 clients validate any `structuredContent` they get, errors included.
 
-To keep `tools/list` small (about 75 KB for the 32 tools, from 150 KB), the
+To keep `tools/list` small (about 77 KB for the 33 tools, from 150 KB), the
 descriptions give each argument's shape and point at three documents the
 agent reads as resources: `scct://docs/tools` (the conventions every tool
 shares: units, ids, positions, how the intent tools merge, the two forms of a
@@ -310,14 +314,15 @@ checked in full, with the JSON pointer of any problem.
 | `editor_undo` | No arguments: undoes this server's newest call that is still undoable, and nothing when it has made none. `call` undoes that MCP call; `steps` undoes that many Undo steps whatever made them; `redo` with `steps` redoes (and makes a redone call undoable again). |
 | `approval_wait` | Keeps waiting for the review window: `ticket` (required), `timeoutSeconds` (default 50). |
 | `editor_log` | The editor's log (last 2,000 lines): `level` (all, warning, error), `contains`, `since`, `newOnly`, `max`. Read-only. |
-| `map_file` | `action`: `new`, `open`, `save` or `save_as`. `path` (a bare name such as `AquaD` is looked up in `Packages\MapsEd`), `mapName` (save_as names the file after its first four letters plus `D`), `discardUnsaved`, `overwrite`. |
+| `map_file` | `action`: `new`, `open`, `save` or `save_as`. `path` (a bare name such as `AquaD` is looked up in `Packages\MapsEd`), `mapName` (save_as names the file after its first four letters plus `D`), `discardUnsaved`, `overwrite`. A compiled map (`Packages\Maps`) is refused as `refused` / `compiled_map`, with the `map_recover` call to use instead. |
+| `map_recover` | **File > Recover Compiled Map**: a compiled `.sdc` (`source`) into an editable map in `Packages\MapsEd` (`name`, default `<source>_Recovered`). `merge`, `keepXboxOnly`, `legacy`, `discard`, `maxRows`. Checks first, reports progress, can be cancelled until it saves, and returns the Recovery Report. See [Recovering compiled maps](#recovering-compiled-maps). |
 | `map_build` | `what`: `geometry` (default, as Build Geometry) or `all` (the full build with lighting, without the Lighting Budget question); then Map Check (`check`, default true). |
 
 ### Inspect
 
 | Tool | Purpose and main arguments |
 | --- | --- |
-| `map_query` | Reads the map. `what`: `summary`, `actors`, `actor`, `level`, `schema`, `assets`, `wiring`, `spawns`, `missions`, `security`, `cameras`, `lights`, `stages`, `design`, `ges` or `spec`. `actors` filters by `classes`, `tags`, `names`, `near {at, radius}`, `box {min, max}`, `selected`, with `fields` (names or `"all"`), `limit` and `cursor`; `actor` takes `actor` (path, name or `{path, class}`) and `includeSchema`; `assets` takes `kind` and `query`. Read-only. |
+| `map_query` | Reads the map. `what`: `summary`, `actors`, `actor`, `level`, `schema`, `assets`, `wiring`, `spawns`, `missions`, `security`, `cameras`, `lights`, `stages`, `design`, `ges` or `spec`. `actors` filters by `classes`, `tags`, `names`, `near {at, radius}`, `box {min, max}`, `selected`, with `fields` (names or `"all"`), `limit` and `cursor`; `actor` takes `actor` (path, name or `{path, class}`) and `includeSchema`; `assets` takes `kind` and `query`; `recovery` reads a recovered map's Recovery Report (the open map's, or `file`'s without the editor) with `category`, `limit` and `offset`. Read-only. |
 | `view_screenshot` | A PNG of a viewport: `viewport` (`perspective` or `top`), `maxEdge` (64-2048, default 1024), `camera {location, rotation}`, `frame` (actors), or `preset`: `overview`, `spawn:spy`, `spawn:merc`, `objective:<name>`. The camera is put back afterwards. |
 | `plan_render` | A top-down plan PNG, north up, of a `spec` or `path` (a `.level.json`, or `scct://examples/<name>`; offline) or of the live map (neither): pieces, brushes, spawns in team colours, objectives, cameras, security, lights, Event links and zones. `maxEdge`, `options` (`storey`, `labels`, `grid`, `legend`, `actorLabels`, `cones`, `title`). |
 
@@ -384,6 +389,93 @@ are listed as standing and do not. Each description lists the fields;
 | --- | --- |
 | `release` | `action`: `check` (read-only: file names, the MapsEd and Maps copies, package names, `<Map>-i.utc` and its interface textures, the `.uas`, the packages the map imports; `base` compares stock packages with a clean install), `sounds` (builds `Packages\Sounds\<Map>.uas` with Interface and `Amb_<Map>`, `quality` default 5.0), `optimise` (Optimise Map Assets' report, or a release copy with `packs`/`suggested`, in `<Game>\Releases\<Map>` or `folder`, which must be a full path inside `<Game>\Releases`, the work folder or `[Mcp] WriteRoots`: the editor refuses any other, since with `overwrite` the copy deletes and rewrites the map's files there), `package` (the archive's file list) or `interface` (`images` into `<Map>-i`). |
 
+## Recovering compiled maps
+
+The game plays compiled maps (`Packages\Maps\<Map>.sdc`): their brushes were
+turned into BSP and their editor data stripped, so they cannot be opened as
+maps. `map_file action:"open"` refuses one (`refused` / `compiled_map`), since
+a plain load of cooked data loses its geometry's alignment, and names
+`map_recover` instead. `map_recover` runs the editor's own **File > Recover
+Compiled Map** (see the [README](../README.md)) without its dialogs:
+
+```json
+{"source": "OffsD", "dryRun": true}
+{"source": "OffsD", "name": "OffsD_Recovered"}
+```
+
+- **`source`**: a name in `Packages\Maps` (`"OffsD"` or `"OffsD.sdc"`),
+  `Packages\Maps\OffsD.sdc`, or a full path to a `.sdc`. A map in
+  `Packages\MapsEd` is already editable: it is refused as `source_map`.
+- **`name`**: the new map in `Packages\MapsEd`. Without it, the name the menu
+  gives: `<source>_Recovered` (characters other than letters, digits and
+  underscores become `_`, a leading digit gets `Map_`, and the source's part is
+  cut to 24 characters), then `_Recovered_2` and so on, past the names
+  whose map, `Packages\Maps` copy, `StaticMeshes\<name>_Assets.usx` or
+  `MapsEd\Recovery\<name>` folder exist. Recovery never replaces a file
+  (`destination_exists`).
+- **`merge`**: join the compiled BSP's fragments into fewer brushes (default:
+  **File > Merge Recovered Geometry**). **`keepXboxOnly`**: keep the Xbox-only
+  actors as common content instead of leaving them out. **`legacy`**: the source
+  is in `Packages\MapsEd` but is a legacy recovered map or a compiled copy (File
+  > Convert Legacy Recovered Map; otherwise `source_map`). **`discard`**: drop the
+  open map's unsaved changes (recovery starts with a new map; otherwise
+  `unsaved_changes`). **`maxRows`**: report rows in the result (default 200).
+
+Before anything changes, the editor checks the source and the name, unsaved
+changes, that no recovery or Rebuild All Maps is running (`busy`), and that
+every package the compiled map imports is installed (`missing_packages`, with
+the names in `details.missing`): a missing package would stop the editor at a
+modal dialog. `dryRun: true` runs only these checks; a real call runs them
+first too, without retrying a busy editor, so a refusal comes back in seconds
+and a busy editor in about ten. Whatever the checks run into, nothing has
+started and the error says so.
+
+The recovery reports each stage (`Loading the compiled map`, `Merging
+fragmented geometry`, `Building geometry`, `Restoring lighting`, `Saving`, ...)
+as progress, with its percent of the whole, and repeats the stage with the
+time so far at least every 15 seconds. It takes minutes, and an hour or more
+for a big map on a slow PC; raise the client's tool timeout before running it
+(`MCP_TOOL_TIMEOUT` for Claude Code; 10800000 covers the server's three hours).
+Cancelling the request, which a client that stops waiting does too, stops it at
+the next stage until it starts saving, and leaves a new, empty map and none of
+the files it had written (`cancelled`, with the editor's own account when it
+could not start the new map or some files were in use); a cancel during saving
+is not taken. A dialog the bridge does not know (`dialog_blocked`) stops it the
+same way, unless it was saving: then the recovery finished and the error says
+so. It is not an Undo step.
+
+The result has `file`, `seconds`, `counts` (BSP cells, structural brushes,
+faces, polygons, actors, what merging did), `recoverySummary`, `categories`
+(each Recovery Report category with its count, what it means and what to do),
+the first `rows` (`{category, item, detail}`, with `actor` for rows that name
+one and `surface` for a BSP surface), `rowsTotal`, `report` (the Recovery.txt)
+and next steps: `map_query what:"recovery"` for every row,
+`view_screenshot frame:[...]` for the actor rows and `map_validate
+profile:"draft"`.
+
+| Category | What it means | What to do |
+| --- | --- | --- |
+| Actor left out | An Xbox-only actor was not recreated. | Usually nothing; recover again with `keepXboxOnly` to keep them. |
+| Xbox-only actor kept | An Xbox-only actor kept as common content (`keepXboxOnly`). | Look at it: the PC version never showed it. |
+| Reference cleared | A property pointed at an actor left out or deleted; it is now None. | Point it at a suitable actor if gameplay needs it. |
+| Asset moved | An embedded mesh or material moved into `StaticMeshes\<name>_Assets.usx`. | Ship that package with the map. |
+| Thin brush | A sliver brush from the BSP's splits. | Leave it unless you edit there. |
+| Mesh lighting recalculated | A mesh whose original baked colours could not be kept. | Look at it; it is lit afresh. |
+| BSP lighting not preserved | A surface that kept a fresh bake. | Re-bake it alone with **Build > Recalculate Selected Lighting**. |
+
+The recovered map keeps the compiled map's baked lighting, and ordinary builds
+keep it too; **Build > Recalculate Lighting** re-bakes the whole map and changes
+its look. Its brushes are new (`RecoveredVolume<n>`): the original brushes and
+their history are not recovered. Never save it under the compiled map's own
+name: every save also writes `Packages\Maps\<name>.sdc`. The `recover_map`
+prompt walks an agent through all of this.
+
+`map_query what:"recovery"` reads `Packages\MapsEd\Recovery\<map>\Recovery.txt`
+for the open map, or for `file` (a recovered map's name or path, the folder or
+the Recovery.txt itself) without the editor: the summary, the facts the editor
+wrote, the categories and the rows, filtered by `category` and paged by `limit`
+and `offset`.
+
 ## Bridge ops
 
 `workflow_request` runs one op of the editor's workflow bridge, the same ops
@@ -395,7 +487,7 @@ enforces whatever the client asks:
 | --- | --- |
 | Read | `editor.state`, `log.tail`, `approval.status`, `blob.read`, `blob.free`, `actors`, `actors.query`, `map`, `map.file`, `settings.inspect`, `authoring.mapid`, `authoring.schema`, `authoring.export`, `authoring.preview`, `assets.search`, `view.screenshot`, `view.capture`, `view.restore`, `mapcheck.run`, `lighting.budget`, `scene.trace`, `ge.list`, `object.inspect`, `mapsettings.get`, `mcp.sidecar.get`, `props.copy`, `design.pieces`, `design.scene`, `design.grid`, `design.view`, `design.bspowners`, `design.builds`, `design.spawns`, `design.clearances`, `placement.selection`, `security.actors`, `light.list`, `objective.actors`, `stage.actors`, `stage.read`, `stage.preview`, `optimise.report`, `magic.classes`, `magic.assets`, `magic.inspect`, `magic.json.export`, `camera.snapshot`, `brush.visibility`, `usages`, `connections`, `surface.brushes`, `mesh.bounds`, `brush.snap.bounds`, `vertex.selection`, `stairs.state`, `tag.preview`, `assembly.capture`, `emitterlib.list`, `emitterlib.packs`, `emitterlib.cache`, `emitterlib.problems`, `emitterlib.categories`, `emitterlib.selected`, `emitterlib.capture`, `skins.settings`, `objectiveplayers.state`, `conveyor.state`, `prefab.instances`, `prefab.counts`, `objimport.preview`, `mover.selected`, `mover.state`, `mover.outline`, `mover.candidates` |
 | Undoable | `mcp.plan`, `undo.call`, `undo.steps`, `redo.steps`, `authoring.apply`, `select`, `design.block`, `design.blockbatch`, `design.align`, `design.layer`, `design.polyflags`, `design.repairflags`, `design.sendtolast`, `design.flags`, `design.group`, `design.translate`, `design.lift`, `design.tempstart`, `design.register`, `design.unregister`, `mcp.sidecar.set`, `placement.drop`, `placement.move`, `placement.turn`, `placement.copy`, `props.paste`, `start.create`, `alarm.locks`, `security.create`, `security.sensor`, `security.link`, `security.outputs`, `security.unlink`, `security.delete`, `security.move`, `stage.apply`, `objectiveplayers.set`, `objectiveplayers.playlevel`, `objectiveplayers.targets`, `conveyor.add`, `conveyor.sync`, `camera.order`, `camera.add`, `magic.component`, `magic.key`, `magic.json.import`, `magic.edit`, `magic.create`, `magic.link`, `objective.add`, `replace`, `tag.rename`, `assembly.place`, `emitterlib.place`, `brush.visibility.set`, `builder.fit`, `builder.fit.brush`, `vertex.portal`, `vertex.snap`, `brush.snap`, `stairs.smooth`, `stairs.remove`, `settings.edit`, `ge.add`, `surface.texture`, `mover.path`, `mover.settings`, `mover.wire`, `prefab.selectinstance`, `prefab.selectall`, `prefab.place` |
-| File | `map.new`, `map.open`, `map.save`, `asset.texture`, `asset.mesh`, `package.save`, `object.set`, `interface.texture`, `minimap.apply`, `uas.build`, `mapsettings.set`, `optimise.release`, `conveyor.prepare`, `emitterlib.save`, `emitterlib.delete`, `emitterlib.update`, `objimport.import`, `prefab.save`, `prefab.update`, `prefab.break` |
+| File | `map.new`, `map.open`, `map.save`, `map.recover`, `asset.texture`, `asset.mesh`, `package.save`, `object.set`, `interface.texture`, `minimap.apply`, `uas.build`, `mapsettings.set`, `optimise.release`, `conveyor.prepare`, `emitterlib.save`, `emitterlib.delete`, `emitterlib.update`, `objimport.import`, `prefab.save`, `prefab.update`, `prefab.break` |
 | Build | `design.build`, `build.all` |
 | Process | `editor.quit`, `play.level` (needs `AllowPlay=1`) |
 | Raw | `exec` (needs `AllowRawExec=1`; use `editor_exec`) |
@@ -443,7 +535,19 @@ Arguments of the ops made for the MCP server (the others take the shapes
   room's east wall faces west, `-X`).
 - `scene.trace {segments:[{from, to}]}`: `{hits:[{hit, at, normal, actor}]}`.
 - `map.new {discard}`, `map.open {path, discard}`, `map.save {path,
-  overwrite}`, `build.all {}`, `editor.quit {discard}`.
+  overwrite}`, `build.all {}`, `editor.quit {discard}`. `map.open` refuses a
+  compiled map in `Packages\Maps` (`refused` / `compiled_map`).
+- `map.recover {source, destination, merge, keepXboxOnly, legacy, discard, maxRows}`:
+  only on its own, cancellable while it runs. `workflow_request` refuses it
+  (`use_map_recover`: `map_recover` runs it), and so does a plan holding it
+  (`not_in_plan`: the server refuses any such plan, the editor one of more
+  than one step). A dry run returns the
+  checks `{dryRun, source, destination, merge, keepXboxOnly, imports, missing,
+  sourceBytes, checks}`; a recovery `{ok, file, source, merge, keepXboxOnly,
+  seconds, summary, counts, categories, rows, rowsTotal, report, folder}`, with
+  progress `{stage, stageIndex, percent}`. Refusals: `source_map`,
+  `destination_exists`, `unsaved_changes`, `missing_packages` (`details.missing`)
+  and `busy`.
 - `view.screenshot {viewport, maxEdge, camera, frame}`: `{png, width,
   height}`; `mapcheck.run {}`: `{rows:[{severity, group, check, message,
   actors, surfaces}], summary}`; `lighting.budget {}`.
@@ -520,6 +624,7 @@ points at `scct://rules`, which it no longer embeds (the catalogue alone is
 | `design_security` | area, intensity, details | Alarms, detectors, door locks and the CamNet. |
 | `ge_pass` | area, focus | The spies' climbing layer: ledges, hand-over-hand, pipes, ladders, ziplines, fences. |
 | `review_map_against_wiki` | profile, focus | Audits the open map and reports by wiki page, changing nothing. |
+| `recover_map` | **source**, name, merge, keepXboxOnly, goal | Recovers a compiled map: the checks, missing packages, the recovery, its report, what is not 1:1 and what to do next. |
 | `fix_validation` | profile, scope, findings | Applies each finding's fix, dry run first, until the map is clean. |
 | `prepare_release` | **mapName**, images, briefing | Naming, Map Settings, interface textures, the `.uas`, package checks and the archive list. |
 
@@ -880,6 +985,9 @@ what follows as the current state, not a promise:
   manual steps (right-click empty viewport space > **Map Settings**).
   `mapsettings.get` reads what it can from `<Map>-i.utc` on disk. Level
   Properties and the interface textures go through paths RE+ already uses.
+- **Recovery.** `map_recover` and `map_query what:"recovery"` are tested
+  against a stubbed editor and a Recovery.txt in the editor's format; the
+  `map.recover` op has not yet run a recovery in a real editor over the pipe.
 - **Restarting the editor.** `editor_restart` needs the editor to close without
   a question; if one appears (for example about unsaved changes), answer it,
   or restart the editor yourself when told.
@@ -919,7 +1027,7 @@ what follows as the current state, not a promise:
   answer or the client goes away.
 - The DLL sends no change events of its own yet: live resources are marked
   updated after each change the server makes, not after your own edits.
-- `tools/list` is about 75 KB; the import and media tools' descriptions
+- `tools/list` is about 77 KB; the import and media tools' descriptions
   (about 20 KB) are now its largest part.
 
 ## Troubleshooting
@@ -940,12 +1048,19 @@ what follows as the current state, not a promise:
 | `denied` | You cancelled the review. |
 | `dialog_blocked` | A dialog opened during the change. It was answered with its most cautious button (or closed) and the call stopped there; the message says what happened. `details.dialogs` has its title, text and answer; `stoppedAt` is the step it stopped at (no later step ran), `ran` the steps that finished and `wrote` the files and packages they had already written, which stay. `rolledBack` says whether the map changes were undone: a plan that had already saved or written files keeps them (see [Dialogs](#how-calls-run)), so the map and its file stay alike, and then `editor_undo` with the `call` the message names takes them back. Answer the dialog's question yourself in the editor if it needs one, then retry. |
 | `refused` / `raw_exec_off` or `play_off` | Set `AllowRawExec=1` or `AllowPlay=1` in the INI with the editor closed, only if you want to allow that. |
-| `refused` / `unsaved_changes` | Save the map, or tell the agent it may discard the changes. |
+| `refused` / `unsaved_changes` | Save the map, or tell the agent it may discard the changes (`map_recover` too: it starts a new map). |
 | `refused` / `not_map_owned` | The package is not the map's own (an import, a package save, a Map JSON `texture` or `save`, an `editor_exec` `PACKAGE=`); use `<Map>_TXT`, `<Map>_STM` or another `<Map>_` name. |
 | `refused` / `package_name` or `interface_package` | `<Map>` and `Amb_<Map>` are not for imports, and a name another kind of package has would merge with it; `<Map>-i` is written only by the interface textures. Use `<Map>_TXT` or `<Map>_STM`. |
 | `refused` / `unsaved_map` | The map has no file yet, and its packages, `.uas` and release copy are named after it. Save it first (`map_file action:"save_as"`). |
 | `refused` / `denied_command` | `editor_exec` never runs that command (see [Limits and safety](#limits-and-safety)); use the tool that does it with its checks. |
 | A build or `.uas` times out in the client | Raise the client's tool timeout; the editor finishes the build regardless, and `editor_status` shows the result. |
+| `map_recover` times out in the client | A recovery can take an hour or more, and a client that stops waiting cancels it: it stops at its next stage, unless it is saving, and leaves a new, empty map. Raise the client's tool timeout before running it again (Claude Code: `MCP_TOOL_TIMEOUT`, in milliseconds); `editor_status` and `map_query what:"recovery"` show whether it finished. |
+| `refused` / `compiled_map` | `map_file open` was given a compiled map from `Packages\Maps`. Recover it with `map_recover` (the error names the call). |
+| `refused` / `missing_packages` | The compiled map imports packages this game does not have (`details.missing`). Install them (`.utx` in Textures, `.usx` StaticMeshes, `.uax` Sounds, `.ukx` Animations, `.u` System), for example from the SCCT-Maps collection, and try again. |
+| `refused` / `destination_exists` | The recovered map's name is taken (its map, `Packages\Maps` copy, asset package or Recovery folder). Pass another `name`; the error suggests one. |
+| `refused` / `source_map` | The source is an editable map in `Packages\MapsEd`: open it with `map_file open`. |
+| `busy` during `map_recover` | A recovery started from the File menu, or Rebuild All Maps, is running (it can show as `modal`, `slow_task` or a timeout of the checks); nothing was started. Wait for it to finish, and leave its progress window open: closing it cancels that recovery. |
+| `cancelled` from `map_recover` | The recovery stopped: the editor has a new, empty map and the files it had written were removed, unless the message says the editor could not start the new map (restart it) or some files remain (recover under another name). |
 | `editor_launch` waits and fails | A startup window (an update offer, crash recovery, a missing package) is waiting for you; answer it, then `editor_status`. `System\Reloaded_Editor.exe.log` says why the launcher failed. |
 | Video frames fail | Install ffmpeg and set `[Mcp] Ffmpeg` to its `ffmpeg.exe`, or put it on `PATH`. |
 | Output paths refused | Leave the path out to write in the work folder, or add the folder to `[Mcp] WriteRoots`. |

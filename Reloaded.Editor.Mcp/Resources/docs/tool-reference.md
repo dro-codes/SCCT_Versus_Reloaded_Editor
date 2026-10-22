@@ -139,6 +139,25 @@ Level Properties, Map Settings, interface textures and the in-game minimap (`scc
 
 Checked: MapName in capitals, the ranges above, one Modes and ModesStrings entry per mode, Disk Hunt ScoreLimit and Handicap against the disks, SendAtTime negative, interface texture formats. Save the map afterwards (`map_file action save`).
 
+## map_recover
+
+Runs the editor's **File > Recover Compiled Map** on a compiled map without its dialogs, and saves an editable source map. Recovery rebuilds structural brushes from the compiled BSP's convex cells (`RecoveredVolume<n>`), restores the actors and level settings (PC and common ones), moves embedded meshes and materials into `StaticMeshes\<name>_Assets.usx`, rebuilds geometry and paths, carries the original baked lighting over, saves, reopens and verifies the result. The compiled file is not changed.
+
+- `source` (required): `"OffsD"` or `"OffsD.sdc"` (in `Packages\Maps`), `Packages\Maps\OffsD.sdc`, or a full path to a `.sdc`. A map in `Packages\MapsEd` is refused (reason source_map): open it with `map_file`.
+- `name`: the new map's file in `Packages\MapsEd` (ASCII letters, digits and underscores). Default `<source>_Recovered` (other characters become `_`, a leading digit gets `Map_`, kept short), numbered `_2`, `_3`, ... past names whose map, `Packages\Maps` copy, asset package or `MapsEd\Recovery\<name>` folder exist, as the menu does. A taken name is refused (destination_exists) with another suggested.
+- `merge`: join the BSP's fragments into fewer, larger brushes and combine matching surfaces (default: the editor's File > Merge Recovered Geometry). If the editor's BSP build cannot reproduce the merged brushes, the error suggests `merge: false`.
+- `keepXboxOnly`: keep the Xbox-only actors (PLF_XBOX_ONLY) as common content; by default they are left out and references to them cleared.
+- `legacy`: the source is in Packages\MapsEd but is a legacy recovered map (saved in compiled layout by an older RE+) or a compiled map copied there (File > Convert Legacy Recovered Map); without it such a source is refused as `source_map`.
+- `discard`: recovery starts with a new map, so unsaved changes are refused (unsaved_changes) unless `discard: true`.
+- `maxRows` (0-2000, default 200): report rows in the result.
+- `dryRun`: only the checks: the source, the name, unsaved changes, a recovery or Rebuild All Maps already running, and the packages the compiled map imports (missing_packages lists the ones not installed: a missing package would stop the editor at a dialog). The real call runs the same checks first.
+
+Progress: each stage with its percent of the whole. It takes minutes, an hour or more for a big map; the server waits up to three hours. Cancelling stops it at its next stage until it starts saving, and leaves a new, empty map with none of its files. Not an Undo step.
+
+It returns `file`, `seconds`, `counts` (cells, cellFaces, joinedBrushes, brushes, brushFaces, grown, absorbed, splitBack, sheetBrushes, polygons, unifiedSurfaces, actors), `recoverySummary`, `categories` (`{category, count, meaning, action}`), `rows` (`{category, item, detail, actor?, surface?}`), `rowsTotal`, `report` (Recovery.txt), `folder` and `next`. `map_query what:"recovery"` reads the whole report later, with `category`, `limit` and `offset`, also offline with `file`.
+
+Categories: Actor left out (Xbox-only, not recreated), Xbox-only actor kept (keepXboxOnly: look at it, the PC version never showed it), Reference cleared (a property now None), Asset moved (into the asset package: ship it), Thin brush (a sliver brush), Mesh lighting recalculated (a mesh lit afresh), BSP lighting not preserved (a surface that kept a fresh bake; the user can re-bake it alone with Build > Recalculate Selected Lighting). Ordinary builds keep the recovered bake; Build > Recalculate Lighting replaces all of it.
+
 ## map_validate
 
 What it checks (`scct://rules` lists every rule with its severities):

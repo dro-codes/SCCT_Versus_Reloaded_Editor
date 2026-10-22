@@ -255,6 +255,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ObjImportModelTests.cpp /Fo"%T
 if errorlevel 1 goto failed
 "%TEMP%\ObjImportModelTests.exe"
 if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\McpRecoverModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpRecoverModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\McpRecoverModelTests.exe"
+if errorlevel 1 goto failed
 popd
 exit /b 0
 :failed
