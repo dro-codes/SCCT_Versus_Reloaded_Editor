@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include "WorkflowModel.h"
+#include <filesystem>
 #include <string>
 #include <vector>
 namespace MapAuthoringDialog
@@ -22,8 +23,20 @@ namespace MapAuthoringDialog
         const char* placement=nullptr; // WindowPlacement key, or none
         std::vector<ReviewRow> rows;
     };
-    // True when the apply button closed it; ticked then holds the ticked rows, in order.
+    // True when the apply button closed it; ticked then holds the ticked rows, in order. Only one change list is
+    // open at a time: a second while one is open throws.
     bool Show(HWND owner,const Review& review,std::vector<size_t>* ticked=nullptr);
     // A list cell: UTF-8 to UTF-16, line breaks to spaces, long values shortened.
     std::wstring Cell(const std::string& text);
+    // The change preview Import Map from JSON shows (preview: PreviewMapAuthoring's
+    // {rows, tally, note}; document: {map, description} at least), for the MCP
+    // bridge's approval. A nested modal loop over owner (Show); true when the user
+    // chose Approve.
+    bool Approve(HWND owner,const Workflow::Json& preview,const Workflow::Json& document);
+    // Closes an open change list as Cancel (its Show returns false); nothing when none is open.
+    void CancelReview();
+    bool Reviewing();
+    // Streams a document to path as indented JSON, through a temporary file
+    // beside it, refusing more than 256 MiB. Throws when it cannot be written.
+    void WriteExport(const std::filesystem::path& path,const Workflow::Json& document);
 }

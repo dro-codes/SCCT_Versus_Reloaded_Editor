@@ -47,6 +47,7 @@
 #include "EngineLog.h"
 #include "MapCheckLog.h"
 #include "WorkflowTools.h"
+#include "McpBridge.h"
 #include "PasteFix.h"
 #include "LargeAddress.h"
 #include "PropertySearch.h"
@@ -214,6 +215,7 @@ BOOL CALLBACK InitFunction(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* Context)
     EngineLog::Initialize();
     MapCheckLog::Initialize();
     WorkflowTools::Initialize();
+    McpBridge::Initialize(); // [Mcp] only; the pipe starts with the frame (EditorExtras)
     EmitterPreview::Initialize();
     BspDiagnostics::Initialize(dllPath);
     PasteFix::Initialize();

@@ -610,10 +610,12 @@ namespace Updater
     }
 
     // What a start does with the files the last update or roll back left.
-    // Installing renames the running DLL (and a replaced launcher) to .old;
-    // the next start keeps it as the previous version, which Roll Back puts
-    // back. A previous launcher that does not go with the new previous DLL
-    // (the update kept the launcher) is removed so the pair stays matched.
+    // Installing renames the running DLL (and a replaced launcher or MCP
+    // server) to .old; the next start keeps it as the previous version, which
+    // Roll Back puts back. A previous launcher or MCP server that does not go
+    // with the new previous DLL (the update kept it) is removed so the set
+    // stays matched: the MCP server and the DLL must speak the same pipe
+    // protocol.
     enum class CleanUpAction
     {
         KeepOldDll,          // Reloaded.Editor.dll.old -> Reloaded.Editor.previous.dll
@@ -622,15 +624,20 @@ namespace Updater
         RemoveOldLauncher,
         RemoveStagedDll,     // .update files an interrupted install left
         RemoveStagedLauncher,
+        KeepOldMcp,          // Reloaded.Editor.Mcp.exe.old -> Reloaded.Editor.Mcp.previous.exe
+        RemovePreviousMcp,
+        RemoveOldMcp,
+        RemoveStagedMcp,
     };
     struct Leftovers
     {
         bool oldDll = false, oldLauncher = false, previousLauncher = false, stagedDll = false, stagedLauncher = false;
+        bool oldMcp = false, previousMcp = false, stagedMcp = false;
     };
     struct CleanUpStep
     {
         CleanUpAction action;
-        bool needsDll; // skipped when keeping the old DLL failed, so the pair stays together
+        bool needsDll; // skipped when keeping the old DLL failed, so the set stays together
     };
     inline std::vector<CleanUpStep> CleanUpPlan(const Leftovers& found)
     {
@@ -640,11 +647,26 @@ namespace Updater
             steps.push_back({CleanUpAction::KeepOldDll, false});
             if (found.oldLauncher) steps.push_back({CleanUpAction::KeepOldLauncher, true});
             else if (found.previousLauncher) steps.push_back({CleanUpAction::RemovePreviousLauncher, true});
+            if (found.oldMcp) steps.push_back({CleanUpAction::KeepOldMcp, true});
+            else if (found.previousMcp) steps.push_back({CleanUpAction::RemovePreviousMcp, true});
         }
-        else if (found.oldLauncher) steps.push_back({CleanUpAction::RemoveOldLauncher, false});
+        else
+        {
+            if (found.oldLauncher) steps.push_back({CleanUpAction::RemoveOldLauncher, false});
+            if (found.oldMcp) steps.push_back({CleanUpAction::RemoveOldMcp, false});
+        }
         if (found.stagedDll) steps.push_back({CleanUpAction::RemoveStagedDll, false});
         if (found.stagedLauncher) steps.push_back({CleanUpAction::RemoveStagedLauncher, false});
+        if (found.stagedMcp) steps.push_back({CleanUpAction::RemoveStagedMcp, false});
         return steps;
+    }
+
+    // Started by the MCP server (editor_launch passes -reMcp): the start-up
+    // update offer would hold up its calls, so the check waits for a start
+    // by hand. Any argument equal to -reMcp, ignoring case.
+    inline bool StartedForMcp(const std::vector<std::string>& arguments)
+    {
+        return std::any_of(arguments.begin(), arguments.end(), [](const std::string& a) { return Lower(a) == "-remcp"; });
     }
 
     inline std::uint32_t Crc32(const std::uint8_t* data, size_t size)

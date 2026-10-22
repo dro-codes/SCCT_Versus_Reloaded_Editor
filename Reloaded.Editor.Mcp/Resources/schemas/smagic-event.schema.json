@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scct://schema/smagic-event",
+  "title": "scct.smagic-event version 1",
+  "description": "An SMagicEvent's settings as SMagicEvent Workbench Export JSON... writes them and Import JSON... reads them (tests/SMagicEventJson.md). Import reads format, version, class and properties only; schema, context and instructions are reference information, and validation uses the destination editor's live schema. Every leaf is a string; every supplied group and action keeps all its structure fields; supplied arrays replace the whole array; omitted top-level properties stay unchanged. Import keeps the destination's name, Tag, position and rotation, and creates or links no other actors. Event fields name actor Tags literally (no remapping). Files are limited to 8 MiB and 64 nesting levels; arrays to 4096 entries; delays to 0-86400 s. Semantics (tests/SMagicEventSemantics.md): Repeat 0 unlimited, N times then disabled, negative disabled; Sequence True sends one entry per matching activation and wraps; every action of one activation shares the same time origin, and equal delays may run in either order; a trigger from StopActor clears pending actions.",
+  "type": "object",
+  "required": ["format", "version", "class", "properties"],
+  "properties": {
+    "format": {"const": "scct.smagic-event"},
+    "version": {"const": 1},
+    "class": {"type": "string", "description": "Must equal the destination event's class, normally SBase.SMagicEvent."},
+    "properties": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Properties of the SMagicEvent category, plus Event and InitialState.",
+      "properties": {
+        "Groups": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/group"}},
+        "StopActor": {"type": "string", "description": "An object reference (Class'MyLevel.Name') or None: its trigger cancels pending actions."},
+        "Event": {"$ref": "#/$defs/name", "description": "What the SMagicEvent itself sends (often None)."},
+        "InitialState": {"type": "string", "description": "Enum name from the live schema."}
+      },
+      "additionalProperties": {"$ref": "#/$defs/value"}
+    },
+    "schema": {"type": "object", "description": "Reference only: the live property schema at export."},
+    "context": {"type": "object", "description": "Reference only: map, the exported actor, its Tag, and the map's authorable actors with their class, Tag and Event."},
+    "instructions": {"type": "string"}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_]{1,63}$", "description": "A Tag or event name (NameProperty), or None."},
+    "bool": {"enum": ["True", "False"]},
+    "integer": {"type": "string", "pattern": "^[+-]?[0-9]+$"},
+    "seconds": {"type": "string", "pattern": "^\\+?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$", "description": "0-86400 seconds."},
+    "eventType": {"enum": ["EVT_Trigger", "EVT_Untrigger", "EVT_TriggerUntrigger", "EVT_UntriggerTrigger"], "description": "The wiki's Trigger, Untrigger, TriggerUntrigger (alternates, starting with Trigger) and UntriggerTrigger (alternates, starting with Untrigger)."},
+    "value": {
+      "anyOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/value"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "group": {
+      "type": "object",
+      "description": "One EventGroup (wiki: Groups). Keep every field the export has.",
+      "required": ["EventGroup", "Repeat", "Sequence", "SequenceIndex"],
+      "properties": {
+        "EventGroup": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/action"}},
+        "Repeat": {"$ref": "#/$defs/integer", "description": "0 unlimited, 1 once, 2 twice...; when used up the group is disabled for good; negative disables it at once."},
+        "Sequence": {"$ref": "#/$defs/bool", "description": "True: one entry per activation, in order, wrapping; it advances only when the next entry's ValidOn matches."},
+        "SequenceIndex": {"$ref": "#/$defs/integer", "description": "Runtime position of a sequence; keep \"0\"."}
+      },
+      "additionalProperties": {"$ref": "#/$defs/value"}
+    },
+    "action": {
+      "type": "object",
+      "description": "One entry of an EventGroup.",
+      "required": ["Delay", "Event", "Type", "ValidOn"],
+      "properties": {
+        "Delay": {"$ref": "#/$defs/seconds"},
+        "Event": {"$ref": "#/$defs/name", "description": "The Tag of the actors to trigger."},
+        "Type": {"$ref": "#/$defs/eventType"},
+        "ValidOn": {"allOf": [{"$ref": "#/$defs/eventType"}], "description": "Which incoming activation sends this entry: EVT_Trigger on Trigger, EVT_Untrigger on Untrigger; the combined values accept either."}
+      },
+      "additionalProperties": {"$ref": "#/$defs/value"}
+    }
+  }
+}

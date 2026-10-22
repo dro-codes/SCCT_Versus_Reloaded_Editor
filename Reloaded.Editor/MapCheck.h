@@ -8,6 +8,8 @@
 // leak path drawn in the viewports (MapCheckModel.h holds the checks).
 namespace MapCheck
 {
+    struct Report; // MapCheckModel.h
+
     // Reserved block 41220-41239.
     constexpr UINT kOpenCommand = 41220;
 
@@ -16,4 +18,9 @@ namespace MapCheck
     // A reachability run ended (Reachability.h): an open Map Check refreshes
     // so its Reachability rows follow.
     void ReachabilityChanged();
+    // The checks the window runs, on the map as last built, with the
+    // [MapCheck] settings, and the Reachability rows from the last run; logged
+    // like a Refresh. UI thread only. ToJson (MapCheckModel.h) is the bridge's
+    // mapcheck.run reply.
+    Report Measure();
 }

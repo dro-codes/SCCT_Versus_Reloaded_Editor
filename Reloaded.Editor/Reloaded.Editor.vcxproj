@@ -216,6 +216,14 @@
     <ClInclude Include="Version.h" />
     <ClInclude Include="WorkflowEditor.h" />
     <ClInclude Include="WorkflowTools.h" />
+    <ClInclude Include="McpBridge.h" />
+    <ClInclude Include="McpBridgeModel.h" />
+    <ClInclude Include="McpEditor.h" />
+    <ClInclude Include="McpGuardModel.h" />
+    <ClInclude Include="McpOps.h" />
+    <ClInclude Include="McpPlanModel.h" />
+    <ClInclude Include="McpSafetyModel.h" />
+    <ClInclude Include="McpNative.inl" />
     <ClInclude Include="CharacterPreview.h" />
     <ClInclude Include="CharacterPreviewModel.h" />
     <ClInclude Include="EmitterPreview.h" />
@@ -376,6 +384,9 @@
     <ClCompile Include="WorkflowEditor.cpp" />
     <ClCompile Include="WorkflowGraph.cpp" />
     <ClCompile Include="WorkflowTools.cpp" />
+    <ClCompile Include="McpBridge.cpp" />
+    <ClCompile Include="McpLifecycle.cpp" />
+    <ClCompile Include="McpOps.cpp" />
     <ClCompile Include="CharacterPreview.cpp" />
     <ClCompile Include="EmitterPreview.cpp" />
     <ClCompile Include="CharacterSkinsWindow.cpp" />

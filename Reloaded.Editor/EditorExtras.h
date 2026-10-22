@@ -42,4 +42,7 @@ namespace EditorExtras
     // the user keeps the open map. Autosaves and kept backups are not listed
     // in Open Recent.
     bool OpenMap(const std::string& path, HWND owner, const char* title, bool confirmDiscard = true);
+    // Whether the open map has changes its file does not, as the unsaved-changes
+    // warning sees it (UnsavedChangesModel.h). False before the first map.
+    bool HasUnsavedChanges();
 }

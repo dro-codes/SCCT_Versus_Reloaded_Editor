@@ -839,6 +839,81 @@ the short way round), ghost outlines carried and turned about the pivot and boxe
 the cap, the plain names of InitialState and the other settings, and the key arrays as
 the editor reads and writes them. The editor side runs in the `mover` smoke suite.
 
+## MCP server
+
+The MCP server and its editor bridge are described in [docs/Mcp.md](../docs/Mcp.md).
+Their engine-free parts have their own suites, run by two scripts with the same
+list (keep them in step):
+
+- `tools\test_mcp.cmd`, from an x86 Native Tools Command Prompt for Visual Studio,
+  builds each suite with `cl /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8`
+  and runs it, then builds the whole server and runs `--version` and
+  `--self-test`, which checks every registered tool and reads every embedded
+  resource.
+- `tools/test_mcp.sh [-j jobs] [-k] [build dir]` does the same with g++ (or
+  `$CXX`) and `-Wall -Wextra -Wshadow -Werror`, for contributors without MSVC:
+  it builds in parallel, runs one suite at a time, and keeps going after a
+  failure with `-k`.
+
+Both run from the repository root, since several suites read sources relative
+to it. CI runs `test_mcp.cmd`, the built exe's `--self-test`
+and the embed comparison below.
+
+`Reloaded.Editor.Mcp/Embedded.gen.h`, the server's embedded copy of
+`Reloaded.Editor.Mcp/Resources`, is generated, not committed. The
+Reloaded.Editor.Mcp build writes it before compiling with
+`tools/mcp/embed_resources.ps1` (Windows PowerShell), rewriting it only when a
+resource changed; `test_mcp.cmd` runs the same script first, and `test_mcp.sh`
+runs its Python twin, `tools/mcp/embed_resources.py`. The two must write the
+same bytes: `test_mcp.sh` compares them when `pwsh` is on PATH, and CI compares
+the built header with the Python script's output.
+
+| Suite | What it covers |
+| --- | --- |
+| `McpBridgeModelTests` | The pipe's framing and limits, the hello handshake and protocol versions, op policies and error codes. |
+| `McpPlanModelTests` | `mcp.plan` checks: section order, `$bind` pointers, single ops wrapped as plans, refused ops. |
+| `McpOpCoverageTests` | Every op the editor answers has a policy row, and every row names an op the editor answers (it reads the DLL's sources). The bridge's refusals in `Reloaded.Editor/McpSafetyModel.h`: map-owned packages for imports and Map JSON `texture`/`save`, release folders inside `Releases`, the work folder and `WriteRoots`, and `exec`'s deny list read word by word as the console reads it, with its `FILE=`, `PACKAGE=` and one-command rules. The dialog watchdog's button (by control id, translated labels, OK only alone, closed when none is safe). No DLL source calls `std::min`/`std::max` while `windows.h`'s macros are live. |
+| `MapCheckJsonModelTests` | Map Check rows and summary as JSON (`mapcheck.run`). |
+| `McpProtocolModelTests` | JSON-RPC messages, protocol version negotiation, capabilities, tool and resource JSON, argument checking against schemas. |
+| `McpServerTests` | The server over strings against a FakeBridge: handshake, lists, the session, query and escape tools, resources, prompts, progress, approval, busy and stale replies, cancellation, launch and restart. |
+| `PromptsTests` | The embedded files, the prompt template syntax, and every tool name the digests and docs cite. |
+
+What only a running editor can show is checked in a disposable copy of the game,
+as the native suites above are (see
+[McpBridgeNativeNotes.md](McpBridgeNativeNotes.md) for each case and what it
+expects):
+
+```powershell
+# The native probe's MCP bridge section (tests/WorkflowNativeTests.h, mcpBridge)
+./tools/run_native_map_recovery_test.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpBridgeOnly
+# The same, preparing the install and turning the server on itself
+./tools/run_mcp_e2e.ps1 -Native -EditorDll ./bin/Reloaded.Editor.dll
+# End to end: Reloaded.Editor.Mcp.exe over stdio against a real editor
+./tools/run_mcp_e2e.ps1 -EditorDll ./bin/Reloaded.Editor.dll -McpExe ./bin/Reloaded.Editor.Mcp.exe
+# No game needed: reads the step files and tests the expectation checker
+pwsh tools/run_mcp_e2e.ps1 -CheckScripts
+```
+
+The native section is a pipe client inside the editor (`tests/mcp/McpPipeClient.h`):
+the handshake and protocol mismatch, a second client, refused and blocked ops,
+labels in Undo History and the call history file, dry runs, `stale`, `busy` under
+a modal dialog, a failing plan rolled back with no Undo step, two-step plans as
+one Undo step, `undo.call`, `spec.material`, `build.all`, `mapcheck.run`,
+`ge.add`, screenshots over 256 px, an export over 8 MiB read back through blobs,
+the `map.new`/`map.save`/`map.open` round trip, `design.register`, approval
+(approve, cancel, client cancel, busy while the review is open), Disconnect and
+turning the server off and on.
+
+The end-to-end run starts the editor through the launcher with `-reMcp` in the
+disposable install (`[Mcp] Enabled=1`, approval, raw commands and Play off), runs
+`Reloaded.Editor.Mcp.exe --self-test`, then plays the JSON-RPC steps of
+`tests/mcp/e2e/versus-starter.jsonl`: initialize and the tool list, `editor_status`,
+`map_file new`, `map_build all`, `map_query summary`, `map_file save_as`,
+`editor_restart` and the same summary again, a screenshot, then a one-light
+`map_changes_apply` taken back with `editor_undo`. The transcript
+(`mcp_e2e_transcript.txt`) and the server's stderr (`mcp_stderr.log`) stay in the
+test folder.
+
 ## Map recovery
 
 ClarD soft-body regression (2026-09-13): one native simulation step before

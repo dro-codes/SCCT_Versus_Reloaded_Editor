@@ -732,8 +732,8 @@ JMP_HOOK(0x10e57b30, MenuBarDispatch)
         //   41580-41599 command palette       41600-41619 compare with backup
         //   41620-41639 host and client play  41640-41659 OBJ mesh import
         //   41660-41679 map OBJ export        41680-41699 light and shadow accuracy
-        //   41700-41719 appearance
-        cmp dword ptr [esp+4], 41719
+        //   41700-41719 appearance            41720-41739 MCP server
+        cmp dword ptr [esp+4], 41739
         jbe workflow_dispatch
     workflow_legacy_range:
         cmp dword ptr [esp+4], 40920

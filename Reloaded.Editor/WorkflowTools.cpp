@@ -54,6 +54,9 @@
 #include "SaveBackupModel.h"
 #include "CrashRecoveryModel.h"
 #include "LevelSnapshot.h"
+#include "McpBridge.h"
+#include "McpEditor.h"
+#include "McpOps.h"
 #include "logger.h"
 #include <commdlg.h>
 #include <windowsx.h>
@@ -1576,6 +1579,107 @@ namespace
         return menu;
     }
 }
+// The MCP bridge's edits of the library (McpOps.cpp), made the way Map
+// Design makes its own: the open map's entry, saved at once, and Map Design's
+// portable workspace copy kept with it.
+Json LibraryEntry()
+{
+    Sync();
+    return document.at("maps").value(mapKey,EmptyMap());
+}
+void RestoreLibraryEntry(const Json& entry)
+{
+    Sync();
+    Json next=document;next["maps"][mapKey]=entry;Save(next);
+    if(entry.is_object() && entry.contains("design"))
+        try{DesignWriteWorkspace(NormalizeDesign(entry.at("design")));}catch(const std::exception&){ /* The library is saved; the copy is best effort. */ }
+}
+namespace
+{
+    void SaveDesign(const Json& data)
+    {
+        Json next=document;next["maps"][mapKey]["design"]=data;Save(next);
+        try{DesignWriteWorkspace(data);}catch(const std::exception&){ /* The library is saved; the copy is best effort. */ }
+    }
+}
+Json RegisterDesignPieces(const Json& pieces,const Json& elements)
+{
+    Sync();
+    const auto map=Editor::AuthoringMap();
+    std::vector<Json> list;
+    if(!pieces.is_array())throw std::runtime_error("design.register takes pieces: the pieces design.block or design.blockbatch returned.");
+    for(const auto& item:pieces)
+        if(item.is_array())for(const auto& piece:item)list.push_back(piece);
+        else list.push_back(item);
+    Json data=NormalizeDesign(document.at("maps").value(mapKey,EmptyMap()).value("design",Json::object()));
+    size_t registered=0,added=0;
+    for(auto piece:list)
+    {
+        if(!piece.is_object() || !piece.contains("spec") || !piece.at("spec").is_object() || !piece.contains("members") || !piece.at("members").is_array() || piece.at("members").empty()
+           || !piece.contains("position") || !piece.contains("rotation") || !piece.contains("fingerprint"))
+            throw std::runtime_error("A piece to register is a result of design.block or design.blockbatch: {map, spec, position, rotation, members, fingerprint}.");
+        if(piece.value("map",std::string())!=map)throw std::runtime_error("A piece to register was placed in another map.");
+        // The same brushes twice are one piece.
+        if(std::any_of(data.at("pieces").begin(),data.at("pieces").end(),[&](const Json& stored){return stored.value("members",Json())==piece.at("members");}))continue;
+        // Named as the panel names a new piece, so the Scene panel tells one room from the next.
+        const auto kind=piece.at("spec").value("kind",std::string());
+        const auto name=piece.at("spec").value("name",std::string());
+        if(!kind.empty() && (name.empty() || name=="Blockout" || name==kind))piece["spec"]["name"]=Design::NextName(data.at("pieces"),kind);
+        data["pieces"].push_back(std::move(piece));++registered;
+    }
+    if(elements.is_array() && !elements.empty())
+    {
+        if(!data.contains("elements") || !data.at("elements").is_array())data["elements"]=Json::array();
+        for(const auto& element:elements)
+        {
+            if(!element.is_object() || !element.contains("kind") || !element.contains("points"))throw std::runtime_error("An element to register is {kind, points, members, command}.");
+            data["elements"].push_back(element);++added;
+        }
+    }
+    if(registered || added)SaveDesign(data);
+    return {{"registered",registered},{"elements",added}};
+}
+size_t UnregisterDesignPieces(const Json& members)
+{
+    Sync();
+    std::set<std::string> paths;
+    for(const auto& member:members)paths.insert(Fold(member.at("path").get<std::string>()));
+    auto owned=[&](const Json& record)
+    {
+        for(const auto& member:record.value("members",Json::array()))
+            if(member.is_object() && paths.count(Fold(member.value("path",std::string()))))return true;
+        return false;
+    };
+    Json data=NormalizeDesign(document.at("maps").value(mapKey,EmptyMap()).value("design",Json::object()));
+    size_t removed=0;
+    auto& list=data["pieces"];
+    for(auto it=list.begin();it!=list.end();)if(owned(*it)){it=list.erase(it);++removed;}else ++it;
+    if(data.contains("elements") && data.at("elements").is_array())
+    {
+        auto& records=data["elements"];
+        for(auto it=records.begin();it!=records.end();)if(owned(*it))it=records.erase(it);else ++it;
+    }
+    if(removed)SaveDesign(data);
+    return removed;
+}
+Json DesignElements()
+{
+    Sync();
+    const auto design=document.at("maps").value(mapKey,EmptyMap()).value("design",Json::object());
+    return design.is_object()?design.value("elements",Json::array()):Json::array();
+}
+Json McpSidecar()
+{
+    Sync();
+    return document.at("maps").value(mapKey,EmptyMap()).value("mcp",Json());
+}
+void SetMcpSidecar(const Json& sidecar)
+{
+    Sync();
+    Json next=document;
+    if(sidecar.is_null())next["maps"][mapKey].erase("mcp");else next["maps"][mapKey]["mcp"]=sidecar;
+    Save(next);
+}
 bool AppendObjectiveMenu(HMENU menu,const Json& actor){return ObjectiveMenu(menu,actor);}
 Json SaveEmitterSelection(HWND owner,bool confirm)
 {
@@ -1653,6 +1757,7 @@ void CameraBookmark(int slot,bool store,bool fromMenu)
 }
 bool HandleCommand(UINT command)
 {
+    if(command>=McpBridge::kMenuFirst && command<=McpBridge::kMenuLast)return McpBridge::HandleCommand(command);
     if(EditorExtras::HandleCommand(command))return true;
     if(command==UndoHistory::kOpen || command==UndoHistory::kAddCheckpoint)
     {
@@ -1931,6 +2036,7 @@ void Initialize()
     previousTrackMenu=*reinterpret_cast<TrackMenuFn*>(0x11af23c0);
     auto track=&TrackMenuHook;MemoryWriter::WriteBytes(0x11af23c0,&track,sizeof(track));
     MemoryWriter::WriteJump(0x10e045e9,reinterpret_cast<void(*)()>(&VertexClickHook));
+    McpOps::Initialize();
 }
 }
 
@@ -1962,153 +2068,175 @@ static Workflow::Json MoreWorkflowRequests(const std::string& op,const Workflow:
     throw std::runtime_error("Unknown workflow request.");
 }
 
+// One request: the MCP ops first (McpOps.h), then this chain, which is at the
+// compiler's nesting limit (C1061), then MoreWorkflowRequests.
+Workflow::Json WorkflowTools::Request(const Workflow::Json& q)
+{
+    const std::string op=q.at("op");
+    if(const auto* handler=McpOps::Find(op))return (*handler)(q);
+    Json result;
+    if(op=="actors") result=Editor::Actors(q.value("selected",false));
+    else if(op=="map.file")result=Editor::MapFile();
+    else if(op=="map.setfile"){Editor::SetMapFile(q.at("file").get<std::string>());result=Editor::MapFile();}
+    else if(op=="design.scene")result=Editor::DesignScene();
+    else if(op=="design.block")result=Editor::DesignBlockout(q.at("spec"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.value("previous",Json{}));
+    else if(op=="design.align"){Editor::DesignAlign(q.at("scene"),q.at("axis"),q.at("mode"),q.value("spacing",0.0));result=true;}
+    else if(op=="design.layer"){Editor::DesignLayer(q.at("members"),q.at("hidden"),q.at("locked"),q.value("group",std::string()),q.value("groupAction",std::string("none")));result=true;}
+    else if(op=="design.grid")result=Editor::DesignGrid();
+    else if(op=="design.view")result=WorkflowTools::DesignView();
+    else if(op=="design.polyflags")result=q.contains("flags")?Json(Editor::DesignSetPolyFlags(q.at("members"),q.at("flags"))):Editor::DesignPolyFlags(q.at("members"));
+    else if(op=="design.repairflags")result=WorkflowTools::DesignRepairFlags();
+    else if(op=="design.bspowners")result=Editor::BspSurfaceOwners();
+    else if(op=="design.sendtolast")result=Editor::DesignSendToLast(q.at("members"));
+    else if(op=="design.builds")result=Editor::GeometryBuilds();
+    else if(op=="design.blockbatch")result=Editor::DesignBlockoutBatch(q.at("items"));
+    else if(op=="design.flags"){Editor::DesignSetFlags(q.at("members"),q.value("hidden",-1),q.value("locked",-1));result=true;}
+    else if(op=="design.group"){Editor::DesignGroupMembers(q.at("members"),q.at("group"),q.at("action"));result=true;}
+    else if(op=="design.translate"){Editor::DesignTranslate(q.at("members"),q.at("delta").get<Vector>());result=true;}
+    else if(op=="placement.selection")result=Editor::PlacementSelection();
+    else if(op=="placement.drop")result=Editor::PlacementDrop(q.value("surface",0),q.value("align",false));
+    else if(op=="design.lift")result=Editor::CreateLift(q.at("position").get<Vector>(),q.value("width",192.0),q.value("length",192.0),q.value("thickness",16.0),q.at("rise"),q.value("moveTime",2.0));
+    else if(op=="security.actors")result=Editor::SecurityActors();
+    else if(op=="light.list")result=Editor::Lights();
+    else if(op=="objective.actors")result=Editor::ObjectiveActors();
+    else if(op=="start.create")result=Editor::CreatePlayerStart(q.value("class",std::string("Engine.PlayerStart")),q.value("team",std::string("0")),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})});
+    else if(op=="alarm.locks")result=Editor::AddAlarmLocks(q.at("alarm"),q.at("targets"));
+    else if(op=="light.set")result=Editor::SetActorProperties(q.at("actor"),q.value("properties",Json::object()));
+    else if(op=="security.create")result=Editor::CreateSecurityActor(q.at("class"),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})},q.value("properties",Json::object()));
+    else if(op=="security.sensor")result=Editor::CreateMotionSensor(q.at("low").get<Vector>(),q.at("high").get<Vector>(),q.value("properties",Json::object()));
+    else if(op=="security.link"){Editor::LinkDetectorToAlarm(q.at("detector"),q.at("alarm"));result=true;}
+    else if(op=="security.outputs"){Editor::AddAlarmOutputs(q.at("alarm"),q.at("targets"));result=true;}
+    else if(op=="security.unlink"){Editor::UnwireDetector(q.at("detector"));result=true;}
+    else if(op=="security.delete"){Editor::DeleteSecurityActor(q.at("actor"));result=true;}
+    else if(op=="security.move")result=Editor::MoveSecurityActor(q.at("actor"),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})},q.value("properties",Json::object()));
+    else if(op=="stage.actors")result=Editor::StageActors();
+    else if(op=="stage.read")result=Editor::StagePlan();
+    else if(op=="stage.preview")result=Editor::PreviewStages(q.at("plan"));
+    else if(op=="stage.apply")result=Editor::ApplyStages(q.at("plan"));
+    else if(op=="design.build"){Editor::BuildGeometry();result=true;}
+    else if(op=="design.tempstart")result=Editor::DesignTemporaryStart(q.at("class"),q.value("team",std::string()),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()});
+    else if(op=="design.removestart"){Editor::DesignRemoveTemporaryStart(q.at("start"));result=true;}
+    else if(op=="design.spawns")result=Editor::DesignSpawns();
+    else if(op=="design.clearances")result=Editor::DesignClearances();
+    else if(op=="design.play"){Editor::DesignPlay(q.at("start"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.value("launch",false));result=true;}
+    else if(op=="optimise.report") result=Editor::OptimiseReport(q.value("base",std::string()));
+    else if(op=="optimise.release") result=Editor::OptimiseRelease(q);
+    else if(op=="package.preview") {MapPackageDialog::Preview(GetActiveWindow(),q.at("map").get<std::string>());result=true;}
+    else if(op=="authoring.export") result=Editor::ExportMapAuthoring();
+    else if(op=="authoring.preview"){auto document=q.at("document");Authoring::Rebase(document,Authoring::Utf8Path(q.value("baseDirectory",std::string{})));result=Editor::PreviewMapAuthoring(document);}
+    else if(op=="authoring.apply"){auto document=q.at("document");Authoring::Rebase(document,Authoring::Utf8Path(q.value("baseDirectory",std::string{})));result=Editor::ApplyMapAuthoring(document);}
+    else if(op=="magic.classes") result=Editor::EventClasses();
+    else if(op=="camera.snapshot") result=Editor::CameraNetworks();
+    else if(op=="camera.order") {Editor::OrderCameras(q.at("snapshot"),q.at("paths"),q.value("loop",false),q.value("detach",std::string{}));result=true;}
+    else if(op=="camera.add") result=Editor::AddNetworkCamera(q.at("snapshot"),q.at("paths"),q.value("loop",false));
+    else if(op=="magic.assets") result=Editor::EventAssets(q.at("type"),q.value("classes",false));
+    else if(op=="magic.component") result=Editor::CreateEventComponent(q.at("snapshot"),q.at("class"));
+    else if(op=="magic.key") {Editor::CaptureMoverKey(q.at("snapshot"),q.at("key"));result=true;}
+    else if(op=="magic.inspect") result=Editor::InspectActor(q.at("actor"));
+    else if(op=="magic.json.export") result=Editor::ExportEventJson(q.at("actor"));
+    else if(op=="magic.json.import") {Editor::ImportEventJson(q.at("snapshot"),q.at("document"));result=true;}
+    else if(op=="magic.edit") {Editor::EditActor(q.at("snapshot"),q.at("changes"));result=true;}
+    else if(op=="magic.create") result=Editor::CreateEventActor(q.at("class"),q.value("event",Json{}),q.value("trigger",false),q.value("geometry",std::string("point")),q.value("group",0));
+    else if(op=="magic.link") {Editor::LinkEventActor(q.at("event"),q.at("target"),q.value("trigger",false),q.value("group",0));result=true;}
+    else if(op=="select") {Editor::Select(q.at("actors"),q.value("focus",false));result=true;}
+    else if(op=="view.capture") result=Editor::CaptureView();
+    else if(op=="brush.visibility") result=Editor::BrushVisibility();
+    else if(op=="brush.visibility.set") {Editor::SetBrushVisibility(q.at("category"),q.at("action"));result=true;}
+    else if(op=="view.restore") result=Editor::RestoreView(q.at("view"));
+    else if(op=="usages") result=Editor::FindUsages(q.at("asset"));
+    else if(op=="replace") {Editor::ReplaceUsages(q.at("usages"),q.at("source"),q.at("replacement"));result=true;}
+    else if(op=="connections") result=Editor::Connections(q.at("actor"));
+    else if(op=="objective.add") result=Editor::AddObjectiveActor(q.at("owner"),q.at("class"));
+    else if(op=="surface.brushes") result=Editor::SelectedSurfaceBrushes();
+    else if(op=="mesh.bounds") result=Editor::SelectedMeshBounds();
+    else if(op=="builder.fit") {Editor::FitBuilderBrushToMeshes();result=true;}
+    else if(op=="builder.fit.brush") {Editor::FitBuilderBrushToBrushes();result=true;}
+    else if(op=="brush.snap.bounds") result=Editor::BrushSnapBounds(q.value("surfaces",false));
+    else if(op=="vertex.selection") result=Editor::SelectedBrushVertices();
+    else if(op=="vertex.portal") result=Editor::AddVertexPortal();
+    else if(op=="stairs.state") result=Editor::StairSmoothState(q.value("surfaces",false));
+    else if(op=="stairs.smooth") result=Editor::SmoothStairs(q.value("surfaces",false));
+    else if(op=="stairs.remove") result=Editor::RemoveStairSmoothing(q.value("surfaces",false));
+    else if(op=="vertex.snap") {Editor::SnapSelectedBrushVertices(q.at("axes").get<unsigned>());result=true;}
+    else if(op=="brush.snap") {Editor::SnapBrushesToGrid(q.at("axes").get<unsigned>(),q.value("surfaces",false));result=true;}
+    else if(op=="tag.preview") result=Editor::PreviewTagRename(q.at("actor"),q.at("tag"));
+    else if(op=="tag.rename") {Editor::RenameTag(q.at("preview"));result=true;}
+    else if(op=="assembly.capture") result=Editor::CaptureAssembly(q.at("members"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()});
+    else if(op=="assembly.place") result=Editor::PlaceAssembly(q.at("definition"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.at("bindings").get<std::map<std::string,std::string>>());
+    else if(op=="emitterlib.list") result=Editor::EmitterLibrary();
+    else if(op=="emitterlib.packs") result=Editor::EmitterPacks();
+    else if(op=="emitterlib.cache") result=Editor::EmitterLibraryCacheState();
+    else if(op=="emitterlib.problems") result=Editor::EmitterLibraryProblems();
+    else if(op=="emitterlib.categories") result=Editor::EmitterCategories();
+    else if(op=="emitterlib.selected") result=Editor::SelectedEmitters();
+    else if(op=="emitterlib.capture") result=Editor::CaptureEmitters(q.contains("members")?q.at("members"):Editor::SelectedEmitters(),q.value("map",std::string{}));
+    else if(op=="emitterlib.save")
+    {
+        // An entry (a draft or a listed entry) or a fresh capture; the
+        // text fields given here override the entry's own.
+        Json entry=q.contains("entry")?q.at("entry"):Editor::CaptureEmitters(q.contains("members")?q.at("members"):Editor::SelectedEmitters(),q.value("map",std::string{}));
+        for(const char* key:{"name","category","description","preview"}) if(q.contains(key)) entry[key]=q.at(key);
+        result=Editor::SaveEmitterEntry(entry);
+    }
+    else if(op=="emitterlib.place")
+    {
+        Json entry=q.contains("entry")?q.at("entry"):EmitterLibrary::Find(*Editor::EmitterLibraryState().entries,q.contains("id")?q.at("id").get<std::string>():q.at("name").get<std::string>());
+        Pose pose{q.contains("position")?q.at("position").get<Vector>():Editor::BuilderPose().position,q.value("rotation",Rotation{})};
+        result=Editor::PlaceEmitterEntry(entry,pose);
+    }
+    else if(op=="emitterlib.delete") {Editor::DeleteEmitterEntry(q.at("id"));result=true;}
+    else if(op=="emitterlib.update")
+    {
+        Json changes=Json::object(); for(const char* key:{"name","category","description"}) if(q.contains(key)) changes[key]=q.at(key);
+        result=Editor::UpdateEmitterEntry(q.at("id"),changes);
+    }
+    else if(op=="emitterlib.restore") {Editor::RestoreBuiltinEmitters();result=true;}
+    else if(op=="preview.open"){std::string error;if(!EmitterPreview::OpenTestWindow(error))throw std::runtime_error(error);result=EmitterPreview::State();}
+    else if(op=="preview.show"){EmitterPreview::Show(q.at("entry"));result=EmitterPreview::State();}
+    else if(op=="preview.capture") result=EmitterPreview::Capture(q.value("path",std::string()));
+    else if(op=="preview.clear"){EmitterPreview::Clear();result=EmitterPreview::State();}
+    else if(op=="preview.close"){EmitterPreview::CloseTestWindow();result=EmitterPreview::State();}
+    else if(op=="preview.state") result=EmitterPreview::State();
+    else if(op=="preview.attach"){std::string error;if(!EmitterPreview::Attach(reinterpret_cast<HWND>(static_cast<uintptr_t>(q.at("hwnd").get<uint64_t>())),error))throw std::runtime_error(error);result=EmitterPreview::State();}
+    else if(op=="preview.detach"){EmitterPreview::Detach();result=EmitterPreview::State();}
+    else if(op=="preview.step"){EmitterPreview::Step(q.value("seconds",1.0));result=EmitterPreview::State();}
+    else if(op=="preview.camera"){if(q.contains("camera"))EmitterPreview::SetCamera(q.at("camera"));result=EmitterPreview::Camera();}
+    else if(op=="characters.open"){std::string error;if(!CharacterPreview::OpenTestWindow(error))throw std::runtime_error(error);result=CharacterPreview::State();}
+    else if(op=="characters.show"){result=CharacterPreview::Show(q.value("slots",Json::object()),q.value("models",Json::object()));result["state"]=CharacterPreview::State();}
+    else if(op=="characters.capture") result=CharacterPreview::Capture(q.value("path",std::string()));
+    else if(op=="characters.clear"){CharacterPreview::Clear();result=CharacterPreview::State();}
+    else if(op=="characters.close"){CharacterPreview::CloseTestWindow();result=CharacterPreview::State();}
+    else if(op=="characters.state") result=CharacterPreview::State();
+    else if(op=="skins.settings") result=Editor::CharacterSkinSettings();
+    else if(op=="skins.apply") result=Editor::ApplyCharacterSkins(q.value("slots",Json::object()),q.value("models",Json::object()),q.value("goggles",Json::object()));
+    else if(op=="skins.remove") {Editor::RemoveCharacterSkins();result=Editor::CharacterSkinSettings();}
+    else if(op=="characters.camera"){if(q.contains("camera"))CharacterPreview::SetCamera(q.at("camera"));result=CharacterPreview::Camera();}
+    else if(op=="map") result={{"key",Editor::MapKey()},{"level",Editor::LevelPath()}};
+    else result=MoreWorkflowRequests(op,q);
+    return result;
+}
+namespace
+{
+    // A reply the caller's buffer could not hold, kept for its retry with a
+    // bigger one, so the retry gets it without running a change twice.
+    std::string pendingRequest,pendingReply;
+}
 // JSON bridge used by the isolated native integration probe. Calls must be made
 // on the editor UI thread, exactly like the corresponding dialog operations.
+// Returns -(bytes needed) when the reply does not fit.
 extern "C" __declspec(dllexport) int __cdecl ReloadedWorkflowRequest(const char* request,char* output,unsigned capacity)
 {
     using namespace Workflow;
     try
     {
-        Json q=Json::parse(request),result; std::string op=q.at("op");
-        if(op=="actors") result=Editor::Actors(q.value("selected",false));
-        else if(op=="map.file")result=Editor::MapFile();
-        else if(op=="map.setfile"){Editor::SetMapFile(q.at("file").get<std::string>());result=Editor::MapFile();}
-        else if(op=="design.scene")result=Editor::DesignScene();
-        else if(op=="design.block")result=Editor::DesignBlockout(q.at("spec"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.value("previous",Json{}));
-        else if(op=="design.align"){Editor::DesignAlign(q.at("scene"),q.at("axis"),q.at("mode"),q.value("spacing",0.0));result=true;}
-        else if(op=="design.layer"){Editor::DesignLayer(q.at("members"),q.at("hidden"),q.at("locked"),q.value("group",std::string()),q.value("groupAction",std::string("none")));result=true;}
-        else if(op=="design.grid")result=Editor::DesignGrid();
-        else if(op=="design.view")result=WorkflowTools::DesignView();
-        else if(op=="design.polyflags")result=q.contains("flags")?Json(Editor::DesignSetPolyFlags(q.at("members"),q.at("flags"))):Editor::DesignPolyFlags(q.at("members"));
-        else if(op=="design.repairflags")result=WorkflowTools::DesignRepairFlags();
-        else if(op=="design.bspowners")result=Editor::BspSurfaceOwners();
-        else if(op=="design.sendtolast")result=Editor::DesignSendToLast(q.at("members"));
-        else if(op=="design.builds")result=Editor::GeometryBuilds();
-        else if(op=="design.blockbatch")result=Editor::DesignBlockoutBatch(q.at("items"));
-        else if(op=="design.flags"){Editor::DesignSetFlags(q.at("members"),q.value("hidden",-1),q.value("locked",-1));result=true;}
-        else if(op=="design.group"){Editor::DesignGroupMembers(q.at("members"),q.at("group"),q.at("action"));result=true;}
-        else if(op=="design.translate"){Editor::DesignTranslate(q.at("members"),q.at("delta").get<Vector>());result=true;}
-        else if(op=="placement.selection")result=Editor::PlacementSelection();
-        else if(op=="placement.drop")result=Editor::PlacementDrop(q.value("surface",0),q.value("align",false));
-        else if(op=="design.lift")result=Editor::CreateLift(q.at("position").get<Vector>(),q.value("width",192.0),q.value("length",192.0),q.value("thickness",16.0),q.at("rise"),q.value("moveTime",2.0));
-        else if(op=="security.actors")result=Editor::SecurityActors();
-        else if(op=="light.list")result=Editor::Lights();
-        else if(op=="objective.actors")result=Editor::ObjectiveActors();
-        else if(op=="start.create")result=Editor::CreatePlayerStart(q.value("class",std::string("Engine.PlayerStart")),q.value("team",std::string("0")),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})});
-        else if(op=="alarm.locks")result=Editor::AddAlarmLocks(q.at("alarm"),q.at("targets"));
-        else if(op=="light.set")result=Editor::SetActorProperties(q.at("actor"),q.value("properties",Json::object()));
-        else if(op=="security.create")result=Editor::CreateSecurityActor(q.at("class"),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})},q.value("properties",Json::object()));
-        else if(op=="security.sensor")result=Editor::CreateMotionSensor(q.at("low").get<Vector>(),q.at("high").get<Vector>(),q.value("properties",Json::object()));
-        else if(op=="security.link"){Editor::LinkDetectorToAlarm(q.at("detector"),q.at("alarm"));result=true;}
-        else if(op=="security.outputs"){Editor::AddAlarmOutputs(q.at("alarm"),q.at("targets"));result=true;}
-        else if(op=="security.unlink"){Editor::UnwireDetector(q.at("detector"));result=true;}
-        else if(op=="security.delete"){Editor::DeleteSecurityActor(q.at("actor"));result=true;}
-        else if(op=="security.move")result=Editor::MoveSecurityActor(q.at("actor"),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})},q.value("properties",Json::object()));
-        else if(op=="stage.actors")result=Editor::StageActors();
-        else if(op=="stage.read")result=Editor::StagePlan();
-        else if(op=="stage.preview")result=Editor::PreviewStages(q.at("plan"));
-        else if(op=="stage.apply")result=Editor::ApplyStages(q.at("plan"));
-        else if(op=="design.build"){Editor::BuildGeometry();result=true;}
-        else if(op=="design.tempstart")result=Editor::DesignTemporaryStart(q.at("class"),q.value("team",std::string()),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()});
-        else if(op=="design.removestart"){Editor::DesignRemoveTemporaryStart(q.at("start"));result=true;}
-        else if(op=="design.spawns")result=Editor::DesignSpawns();
-        else if(op=="design.clearances")result=Editor::DesignClearances();
-        else if(op=="design.play"){Editor::DesignPlay(q.at("start"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.value("launch",false));result=true;}
-        else if(op=="optimise.report") result=Editor::OptimiseReport(q.value("base",std::string()));
-        else if(op=="optimise.release") result=Editor::OptimiseRelease(q);
-        else if(op=="package.preview") {MapPackageDialog::Preview(GetActiveWindow(),q.at("map").get<std::string>());result=true;}
-        else if(op=="authoring.export") result=Editor::ExportMapAuthoring();
-        else if(op=="authoring.preview"){auto document=q.at("document");Authoring::Rebase(document,Authoring::Utf8Path(q.value("baseDirectory",std::string{})));result=Editor::PreviewMapAuthoring(document);}
-        else if(op=="authoring.apply"){auto document=q.at("document");Authoring::Rebase(document,Authoring::Utf8Path(q.value("baseDirectory",std::string{})));result=Editor::ApplyMapAuthoring(document);}
-        else if(op=="magic.classes") result=Editor::EventClasses();
-        else if(op=="camera.snapshot") result=Editor::CameraNetworks();
-        else if(op=="camera.order") {Editor::OrderCameras(q.at("snapshot"),q.at("paths"),q.value("loop",false),q.value("detach",std::string{}));result=true;}
-        else if(op=="camera.add") result=Editor::AddNetworkCamera(q.at("snapshot"),q.at("paths"),q.value("loop",false));
-        else if(op=="magic.assets") result=Editor::EventAssets(q.at("type"),q.value("classes",false));
-        else if(op=="magic.component") result=Editor::CreateEventComponent(q.at("snapshot"),q.at("class"));
-        else if(op=="magic.key") {Editor::CaptureMoverKey(q.at("snapshot"),q.at("key"));result=true;}
-        else if(op=="magic.inspect") result=Editor::InspectActor(q.at("actor"));
-        else if(op=="magic.json.export") result=Editor::ExportEventJson(q.at("actor"));
-        else if(op=="magic.json.import") {Editor::ImportEventJson(q.at("snapshot"),q.at("document"));result=true;}
-        else if(op=="magic.edit") {Editor::EditActor(q.at("snapshot"),q.at("changes"));result=true;}
-        else if(op=="magic.create") result=Editor::CreateEventActor(q.at("class"),q.value("event",Json{}),q.value("trigger",false),q.value("geometry",std::string("point")),q.value("group",0));
-        else if(op=="magic.link") {Editor::LinkEventActor(q.at("event"),q.at("target"),q.value("trigger",false),q.value("group",0));result=true;}
-        else if(op=="select") {Editor::Select(q.at("actors"),q.value("focus",false));result=true;}
-        else if(op=="view.capture") result=Editor::CaptureView();
-        else if(op=="brush.visibility") result=Editor::BrushVisibility();
-        else if(op=="brush.visibility.set") {Editor::SetBrushVisibility(q.at("category"),q.at("action"));result=true;}
-        else if(op=="view.restore") result=Editor::RestoreView(q.at("view"));
-        else if(op=="usages") result=Editor::FindUsages(q.at("asset"));
-        else if(op=="replace") {Editor::ReplaceUsages(q.at("usages"),q.at("source"),q.at("replacement"));result=true;}
-        else if(op=="connections") result=Editor::Connections(q.at("actor"));
-        else if(op=="objective.add") result=Editor::AddObjectiveActor(q.at("owner"),q.at("class"));
-        else if(op=="surface.brushes") result=Editor::SelectedSurfaceBrushes();
-        else if(op=="mesh.bounds") result=Editor::SelectedMeshBounds();
-        else if(op=="builder.fit") {Editor::FitBuilderBrushToMeshes();result=true;}
-        else if(op=="builder.fit.brush") {Editor::FitBuilderBrushToBrushes();result=true;}
-        else if(op=="brush.snap.bounds") result=Editor::BrushSnapBounds(q.value("surfaces",false));
-        else if(op=="vertex.selection") result=Editor::SelectedBrushVertices();
-        else if(op=="vertex.portal") result=Editor::AddVertexPortal();
-        else if(op=="stairs.state") result=Editor::StairSmoothState(q.value("surfaces",false));
-        else if(op=="stairs.smooth") result=Editor::SmoothStairs(q.value("surfaces",false));
-        else if(op=="stairs.remove") result=Editor::RemoveStairSmoothing(q.value("surfaces",false));
-        else if(op=="vertex.snap") {Editor::SnapSelectedBrushVertices(q.at("axes").get<unsigned>());result=true;}
-        else if(op=="brush.snap") {Editor::SnapBrushesToGrid(q.at("axes").get<unsigned>(),q.value("surfaces",false));result=true;}
-        else if(op=="tag.preview") result=Editor::PreviewTagRename(q.at("actor"),q.at("tag"));
-        else if(op=="tag.rename") {Editor::RenameTag(q.at("preview"));result=true;}
-        else if(op=="assembly.capture") result=Editor::CaptureAssembly(q.at("members"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()});
-        else if(op=="assembly.place") result=Editor::PlaceAssembly(q.at("definition"),{q.at("position").get<Vector>(),q.at("rotation").get<Rotation>()},q.at("bindings").get<std::map<std::string,std::string>>());
-        else if(op=="emitterlib.list") result=Editor::EmitterLibrary();
-        else if(op=="emitterlib.packs") result=Editor::EmitterPacks();
-        else if(op=="emitterlib.cache") result=Editor::EmitterLibraryCacheState();
-        else if(op=="emitterlib.problems") result=Editor::EmitterLibraryProblems();
-        else if(op=="emitterlib.categories") result=Editor::EmitterCategories();
-        else if(op=="emitterlib.selected") result=Editor::SelectedEmitters();
-        else if(op=="emitterlib.capture") result=Editor::CaptureEmitters(q.contains("members")?q.at("members"):Editor::SelectedEmitters(),q.value("map",std::string{}));
-        else if(op=="emitterlib.save")
+        std::string text;
+        if(request && !pendingRequest.empty() && pendingRequest==request) { text=std::move(pendingReply); pendingRequest.clear(); pendingReply.clear(); }
+        else
         {
-            // An entry (a draft or a listed entry) or a fresh capture; the
-            // text fields given here override the entry's own.
-            Json entry=q.contains("entry")?q.at("entry"):Editor::CaptureEmitters(q.contains("members")?q.at("members"):Editor::SelectedEmitters(),q.value("map",std::string{}));
-            for(const char* key:{"name","category","description","preview"}) if(q.contains(key)) entry[key]=q.at(key);
-            result=Editor::SaveEmitterEntry(entry);
+            pendingRequest.clear(); pendingReply.clear();
+            text=Json({{"ok",true},{"result",WorkflowTools::Request(Json::parse(request))}}).dump();
         }
-        else if(op=="emitterlib.place")
-        {
-            Json entry=q.contains("entry")?q.at("entry"):EmitterLibrary::Find(*Editor::EmitterLibraryState().entries,q.contains("id")?q.at("id").get<std::string>():q.at("name").get<std::string>());
-            Pose pose{q.contains("position")?q.at("position").get<Vector>():Editor::BuilderPose().position,q.value("rotation",Rotation{})};
-            result=Editor::PlaceEmitterEntry(entry,pose);
-        }
-        else if(op=="emitterlib.delete") {Editor::DeleteEmitterEntry(q.at("id"));result=true;}
-        else if(op=="emitterlib.update")
-        {
-            Json changes=Json::object(); for(const char* key:{"name","category","description"}) if(q.contains(key)) changes[key]=q.at(key);
-            result=Editor::UpdateEmitterEntry(q.at("id"),changes);
-        }
-        else if(op=="emitterlib.restore") {Editor::RestoreBuiltinEmitters();result=true;}
-        else if(op=="preview.open"){std::string error;if(!EmitterPreview::OpenTestWindow(error))throw std::runtime_error(error);result=EmitterPreview::State();}
-        else if(op=="preview.show"){EmitterPreview::Show(q.at("entry"));result=EmitterPreview::State();}
-        else if(op=="preview.capture") result=EmitterPreview::Capture(q.value("path",std::string()));
-        else if(op=="preview.clear"){EmitterPreview::Clear();result=EmitterPreview::State();}
-        else if(op=="preview.close"){EmitterPreview::CloseTestWindow();result=EmitterPreview::State();}
-        else if(op=="preview.state") result=EmitterPreview::State();
-        else if(op=="preview.attach"){std::string error;if(!EmitterPreview::Attach(reinterpret_cast<HWND>(static_cast<uintptr_t>(q.at("hwnd").get<uint64_t>())),error))throw std::runtime_error(error);result=EmitterPreview::State();}
-        else if(op=="preview.detach"){EmitterPreview::Detach();result=EmitterPreview::State();}
-        else if(op=="preview.step"){EmitterPreview::Step(q.value("seconds",1.0));result=EmitterPreview::State();}
-        else if(op=="preview.camera"){if(q.contains("camera"))EmitterPreview::SetCamera(q.at("camera"));result=EmitterPreview::Camera();}
-        else if(op=="characters.open"){std::string error;if(!CharacterPreview::OpenTestWindow(error))throw std::runtime_error(error);result=CharacterPreview::State();}
-        else if(op=="characters.show"){result=CharacterPreview::Show(q.value("slots",Json::object()),q.value("models",Json::object()));result["state"]=CharacterPreview::State();}
-        else if(op=="characters.capture") result=CharacterPreview::Capture(q.value("path",std::string()));
-        else if(op=="characters.clear"){CharacterPreview::Clear();result=CharacterPreview::State();}
-        else if(op=="characters.close"){CharacterPreview::CloseTestWindow();result=CharacterPreview::State();}
-        else if(op=="characters.state") result=CharacterPreview::State();
-        else if(op=="skins.settings") result=Editor::CharacterSkinSettings();
-        else if(op=="skins.apply") result=Editor::ApplyCharacterSkins(q.value("slots",Json::object()),q.value("models",Json::object()),q.value("goggles",Json::object()));
-        else if(op=="skins.remove") {Editor::RemoveCharacterSkins();result=Editor::CharacterSkinSettings();}
-        else if(op=="characters.camera"){if(q.contains("camera"))CharacterPreview::SetCamera(q.at("camera"));result=CharacterPreview::Camera();}
-        else if(op=="map") result={{"key",Editor::MapKey()},{"level",Editor::LevelPath()}};
-        else result=MoreWorkflowRequests(op,q);
-        auto text=Json({{"ok",true},{"result",result}}).dump(); if(text.size()+1>capacity) return -static_cast<int>(text.size()+1);
+        if(text.size()+1>capacity) { pendingRequest=request; pendingReply=text; return -static_cast<int>(text.size()+1); }
         memcpy(output,text.c_str(),text.size()+1); return 1;
     }
     catch(const std::exception& e)

@@ -243,6 +243,25 @@ int main()
         Check(plan({false, true, true}) == "3 ", "a lone old launcher goes; the previous pair stays");
         Check(plan({false, false, true}).empty(), "previous version left alone");
         Check(plan({true, false, false, true, true}) == "0 4 5 ", "staged files removed");
+        // The MCP server goes with the DLL, as the launcher does.
+        Leftovers mcp;
+        mcp.oldDll = mcp.oldMcp = true;
+        Check(plan(mcp) == "0 6d ", "the old MCP server becomes the previous one");
+        mcp.oldLauncher = mcp.previousMcp = true;
+        Check(plan(mcp) == "0 1d 6d ", "with the launcher, replacing an older previous server");
+        mcp = {};
+        mcp.oldDll = mcp.previousMcp = true;
+        Check(plan(mcp) == "0 7d ", "a previous MCP server that no longer matches goes");
+        mcp = {};
+        mcp.oldLauncher = mcp.oldMcp = mcp.previousMcp = true;
+        Check(plan(mcp) == "3 8 ", "a lone old MCP server goes; the previous set stays");
+        mcp = {};
+        mcp.previousMcp = true;
+        Check(plan(mcp).empty(), "previous MCP server left alone");
+        mcp.stagedDll = mcp.stagedMcp = true;
+        Check(plan(mcp) == "4 9 ", "a staged MCP server removed");
+        Check(StartedForMcp({"ChaosTheory_Editor.exe", "-reMcp"}) && StartedForMcp({"x", "-REMCP", "-UnlockPackages"}), "-reMcp, any case");
+        Check(!StartedForMcp({"ChaosTheory_Editor.exe"}) && !StartedForMcp({"-reMcpX", "reMcp", "-re", "Mcp"}) && !StartedForMcp({}), "only the whole switch");
 
         // Zip directory.
         Check(Crc32(reinterpret_cast<const std::uint8_t*>("123456789"), 9) == 0xCBF43926u, "CRC-32 check value");

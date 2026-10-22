@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scct://schema/build-plan",
+  "title": "scct.build-plan (mcp.plan arguments)",
+  "description": "Several bridge ops run as one call (Reloaded.Editor/McpPlanModel.h), what workflow_request op mcp.plan takes. pre: package loads, imports and saves (authoring.apply documents of load/texture/save only, and file ops), which cannot be undone. steps: joinable map edits, all in one Undo step; on any failure the whole step section rolls back (rolledBack: true, failedStep). post: builds, surface texturing, Map Check, saves and screenshots, each on its own; a failure there keeps the steps' changes. Where ops may run follows their bridge policy: reads anywhere; undoable joinable edits in steps (package documents in pre); file ops in pre or post; builds and processes in post; raw commands, undo/redo and nested plans never. Order inside steps: every step that deletes or replaces actors comes before the first step that pastes any (a paste-then-delete Undo crashed the editor). dryRun runs no mutating op and returns preview rows: authoring.apply previews as authoring.preview, stage.apply as stage.preview, other edits as {change, target, note: \"runs on apply\"}; reads still run. Result: {steps: {id: result}, undo: {steps}, label}.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    {"required": ["pre"], "properties": {"pre": {"minItems": 1}}},
+    {"required": ["steps"], "properties": {"steps": {"minItems": 1}}},
+    {"required": ["post"], "properties": {"post": {"minItems": 1}}}
+  ],
+  "properties": {
+    "label": {"type": "string", "description": "Undo History label, shown as \"MCP <n>: <label>\"."},
+    "dryRun": {"type": "boolean"},
+    "pre": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/step"}},
+    "steps": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/step"}},
+    "post": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/step"}}
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op"],
+      "description": "At most 256 steps in all; step ids are unique across pre, steps and post.",
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z_.-][A-Za-z0-9_.-]{0,62}$", "description": "Default: the section name plus its 1-based position (pre1, steps2, post1). Later steps bind to it."},
+        "op": {"type": "string", "minLength": 1, "not": {"const": "mcp.plan"}, "description": "A bridge op with a policy row, such as design.blockbatch, authoring.apply, objectiveplayers.set, ge.add, settings.edit, design.register, mcp.sidecar.set, design.build, mapcheck.run, map.save, view.screenshot."},
+        "args": {"type": "object", "description": "The op's arguments (the request is args plus \"op\"). Any value may be a $bind.", "additionalProperties": {"$ref": "#/$defs/argument"}},
+        "optional": {"type": "boolean", "description": "post only in effect: record this step's error and carry on."}
+      }
+    },
+    "bind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$bind"],
+      "description": "Replaced by the value at ptr (a JSON pointer, empty for the whole result) in the result of an earlier step; binding a step that has not run is an error. Example: {\"$bind\": {\"step\": \"actors\", \"ptr\": \"/identities/ServerTerminal\"}}.",
+      "properties": {
+        "$bind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["step"],
+          "properties": {
+            "step": {"type": "string"},
+            "ptr": {"type": "string", "pattern": "^(/([^~]|~[01])*)*$"}
+          }
+        }
+      }
+    },
+    "argument": {
+      "anyOf": [
+        {"$ref": "#/$defs/bind"},
+        {"type": "array", "items": {"$ref": "#/$defs/argument"}},
+        {"type": "object", "not": {"required": ["$bind"]}, "additionalProperties": {"$ref": "#/$defs/argument"}},
+        {"type": ["string", "number", "boolean", "null"]}
+      ]
+    }
+  }
+}

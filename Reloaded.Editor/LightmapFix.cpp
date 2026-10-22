@@ -303,9 +303,11 @@ uint32_t LightmapFix::ScanForDamage(const char* path)
     return 0;
 }
 
-void LightmapFix::SetDamageSink(DamageSink sink)
+LightmapFix::DamageSink LightmapFix::SetDamageSink(DamageSink sink)
 {
+    const DamageSink previous = s_damageSink;
     s_damageSink = sink;
+    return previous;
 }
 
 static LightmapFix::SavedSink s_savedSink;
