@@ -112,3 +112,22 @@ Packages\Textures\<MapName>-i.utc
 ```
 
 > **TIP:** the editor may also create a file of the same name with the extension `-i.utx`. The game does not use it, so it is safe to ignore. Good practice is to delete the `-i.utx` and keep only the `-i.utc`.
+
+## How the MCP tools apply this
+
+Writing the settings:
+- `map_settings` (and a spec's `settings` and `interface` sections via `level_build`) writes `MapName` in CAPS. `|` is kept as the line break.
+- `Modes[]` and `ModesStrings[]` are index-aligned, with one entry per mode the map plays.
+- Values are checked against the supported ranges: `RespawnTime` 5-15, `SpiesLives`/`SentriesLives` 0-10, `TimeLimit` 0-20.
+- `LegendModeInBrief*` defaults to the Ubisoft standard text above.
+
+Interface textures:
+- `map_settings` with `interface` (bridge op `interface.texture`) imports `Menu`/`Briefing` (256, DXT5, alpha) and `LoadingATT0`/`LoadingDEF0` (512, DXT1) into `<Map>-i`.
+
+Order of operations:
+- Map Settings needs the save → exit → reopen cycle. Run `map_file action:"save_as"`, then `editor_restart`, before `map_settings`.
+- When SMapSettings cannot be written over the bridge, the tool says so and lists the manual steps above.
+
+Release:
+- `release` checks for `<Map>-i.utc` and reminds you to delete a stray `-i.utx`.
+- Rules: `settings.missing`, `settings.ranges`, `settings.map-name-caps`, `settings.mode-parity`, `settings.modes-missing`, `interface.textures`

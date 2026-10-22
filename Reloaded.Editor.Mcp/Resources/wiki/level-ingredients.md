@@ -140,3 +140,28 @@ Probably not something a typical map uses. When an event activates it, it starts
 | `iVelocityMax` | Highest velocity the projectile is thrown at. |
 | `iVelocityMin` | Lowest velocity the projectile is thrown at. |
 | `ProjectileClass` | The type of projectile thrown. |
+
+## How the MCP tools apply this
+
+**CamNet** (`security` `camnet[{id, camName, at, first, constraints}]`, spec `security.camnet`):
+- At least one camera is required.
+- Exactly one `bFirstCam True` (the `first` flag, or the first listed).
+- `NextCam`/`PrevCam` wired as a **closed loop** in list order.
+- `bBlockActors`/`bBlockPlayers` `True`.
+- `constraints:{pitch:[min,max], yaw:[min,max]}` written to `PitchConstraint`/`YawConstraint` (`Y` = min, `Z` = max).
+- `map_query what:"cameras"` reads the loop back.
+
+**Ingredients** (`environment` `ingredients[{kind, in|at, props?}]`; `props` adds any other property):
+
+| `kind` | Class | Defaults applied |
+|---|---|---|
+| `ammo` | `SAmmoStock` | interaction 60 high / 120 radius, `bInteractInFront` |
+| `infirmary` | `SInfirmary` | `bBlockActors`/`bBlockPlayers` `True`, interaction 120 / 60, `bInteractInFront` |
+| `glass` | `SVitre` | |
+| `extinguisher` | `SExtincteur` | |
+| `projector` | `SProjoFixe` | none; pass `props: {"HitPoints": "1"}` for the Persistent Light Mode |
+| `sprinkler` | `SSprinkler` | `bHidden` `True` |
+| `puddle` | `SFlaque` | |
+| `balltrap` | `SBallTrap` | |
+
+- Rules: `camnet.missing`, `camnet.first-cam`, `camnet.loop`, `ingredients.collision`, `ingredients.interaction`, `ingredients.sprinkler-hidden`

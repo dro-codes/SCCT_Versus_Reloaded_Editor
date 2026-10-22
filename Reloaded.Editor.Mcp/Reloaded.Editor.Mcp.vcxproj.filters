@@ -31,21 +31,43 @@
     <ClCompile Include="Prompts.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="Tools\SessionTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\QueryTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\ValidateTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\SpecTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\IntentTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
     <ClCompile Include="Tools\EscapeTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="Tools\ReleaseTools.cpp"><Filter>Source Files\Tools</Filter></ClCompile>
+    <ClCompile Include="..\Reloaded.Editor\WorkflowModel.cpp"><Filter>Shared Files</Filter></ClCompile>
+    <ClCompile Include="..\Reloaded.Editor\RecoveredPolygonImport.cpp"><Filter>Shared Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BridgeClient.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Embedded.gen.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Embedded.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="FakeBridge.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="GeometricEventModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ImageCodec.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="LevelRulesModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="LevelSpecCompiler.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="LevelSpecModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpProtocolModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpServer.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="McpTool.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PlanRender.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="resource.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Tools\Common.h"><Filter>Header Files\Tools</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\CameraNetworkModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\LevelSnapshotModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\MagicEventModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\MapAuthoringModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\MapDesignModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\McpBridgeModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\McpGuardModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\McpPlanModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\ObjectivePlayersModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\RecoveredBspGeometry.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\RecoveredPolygonImport.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\SecurityModel.h"><Filter>Shared Files</Filter></ClInclude>
+    <ClInclude Include="..\Reloaded.Editor\StageModel.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\Version.h"><Filter>Shared Files</Filter></ClInclude>
     <ClInclude Include="..\Reloaded.Editor\WorkflowModel.h"><Filter>Shared Files</Filter></ClInclude>
   </ItemGroup>

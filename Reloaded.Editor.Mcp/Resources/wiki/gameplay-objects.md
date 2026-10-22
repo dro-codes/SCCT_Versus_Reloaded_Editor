@@ -102,3 +102,17 @@ Actor
 
 - Like `SGamePlayObject`, `STriggerLight` has a **`TriggerMethode`** property in the `Interactions` category. It sets which trigger method the light sends when triggered. See `scct://wiki/events`.
 - To attach an `STriggerLight` to an `SGamePlayObject`, list it in that object's `ObjectLights`. When the object is triggered or damaged, every light in `ObjectLights` toggles with it.
+
+## How the MCP tools apply this
+
+`environment` with `objects[{id, mesh, at, damageable, hitPoints}]` (spec `environment.objects`) creates an `SGamePlayObject`:
+- It sets `DrawType DT_StaticMesh` and `StaticMesh`, plus `bDamageable` and `HitPoints`.
+- It **never** sets `bPickable`, and leaves `bCanBeChaffed` off.
+
+Switchable lights:
+- `events.triggerLights[{light, object, initiallyOn}]` turns a spec light (from `environment.lights`) into an `STriggerLight`, and adds it to the object's `ObjectLights`.
+- `initiallyOn` writes `bInitiallyOn`.
+- RE+ Map Design's **switchable light** preset is an `STriggerLight` too.
+
+Other properties go through `actors_edit` `set`, using the live schema (`map_query what:"schema"`).
+- Rules: `objects.pickable`, `objects.chaff`

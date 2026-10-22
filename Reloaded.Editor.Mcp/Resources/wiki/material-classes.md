@@ -97,3 +97,19 @@ Replaces a material on **BSP** or on **StaticMeshes**, depending on the option c
 - In one of your own packages, **re-save the StaticMesh package** afterwards.
 
 > **NOTE:** exporting DirectDraw (`.dds`) textures from the Texture Browser **does not work** in this editor; Ubisoft broke it.
+
+## How the MCP tools apply this
+
+Texturing:
+- Materials for blockout pieces come from the spec's `material` / `defaults.material`, which maps to `design.block` `spec.material`.
+- Per-face textures come from `geometry.surfaces`, or map-changes `surface` ops after a geometry build.
+
+Creating and setting materials:
+- New textures come in with map-changes v2 `texture` + `save` ops.
+- Package names must be map-owned (`<Map>_TXT`); stock packages are never written.
+- Setting `bClimbable` or other Echelon flags on a texture is an object edit (bridge `object.set`, via `workflow_request`), followed by saving that map-owned package.
+
+Constraints:
+- `map_validate` reminds you that a fence GE also needs `bClimbable`.
+- `.dds` export is broken in the editor, so the tools never rely on exporting textures.
+- Rules: `ge.fence-climbable`, `release.package-names`

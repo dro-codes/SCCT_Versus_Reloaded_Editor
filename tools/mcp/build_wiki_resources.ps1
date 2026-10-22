@@ -14,6 +14,11 @@ param(
 # - Values the wiki only shows in screenshots are marked "image-only". The
 #   images themselves are not copied.
 # - Each digest starts with "# <title>" and "Source: <wiki URL>".
+# - Each digest ends with "## How the MCP tools apply this". That section
+#   names the tools that write the page's actors and a "- Rules:" line of the
+#   map_validate rule ids that check them.
+# - tests/PromptsTests.cpp checks those ids against LevelRulesModel.h, and
+#   checks that every rule's wiki page has a digest.
 #
 # To update after the wiki changes:
 # 1. Run this script with -Compare. It fetches every page into OutDirectory

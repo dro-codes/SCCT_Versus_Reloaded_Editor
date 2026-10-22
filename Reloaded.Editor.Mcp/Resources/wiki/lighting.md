@@ -151,3 +151,21 @@ To give a light a corona:
   - Tick lights and press `Select` to select them.
 - **Modify Selected Lights** (`Tools` → `Modify Selected Lights`): adds to or multiplies the selected lights' brightness, saturation or radius.
 - **Duplicate Selected Lights as In-Game Lights** (`Tools` → `Duplicate Selected Lights as In-Game Lights`): duplicates the lights as In-Game Lights, applying the same add or multiply adjustments.
+
+## How the MCP tools apply this
+
+`environment` with `lights[{id, preset: ceiling|spot|sun|echelon-spot, in|at, radius, brightness, hue, saturation, corona, cone}]` (spec `environment.lights`; `defaults.lights:"rooms"` puts a ceiling light in each room):
+- **Static lights** use only `LE_None` (`ceiling`), `LE_Spotlight` (`spot`) or `LE_Sunlight` (`sun`). `sun` needs a Fake Backdrop in the zone.
+- **`cone`** (0-255) is the `spot` preset's `LightCone`: larger is a wider beam. Without it the light keeps the class's default cone. It shapes `LE_Spotlight` only, so on another preset it is not written (warning `light.cone`).
+- **`echelon-spot`** writes `LightEffect LE_ESpotShadow` with `EchelonNormalInfluence 0.9` and a modest `EchelonRange`.
+
+Caveats:
+- `light.set` is blocked over the bridge. Change existing lights with `actors_edit` `set`, which checks the current values first.
+- Switchable lights are `STriggerLight` (see `scct://wiki/gameplay-objects`).
+- Static-light changes need `map_build what:"all"` to bake.
+
+Inspection:
+- `map_query what:"lights"` lists the lights.
+- `map_validate` folds in the RE+ lighting budget.
+
+- Rules: `lighting.static-effect`, `lighting.echelon-normal`, `lighting.budget`, `lighting.guideline`

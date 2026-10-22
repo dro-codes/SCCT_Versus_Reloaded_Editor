@@ -1,6 +1,6 @@
 # Map JSON: snapshots and change files
 
-Abridged from RE+ `docs/MapAuthoring.md`. These are the formats behind **View > Export Map to JSON...** / **Import Map from JSON...** and the bridge ops `authoring.export`, `authoring.preview` and `authoring.apply`. The MCP tools write them for you: `actors_edit` and `map_changes_apply`.
+Abridged from RE+ `docs/MapAuthoring.md`. These are the formats behind **View > Export Map to JSON...** / **Import Map from JSON...** and the bridge ops `authoring.export`, `authoring.preview` and `authoring.apply`. The MCP tools write them for you: `level_build`, the intent tools, `actors_edit` and `map_changes_apply`.
 
 Schemas:
 - `scct://schema/map-changes`
@@ -111,7 +111,7 @@ Coordinates and rotation:
 - An existing file is replaced only with `overwrite: true`, and is backed up first.
 - Save the package **before** saving a map that uses it.
 
-**Packages over MCP.** Through `map_changes_apply` and `workflow_request` (authoring.apply or authoring.preview), a `texture` or `save` may only name the map's own `<Map>_<name>` package, such as `<Map>_TXT` (a `texture` may also go into `MyLevel`, which is saved with the map). Any other is refused before anything runs, with code refused and reason not_map_owned (a stock or other map's package), package_name (`<Map>` or `Amb_<Map>`, or a name another kind of package already has) or interface_package (`<Map>-i`, which the interface textures write), and before the map's first save every one but a `texture` into `MyLevel` is refused (unsaved_map), since those packages are named after its file. A `load` alone is always allowed.
+**Packages over MCP.** Through `map_changes_apply`, `workflow_request` (authoring.apply or authoring.preview) and `level_build`, a `texture` or `save` may only name the map's own `<Map>_<name>` package, such as `<Map>_TXT` (a `texture` may also go into `MyLevel`, which is saved with the map). Any other is refused before anything runs, with code refused and reason not_map_owned (a stock or other map's package), package_name (`<Map>` or `Amb_<Map>`, or a name another kind of package already has) or interface_package (`<Map>-i`, which the interface textures write), and before the map's first save every one but a `texture` into `MyLevel` is refused (unsaved_map), since those packages are named after its file. A `load` alone is always allowed.
 
 **polygon brushes** (v2: create with `geometry:"polygons"`, `polygons:[{vertices, texture?, flags?, origin?, textureU?, textureV?, pan?}]`)
 - Vertices are local to `Location`.

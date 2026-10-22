@@ -76,3 +76,18 @@ A modified `ZoneInfo` that automatically detects intruding Spies entering the zo
 | Property | Description |
 |---|---|
 | `bDetectIntruders` | If `True`, the zone detects Spies entering it and sends a trigger for an alarm. |
+
+## How the MCP tools apply this
+
+Zones (spec `zones[{id, locationName, spaces}]`):
+- The compiler adds **zone portals** in the doorways where zones meet (Map Design doorway `portal`).
+- It places one `ZoneInfo` per zone, with `LocationName`, inside the zone's spaces.
+- **Put every spawn room in a zone**, so the players get a `ZoneInfo` `LocationName` at spawn, as the tip above requires. `map_validate` notes a `ZoneInfo` without one.
+- Run `map_build` and then `map_validate`: Map Check reports zone leaks.
+
+Volumes (`environment` `volumes[{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box:{min,max} | {in}, locationName, props}]`):
+- Volumes are made as **polygon brushes** sized to the box. The map-changes `geometry:"box"` is always a 256 uu cube.
+- `ERainVolume` `m_RainSize` is computed as half X/Y, full Z.
+
+RE+ never creates `SAlarmZoneInfo`. Motion detection is an `SVolumetricSensor` plus a `Volume` (`security` `devices kind:"motion"`).
+- Rules: `zones.alarm-zone`, `zones.location-name`, `zones.leak`, `story.visibility-zone`

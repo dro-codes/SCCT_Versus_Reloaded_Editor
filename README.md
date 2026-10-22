@@ -34,7 +34,7 @@ Looking for maps to open? Recovered, enhanced and community maps are in [SCCT-Ma
 
 ### MCP server for AI agents
 
-**RE+ Tools > MCP > Enable MCP server** lets an AI agent such as Claude Code or Claude Desktop work in the running editor through `Reloaded.Editor.Mcp.exe`. It can read, edit and build the open map, with the SCCT Versus wiki's rules at hand as digests. Every change is one Undo step, can be previewed first, and with **Require approval for changes** waits for you to approve it in the editor (both switches are also in RE+ Options, View > RE+ Options or F12). The server is off until you turn it on and never writes the game's own packages; **Copy Claude Code command** puts the setup command on the clipboard. Full guide: [docs/Mcp.md](docs/Mcp.md).
+**RE+ Tools > MCP > Enable MCP server** lets an AI agent such as Claude Code or Claude Desktop work in the running editor through `Reloaded.Editor.Mcp.exe`. It can read and edit the open map, build a whole Versus level from a description, check it against the SCCT Versus wiki with every finding citing its page, and take it to a release. Every change is one Undo step, can be previewed first, and with **Require approval for changes** waits for you to approve it in the editor (both switches are also in RE+ Options, View > RE+ Options or F12). The server is off until you turn it on and never writes the game's own packages; **Copy Claude Code command** puts the setup command on the clipboard. Full guide: [docs/Mcp.md](docs/Mcp.md).
 
 ### Gameplay tools
 

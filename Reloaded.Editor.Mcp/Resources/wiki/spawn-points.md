@@ -33,3 +33,21 @@ The STriggerPlayerStart property sheet is image-only on the wiki.
 - `scct://wiki/events` (how a `Tag` receives an event)
 - `scct://wiki/game-modes` (sector maps and Deathmatch)
 - `scct://wiki/zones-and-volumes` (give spawn areas a `ZoneInfo` `LocationName`)
+
+## How the MCP tools apply this
+
+Placement:
+- `gameplay` (spawns), or the `spawns` section of a `scct.level-spec` passed to `level_build`, creates `PlayerStart` actors. `TeamNumber` is `"0"` for spy and `"1"` for merc.
+- RE+ places **4 per team** by default (`defaults.startsPerTeam`). That is above the wiki minimum of 3.
+- Starts go 48 uu above the floor, on a 128 uu lattice inside the named room, facing `facing.toward`.
+- `spawns.toggles[{id, team, in|at, enabledBy}]` creates an `STriggerPlayerStart` whose `Tag` is the toggling event.
+
+Checking:
+- `map_query what:"spawns"` lists starts per team.
+- `view_screenshot preset:"spawn:spy"` / `"spawn:merc"` shows them.
+
+Placement guidance (RE+ design checks, not wiki rules):
+- Spy starts should not be within 512 uu of an objective.
+- The two teams' starts should not be within 768 uu of each other.
+- Every objective should be within 4096 uu of a merc start.
+- Rules: `spawns.team-missing`, `spawns.too-few`, `spawns.in-solid`, `spawns.spy-near-objective`, `spawns.teams-close`, `spawns.objective-far`, `layout.unreachable`, `info.travel`

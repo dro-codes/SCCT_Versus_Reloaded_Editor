@@ -53,3 +53,19 @@ You will probably never need this actor. It behaves much like `SZoneTips`.
 - Ubisoft used it in their tutorial maps to end the session automatically, without the player completing an objective. It is unlikely to help a typical multiplayer map.
 
 The property sheet is image-only.
+
+## How the MCP tools apply this
+
+`environment` with `tutorials[{id, class, at, mesh?, properties}]` (spec `environment.tutorials`) places generic actors. `class` defaults to `SZoneTips`; set `SHelpPath` or `SEndZoneTip` explicitly.
+
+**`SZoneTips` and `SEndZoneTip` get the wiki's settings by default:** `DrawType DT_Sprite`, `bHidden True`, `bShowOnlyWithIngameHelp True` and `bStayPermanently False`. Values in `properties` still win.
+
+The compiler passes the rest of `properties` through, so write these yourself:
+- **`SHelpPath`:** give it a `mesh`; the compiler then sets `StaticMesh` and `DrawType DT_StaticMesh`.
+- **`SZoneTips`:**
+  - `sMessage_ATT` / `sMessage_DEF` as complete two-element arrays, such as `["\"Climb the pipe\"", "\"\""]`;
+  - optionally `CollisionRadius` / `CollisionHeight`.
+- **`SEndZoneTip`:** only when the user asks for one; it ends the game.
+
+`map_validate` warns about tutorial actors whose sprite would show in game.
+- Rules: `tutorials.hidden`

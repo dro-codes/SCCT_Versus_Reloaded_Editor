@@ -1,5 +1,6 @@
 // Escape hatches: direct actor edits, raw map-changes documents, any bridge
-// op, and console commands.
+// op, and console commands. The intent tools and level_build cover most
+// work; these reach what they do not.
 #include "Common.h"
 #include "../../Reloaded.Editor/McpSafetyModel.h"
 #include <set>
@@ -180,6 +181,7 @@ namespace
         o.warnings = warnings;
         o.extra = {{"steps", steps}};
         if (!moves.empty() || !deletes.empty()) o.next.push_back(Next("map_build", "Moved or deleted brushes need a geometry rebuild.", {{"what", "geometry"}}));
+        o.next.push_back(Next("map_validate", "Check the map against the wiki rules."));
         return Done(c, o, true);
     }
 
@@ -189,7 +191,7 @@ namespace
         if (!Has(a, "document") || !a.at("document").is_object()) return Fail("document is a scct.map-changes object (docs: scct://docs/map-authoring, schema scct://schema/map-changes).");
         const auto& document = a.at("document");
         if (document.value("format", std::string()) != "scct.map-changes")
-            return Fail("document.format must be \"scct.map-changes\" (a scct.map-authoring export is not a change file).");
+            return Fail("document.format must be \"scct.map-changes\" (a scct.level-spec goes to level_build; a scct.map-authoring export is not a change file).");
         if (!document.contains("operations") || !document.at("operations").is_array() || document.at("operations").empty()) return Fail("document.operations is a non-empty list.");
         const bool dry = DryRun(a);
         const auto label = Label(a, "map_changes_apply");
@@ -217,6 +219,7 @@ namespace
         bool brushes = !deletedList.empty();
         for (const auto& op : document.at("operations")) brushes = brushes || (op.is_object() && op.contains("geometry"));
         if (brushes) o.next.push_back(Next("map_build", "Brushes changed: rebuild geometry.", {{"what", "geometry"}}));
+        o.next.push_back(Next("map_validate", "Check the map against the wiki rules."));
         return Done(c, o, true);
     }
 
@@ -237,6 +240,7 @@ namespace
         o.summary = dry ? "Dry run of " + op + ": nothing changed." : "Ran " + op + ".";
         o.extra = {{"op", op}, {"policy", Bridge::PolicyName(policy->policy)}, {"result", result}};
         if (dry) o.extra["preview"] = PreviewRows(result);
+        o.next.push_back(Next("map_validate", "Check the map against the wiki rules."));
         return Done(c, o, !dry);
     }
 
@@ -270,7 +274,7 @@ void RegisterEscapeTools(Registry& registry)
             "- delete (needs allowDeletes: true; references to it are left dangling, see map_query wiring).\n"
             "- copy_properties {from, only?:[names]}: paste another actor's editable properties.\n"
             "- rename_tag {tag}: renames the Tag (letters, digits, underscore; unique) and every Event or event group that named it.\n"
-            "Follow the wiki's values (scct://wiki/*).";
+            "Follow the wiki's values (scct://wiki/*); for new gameplay prefer the intent tools or level_build, which apply the wiki defaults.";
         // The description says what each action's fields mean.
         Json edit = S::Object({{"action", {{"type", "string"}, {"enum", {"set", "move", "turn", "copy", "drop", "delete", "copy_properties", "rename_tag"}}}},
                                {"actor", S::Actor({})},
@@ -304,7 +308,8 @@ void RegisterEscapeTools(Registry& registry)
             "version 3 deletes (allowDeletes and the exact map id; map \"*\" is refused for deletes). A texture or save may only write the map's own "
             "<Map>_<name> package (or a texture into MyLevel): another is refused with reason not_map_owned (or package_name, interface_package), and any "
             "before the map's first save with unsaved_map. dryRun returns the editor's preview rows (Add, Modify, Move, Delete, Link, Package, Surface) "
-            "without changing anything. The result maps each create id to the actor made (created[].identity).";
+            "without changing anything. The result maps each create id to the actor made (created[].identity). Prefer level_build for whole levels: it "
+            "writes these documents with the wiki defaults.";
         t.inputSchema = S::Mutating(S::Input({{"document", S::Free("The scct.map-changes document.")},
                                               {"baseDirectory", S::String("Folder that relative texture file paths in the document are relative to.")}},
                                              {"document"}));

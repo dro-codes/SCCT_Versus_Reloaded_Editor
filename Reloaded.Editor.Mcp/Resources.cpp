@@ -1,8 +1,12 @@
-// scct:// resources: the embedded wiki digests, schemas and docs
-// (Embedded.gen.h), and the live editor and map.
+// scct:// resources: the embedded wiki digests, schemas, examples and docs
+// (Embedded.gen.h), the rule catalogue, and the live editor and map.
 #include "Embedded.h"
 #include "Tools/Common.h"
 #include <tuple>
+#if !defined(RE_MCP_STANDALONE) && __has_include("LevelRulesModel.h")
+#include "LevelRulesModel.h"
+#define RE_MCP_RULES 1
+#endif
 
 namespace Mcp
 {
@@ -11,7 +15,7 @@ namespace
     using namespace Tools;
 
     // "wiki/game-modes.md" -> "scct://wiki/game-modes"; the schemas folder is
-    // served as scct://schema/..., and "map-changes.schema.json" loses both
+    // served as scct://schema/..., and "versus-starter.level.json" loses both
     // extensions.
     std::string UriOf(const std::string& path)
     {
@@ -51,9 +55,10 @@ namespace
     std::string DescriptionOf(const std::string& folder, const std::string& name)
     {
         if (folder == "wiki")
-            return name == "index" ? "Index of the SCCT Versus wiki digests: start here. Each page holds the class and property names and the rules the tools follow."
+            return name == "index" ? "Index of the SCCT Versus wiki digests: start here. Each page holds the class and property names and the rules the tools and map_validate follow."
                                    : "SCCT Versus wiki digest: " + name + ". Class and property names verbatim from the wiki, which is the source of truth for gameplay rules.";
         if (folder == "schemas") return "JSON Schema for " + name + " documents.";
+        if (folder == "examples") return "Example level spec " + name + ": compiles with level_spec_validate and builds with level_build.";
         if (folder == "docs") return "RE+ documentation: " + name + ".";
         return "Embedded file " + name + ".";
     }
@@ -69,6 +74,16 @@ namespace
         return nullptr;
     }
     Json Text(const Json& value) { return {{"text", value.dump(2, ' ', false, Json::error_handler_t::replace)}, {"mimeType", "application/json"}}; }
+
+    std::string RulesMarkdown()
+    {
+#ifdef RE_MCP_RULES
+        return Rules::CatalogMarkdown();
+#else
+        if (const auto* file = FindFile("scct://rules")) return std::string(reinterpret_cast<const char*>(file->data), file->size);
+        return "# Validation rules\n\nThis build of Reloaded.Editor.Mcp has no rule catalogue (LevelRulesModel.h). Read the wiki digests (scct://wiki/index) for the rules.\n";
+#endif
+    }
 }
 
 void RegisterResources(Registry& registry)
@@ -76,8 +91,9 @@ void RegisterResources(Registry& registry)
     for (const auto& file : EmbeddedFiles())
     {
         const std::string path = file.path, folder = Folder(path);
-        // Prompt templates are served as prompts (prompts/get), not resources.
-        if (folder == "prompts" || path.empty()) continue;
+        // Prompt templates are served as prompts (prompts/get), not resources;
+        // a rules.md is only scct://rules' fallback, registered below.
+        if (folder == "prompts" || path.empty() || UriOf(path) == "scct://rules") continue;
         Resource r;
         r.uri = UriOf(path);
         const auto slash = path.find_last_of('/');
@@ -93,13 +109,14 @@ void RegisterResources(Registry& registry)
     // Templates, for clients that complete names; each reads the same files.
     for (const auto& [folder, uri, mime, what] : std::vector<std::tuple<std::string, std::string, std::string, std::string>>{
              {"wiki", "scct://wiki/{page}", "text/markdown", "A wiki digest by slug (index, spawn-points, game-modes, alarms, geometric-events, map-settings, ...)."},
-             {"schema", "scct://schema/{name}", "application/schema+json", "A JSON Schema: map-changes, map-authoring, stages, smagic-event, build-plan."},
+             {"schema", "scct://schema/{name}", "application/schema+json", "A JSON Schema: level-spec, map-changes, map-authoring, stages, smagic-event, build-plan."},
+             {"examples", "scct://examples/{name}", "application/json", "An example level spec, such as versus-starter."},
              {"docs", "scct://docs/{name}", "text/markdown", "RE+ documentation, such as map-authoring and map-design."}})
     {
         Resource r;
         r.uri = uri;
         r.name = folder;
-        r.title = folder == "wiki" ? "Wiki page" : folder == "schema" ? "Schema" : "Documentation";
+        r.title = folder == "wiki" ? "Wiki page" : folder == "schema" ? "Schema" : folder == "examples" ? "Example level spec" : "Documentation";
         r.description = what;
         r.mimeType = mime;
         r.isTemplate = true;
@@ -108,6 +125,15 @@ void RegisterResources(Registry& registry)
             const auto* file = FindFile(u);
             return file ? ReadEmbedded(*file) : Json();
         };
+        registry.Add(std::move(r));
+    }
+    {
+        Resource r;
+        r.uri = "scct://rules";
+        r.name = "rules";
+        r.title = "Validation rules";
+        r.description = "Every rule map_validate and level_spec_validate check, with its draft and release severity and the wiki page it comes from. Read before designing.";
+        r.read = [](const std::string&, ToolContext&) { return Json{{"text", RulesMarkdown()}, {"mimeType", "text/markdown"}}; };
         registry.Add(std::move(r));
     }
 
@@ -131,11 +157,19 @@ void RegisterResources(Registry& registry)
     live("scct://map/summary", "map-summary", "Map summary", "The open map at a glance: actor counts, spawns per team, missions, security, cameras (map_query summary).",
          "application/json", [](const std::string&, ToolContext& c) { return Text(MapSummary(c)); });
     live("scct://map/validation", "map-validation", "Map validation",
-         "The open map checked by the editor's Map Check.", "application/json",
-         [](const std::string&, ToolContext& c)
+         "The open map checked against the wiki rules (map_validate, draft profile), or the editor's Map Check where the rules are not built in.", "application/json",
+         [&registry](const std::string&, ToolContext& c)
          {
+             if (const auto* tool = registry.FindTool("map_validate"))
+             {
+                 const auto result = tool->run(Json{{"profile", "draft"}}, c);
+                 if (result.isError) throw std::runtime_error(result.structured.value("error", std::string("map_validate failed.")));
+                 return Text(result.structured);
+             }
              return Text(Call(c, "mapcheck.run", Json::object(), {}, false, 300000));
          });
+    live("scct://map/spec", "map-spec", "Applied level spec", "The scct.level-spec that level_build last applied to this map, with its hash (null when none).",
+         "application/json", [](const std::string&, ToolContext& c) { return Text(Call(c, "mcp.sidecar.get").value("sidecar", Json())); });
     live("scct://map/screenshot/latest", "screenshot", "Viewport screenshot", "A PNG of the perspective viewport as it is now (1024 pixels on the longer side).", "image/png",
          [](const std::string&, ToolContext& c)
          {

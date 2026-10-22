@@ -312,6 +312,34 @@ void MinMaxMacros(const fs::path& root)
     Check(Code("x=R\"j(\"a\" std::min(\n)j\";y=1'000;c='\\'';z")=="x=\n\"\";y=1'000;c='';z","raw strings, digit separators and char literals");
 }
 
+// settings.edit writes a LevelInfo property the sheet does not offer only
+// when McpNative.inl's McpSettingsExtra lists it: every name the level spec
+// compiler's Settings() writes is there, and no sheet heading is.
+void SettingsNames(const fs::path& root)
+{
+    const auto native=ReadText(root/"Reloaded.Editor"/"McpNative.inl");
+    const auto at=native.find("bool McpSettingsExtra(");
+    Check(at!=std::string::npos,"McpNative.inl has McpSettingsExtra");
+    const auto left=native.find('{',native.find("extra:",at)),right=native.find('}',left);
+    Check(left!=std::string::npos && right!=std::string::npos,"McpSettingsExtra's list");
+    std::set<std::string> listed;
+    const std::regex quoted(R"re("([A-Za-z0-9_]+)")re");
+    const auto list=native.substr(left,right-left);
+    for(std::sregex_iterator it(list.begin(),list.end(),quoted),end;it!=end;++it)listed.insert(Safety::Fold((*it)[1].str()));
+    const auto compiler=ReadText(root/"Reloaded.Editor.Mcp"/"LevelSpecCompiler.h");
+    const auto from=compiler.find("void Settings()"),to=compiler.find("low.settings",from);
+    Check(from!=std::string::npos && to!=std::string::npos,"LevelSpecCompiler.h's Settings()");
+    const auto body=compiler.substr(from,to-from);
+    const std::regex written(R"re(changes\["([A-Za-z0-9_]+)"\])re");
+    std::set<std::string> names;
+    for(std::sregex_iterator it(body.begin(),body.end(),written),end;it!=end;++it)names.insert((*it)[1].str());
+    Check(names.size()>=7,"the compiler's level settings were found ("+std::to_string(names.size())+")");
+    for(const auto& name:names)Check(listed.count(Safety::Fold(name))>0,"settings.edit refuses "+name+", which the compiler writes: add it to McpSettingsExtra");
+    for(const char* heading:{"MapSnapshotInfo","MotionTrackingTweak","Events"})
+        Check(!listed.count(Safety::Fold(heading)),std::string(heading)+" is a heading of the Level Properties sheet, not a property");
+    Check(listed.count("snapshotcamera") && listed.count("mapfloors"),"the minimap's SnapshotCamera and MapFloors");
+}
+
 int main(int argc,char** argv)
 {
     try
@@ -324,6 +352,7 @@ int main(int argc,char** argv)
         fs::path root=argc>1?fs::path(argv[1]):fs::path(".");
         if(!fs::exists(root/"Reloaded.Editor"/"WorkflowTools.cpp") && fs::exists(root/".."/"Reloaded.Editor"/"WorkflowTools.cpp"))root=root/"..";
         MinMaxMacros(root);
+        SettingsNames(root);
         // The request chains and the registries. McpLifecycle.cpp (map files,
         // builds, views, packages) and McpBridge.cpp (approval.status, which
         // only the bridge can answer) may not exist yet in a partial tree:
@@ -357,7 +386,7 @@ int main(int argc,char** argv)
             std::cerr<<problems.size()<<" problem(s)\n";
             return 1;
         }
-        std::cout<<"McpOpCoverage passed ("<<answered.size()<<" ops, "<<rows.size()<<" policy rows, bridge refusals, min/max macros)\n";
+        std::cout<<"McpOpCoverage passed ("<<answered.size()<<" ops, "<<rows.size()<<" policy rows, bridge refusals, min/max macros, level settings)\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}

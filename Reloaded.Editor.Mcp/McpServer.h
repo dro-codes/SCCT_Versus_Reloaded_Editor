@@ -109,7 +109,8 @@ namespace Mcp
         std::thread worker;
     };
 
-    // --self-test: the registry's own checks; 0 when everything passes.
+    // --self-test: the embedded examples through the level-spec compiler and
+    // the rules, and the registry's own checks; 0 when everything passes.
     // Defined in main.cpp, which builds with the whole server.
     int SelfTest(std::ostream& out);
 }

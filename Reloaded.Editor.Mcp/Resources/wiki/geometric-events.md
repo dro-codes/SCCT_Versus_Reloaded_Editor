@@ -135,3 +135,36 @@ The property sheet is image-only.
 
 Open the level properties (`F6`, or right-click empty space → `Level Properties`).
 - `GEActivationMask`: which GE mask is active when the level begins. **GEs with no ID assigned are always enabled.**
+
+## How the MCP tools apply this
+
+`geometric_events` (spec `ges[{kind, points}]`, built by `level_build`) runs the editor's own `GE ADD <command> X1=.. Y1=.. Z1=..` through the bridge op `ge.add`.
+
+Kinds and the `GE ADD` command each uses:
+
+| Spec kind | `GE ADD` command | Points |
+|---|---|---|
+| `ledge` | `LG` | 2 (along the edge) |
+| `hoh` | `HOH` | 2 |
+| `pipe` | `PIPE` | 3 (the third is the side the player climbs from) |
+| `ladder` | `LADDER` | 3 (the third is the side the player climbs from) |
+| `zipline` | `ZL` | 2 |
+| `fence` | `FENCE` | 2 |
+| `pole` | `POLE` | 2 (RE+ Map Design element; not covered by the wiki) |
+
+Point ordering:
+- The tool puts pipes and ladders **lower end first**, with the side point at that end's height, as the stock maps do.
+- The game ignores a pipe or ladder whose side point is anywhere else.
+
+Masks:
+- `geTriggers[{id, toggle, geMask}]` creates `SGETrigger`s.
+- The starting mask is the Level Properties `GEActivationMask`, written by `map_settings`.
+- Assigning GE IDs and listing or deleting GEs are not backed by bridge code yet. Use the editor's `Set GE ID` by hand.
+
+Fences:
+- A fence also needs `bClimbable` on its texture. Set it with an `object.set` on the texture through `workflow_request`, or by hand, then save that (map-owned) package.
+
+Checking:
+- `map_query what:"ges"` lists GEs where the editor can report them.
+- `map_validate` checks every GE against the measurements above. It uses floors traced live, or read from the blockout pieces offline.
+- Rules: `ge.points`, `ge.ledge-height`, `ge.ledge-reach`, `ge.obstacle`, `ge.pull-up`, `ge.ledge-length`, `ge.fence-height`, `ge.fence-recommended`, `ge.fence-climbable`, `ge.hoh-clearance`, `ge.ladder-bars`, `ge.zipline-hang`, `ge.zipline-clearance`, `ge.zipline-slope`, `ge.point-order`

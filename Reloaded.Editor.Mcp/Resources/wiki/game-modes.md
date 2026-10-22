@@ -131,3 +131,42 @@ Deathmatch has **no objective actors** and is simple to set up.
 - `AtResetEvent`: an event sent once at the beginning of a Deathmatch game. A common use is **disabling security systems**, since Deathmatch has no objectives.
 - `Description` / `DescriptionDEF`: mission text for Spies and Mercenaries.
 - `GameMode`: use `GM_DeathMatch`.
+
+## How the MCP tools apply this
+
+The `gameplay` tool and the `gameplay` section of a `scct.level-spec` (built with `level_build`) write all of this with the wiki defaults:
+
+Story:
+- An `SMission` with `GameMode GM_Multi` lists the `SObjective`s by exact name in `Objectives`.
+- Each `SObjective` lists its triggers in `Triggers`.
+- `Description` holds the Spy text and `DescriptionDEF` the Merc text.
+
+Objective triggers:
+- A terminal is an `SComputerObjectiveTrigger`.
+  - It goes at floor+78, and a trace checks that it is clear of collision.
+  - It uses `DominationCaptureTime`. A warning fires if `CaptureTime` is set.
+- An `SFlag` needs 1-5 `SFlagDropZone`s.
+  - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
+  - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
+- An `SBombTargetObjectiveTrigger` uses `CaptureTime`.
+
+Sectors (`gameplay.story.sectors`):
+- The top mission is `GM_Multi` with `bChained True`.
+- Each sector mission is `GM_Undefined` with `bChained False`.
+- `Zone<N>_Complete` SMagicEvents and `Zone<N>_Announce` SAlarms fire on sector completion (the RE+ Zones window shape).
+- An `open` action holds its door open (`TriggerToggle`) unless `hold: false`. A held door must open from nothing else (error `story.action-door-trigger`); see `scct://wiki/movers`.
+- `map_query what:"stages"` reads them back.
+
+Disk Hunt:
+- An `SMission` (`GM_DiskHunt`) lists every `SDisk` in `Triggers`.
+- `Group` cycles 1/2/3 over the placed disks.
+- Disks are kept clear of geometry.
+- The disk count must be at least the Map Settings `ScoreLimit`.
+
+Deathmatch:
+- An `SMission` (`GM_DeathMatch`).
+- With `disableSecurity`, its `AtResetEvent` fires an SMagicEvent that untriggers the security.
+
+Before you rely on an enum value, check the live enum names with `map_query what:"schema" classes:["SBase.SMission"]` (the schema takes full class names).
+
+- Rules: `story.no-mission`, `story.no-multi`, `story.no-objective`, `story.unresolved-reference`, `story.trigger-kind`, `story.objective-orphan`, `story.objective-no-trigger`, `story.mission-empty`, `story.minimum-objectives`, `story.sector-chain`, `story.visibility-zone`, `modes.missing`, `objectives.flag-dropzones`, `objectives.dropzone-unused`, `objectives.terminal-placement`, `objectives.terminal-capture-time`, `diskhunt.disk-count`, `diskhunt.disk-group`, `diskhunt.disk-clearance`, `diskhunt.disk-unlisted`, `deathmatch.security`, `objectiveplayers.problems`, `objectiveplayers.targets`

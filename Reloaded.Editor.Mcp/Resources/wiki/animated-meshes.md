@@ -15,3 +15,15 @@ The property sheet is image-only; the table below is the text.
 | `bAutoStart` | If `True`, the animation sequence starts automatically when the level begins. |
 | `bChainedAnims` | If `True`, the animations in `Animations` play one after another. |
 | `LoopStatus_0forInfinite` | Array matching the `Animations` array: `0` loops that animation forever, `1` plays it once. |
+
+## How the MCP tools apply this
+
+`environment` with `animated[{id, at, mesh?, properties}]` (spec `environment.animated`) places an `SAnimatedMesh`. The class is the default.
+
+**`mesh`** names the animated mesh (`Package.Name` or `Mesh'Package.Name'`). The compiler writes it to `Mesh` with `DrawType DT_Mesh`, and the build loads its package first. An explicit `StaticMesh'…'` reference is written as a static mesh instead (`StaticMesh`, `DT_StaticMesh`).
+
+The compiler passes `properties` through, so write the values yourself:
+- **Mesh:** the animated mesh must come from an existing Ubisoft package; `map_query what:"assets"` lists what is loaded.
+- **Animations:** write `Animations` and `LoopStatus_0forInfinite` as matching arrays, one entry per animation.
+
+No tool imports new animations, because the Animation Browser is missing.

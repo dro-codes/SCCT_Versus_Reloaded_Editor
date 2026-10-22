@@ -1,5 +1,15 @@
-// Reading the map: map_query, view_screenshot.
+// Reading the map: map_query, view_screenshot, plan_render.
 #include "Common.h"
+#include "../Embedded.h"
+#include <set>
+#if !defined(RE_MCP_STANDALONE) && __has_include("../PlanRender.h")
+#include "../PlanRender.h"
+#define RE_MCP_RENDER 1
+#endif
+#if !defined(RE_MCP_STANDALONE) && __has_include("../LevelSpecCompiler.h")
+#include "../LevelSpecCompiler.h"
+#define RE_MCP_SPEC 1
+#endif
 
 namespace Mcp
 {
@@ -133,7 +143,7 @@ namespace
         if (what == "level")
         {
             auto settings = WithoutSchema(Call(c, "settings.inspect"), schema);
-            return Ok(settings, "The LevelInfo's editable properties (Level Properties in the wiki: level-properties).");
+            return Ok(settings, "The LevelInfo's editable properties (Level Properties in the wiki: level-properties). Change them through map_settings or level_build.");
         }
         if (what == "schema")
         {
@@ -236,6 +246,12 @@ namespace
             const auto ges = Call(c, "ge.list");
             return Ok(ges, "Geometric events (ledges, pipes, ladders, ziplines, fences, poles) that Map Design or MCP added. The wiki: geometric-events.");
         }
+        if (what == "spec")
+        {
+            const auto sidecar = Call(c, "mcp.sidecar.get").value("sidecar", Json());
+            if (sidecar.is_null()) return Ok({{"sidecar", nullptr}}, "This map has no level spec yet: level_build stores one when it applies a spec.");
+            return Ok({{"sidecar", sidecar}}, "The level spec level_build last applied to this map (with its hash), which incremental builds diff against.");
+        }
         return Fail("Unknown what \"" + what + "\".");
     }
 
@@ -272,6 +288,135 @@ namespace
         r.content.push_back(TextContent("Screenshot of the " + r.structured.at("viewport").get<std::string>() + " viewport, " + std::to_string(shot.value("width", 0)) + "x" +
                                         std::to_string(shot.value("height", 0)) + (frame.empty() ? "" : ", framing " + Count(frame.size(), "actor")) + "."));
         r.content.push_back(ImageContent(shot.value("png", std::string()), shot.value("mimeType", std::string("image/png"))));
+        return r;
+    }
+
+    // ---------------------------------------------------------- plan_render
+#ifdef RE_MCP_RENDER
+    // The live map as a render scene: design.scene's brushes and actors, with
+    // every actor's TeamNumber (team colours), LocationName (zone labels), Tag
+    // and Event (wiring lines) from actors.query (PlanRender.h SceneFromLive).
+    Json LiveScene(ToolContext& c)
+    {
+        const auto design = Call(c, "design.scene", Json::object(), {}, false, 300000);
+        Json actors = Json::array();
+        try
+        {
+            Json meta;
+            actors = AllActors(c, {{"fields", {"TeamNumber", "LocationName"}}}, 40000, meta);
+        }
+        catch (const Bridge::Error& e)
+        {
+            if (e.code == Bridge::Code::NotConnected || e.code == Bridge::Code::Busy) throw;
+        }
+        catch (const std::exception&) {}
+        return Render::SceneFromLive(design, {{"actors", actors}});
+    }
+#else
+    std::string ActorKind(const std::string& cls, const std::string& team)
+    {
+        const auto c = Lower(cls);
+        if (c.find("playerstart") != std::string::npos) return team == "0" ? "spawn_spy" : team == "1" ? "spawn_merc" : "spawn";
+        if (c.find("camnetwork") != std::string::npos) return "camnet";
+        if (c.find("objectivetrigger") != std::string::npos || c.find("sobjective") != std::string::npos || c.find("sflag") != std::string::npos || c.find("sdisk") != std::string::npos) return "objective";
+        if (c.find("mission") != std::string::npos) return "mission";
+        if (c.find("alarm") != std::string::npos || c.find("laser") != std::string::npos || c.find("camera") != std::string::npos || c.find("detector") != std::string::npos ||
+            c.find("mine") != std::string::npos || c.find("motion") != std::string::npos)
+            return "security";
+        if (c.find("light") != std::string::npos) return "light";
+        if (c.find("mover") != std::string::npos || c.find("slift") != std::string::npos) return "mover";
+        if (c.find("sound") != std::string::npos) return "sound";
+        if (c.find("staticmesh") != std::string::npos) return "mesh";
+        return "actor";
+    }
+    // The live map as a render scene (PlanRender.h): brushes as pieces with
+    // their bounds, everything else as actors.
+    Json LiveScene(ToolContext& c)
+    {
+        Json scene{{"pieces", Json::array()}, {"actors", Json::array()}, {"lines", Json::array()}, {"labels", Json::array()}};
+        std::map<std::string, std::string> teams;
+        try
+        {
+            Json meta;
+            for (const auto& start : AllActors(c, {{"classes", {"Engine.PlayerStart"}}, {"fields", {"TeamNumber"}}}, 5000, meta))
+                teams[Lower(start.value("path", std::string()))] = start.value("values", Json::object()).value("TeamNumber", std::string());
+        }
+        catch (const std::exception&) {}
+        for (const auto& item : Call(c, "design.scene", Json::object(), {}, false, 300000))
+        {
+            const auto path = item.value("path", std::string()), cls = item.value("class", std::string());
+            if (item.contains("edges"))
+            {
+                const auto bounds = Bounds(item.at("edges"));
+                if (bounds.is_null()) continue;
+                const int csg = item.value("csg", 0);
+                const std::string kind = item.value("portal", false) ? "portal" : item.value("volume", false) ? "volume" : item.value("mover", false) ? "mover" : csg == 2 ? "subtract" : "add";
+                scene["pieces"].push_back({{"id", path}, {"kind", kind}, {"cls", cls}, {"box", bounds}, {"yaw", 0}});
+                continue;
+            }
+            const auto team = teams.count(Lower(path)) ? teams[Lower(path)] : std::string();
+            scene["actors"].push_back({{"id", path}, {"cls", cls}, {"position", item.value("position", Json::array({0, 0, 0}))}, {"kind", ActorKind(cls, team)}});
+        }
+        return scene;
+    }
+#endif
+
+    ToolResult RenderPlan(const Json& a, ToolContext& c)
+    {
+        Json scene, diagnostics = Json::array();
+        std::string source = "live map";
+        if (Has(a, "spec") || Has(a, "path"))
+        {
+#ifdef RE_MCP_SPEC
+            std::string from;
+            const auto spec = LoadSpec(a, c, from, EmbeddedFiles());
+            try
+            {
+                Spec::CompileOptions options;
+                options.build = false;
+                options.screenshot = false;
+                const auto compiled = Spec::Compile(spec, options);
+                scene = compiled.render;
+#ifdef RE_MCP_RENDER
+                // Compiled.render draws geometry.brushes; one that does not gets
+                // them from the renderer.
+                std::set<std::string> drawn;
+                for (const auto& p : scene.value("pieces", Json::array())) drawn.insert(Lower(p.value("id", std::string())));
+                bool missing = false;
+                if (spec.contains("geometry") && spec.at("geometry").is_object())
+                    for (const auto& b : spec.at("geometry").value("brushes", Json::array())) missing = missing || (b.is_object() && !drawn.count(Lower(b.value("id", std::string()))));
+                if (missing) Render::AddBrushes(scene, spec);
+#endif
+                for (const auto& d : compiled.diagnostics)
+                    diagnostics.push_back({{"severity", d.severity}, {"rule", d.rule}, {"pointer", d.pointer}, {"message", d.message}, {"wikiPage", d.wikiPage}});
+            }
+            catch (const Spec::SpecError& e) { return Fail(std::string("The spec does not parse: ") + e.what(), {{"pointer", e.pointer}}); }
+            source = from == "spec" ? std::string("spec") : "spec " + from;
+#else
+            return Fail("This build has no level-spec compiler (LevelSpecCompiler.h), so plan_render can only draw the live map: omit spec.");
+#endif
+        }
+        else scene = LiveScene(c);
+        size_t errors = 0;
+        for (const auto& d : diagnostics) errors += d.value("severity", std::string()) == "error";
+        const auto pieces = scene.value("pieces", Json::array()).size(), actors = scene.value("actors", Json::array()).size();
+        ToolResult r;
+        r.structured = {{"source", source}, {"pieces", pieces}, {"actors", actors}, {"diagnostics", diagnostics}};
+        std::string text = "Top-down plan of the " + source + " (" + Count(pieces, "piece") + ", " + Count(actors, "actor") + "; north is up, east right).";
+        if (!diagnostics.empty()) text += " " + Count(diagnostics.size(), "diagnostic") + ", " + Count(errors, "error") + ": see diagnostics.";
+#ifdef RE_MCP_RENDER
+        Json options = Object(a, "options");
+        if (Has(a, "maxEdge")) options["maxEdge"] = Integer(a, "maxEdge", 1024, 64, 4096);
+        const auto png = Render::PlanPng(scene, options);
+        r.structured["bytes"] = png.size();
+        r.content.push_back(TextContent(text));
+        r.content.push_back(ImageContent(Bridge::Base64(png)));
+#else
+        // Without the renderer the scene itself still shows the layout.
+        r.structured["scene"] = scene;
+        r.content.push_back(TextContent(text + " This build has no PNG renderer (PlanRender.h); the scene is in structured content.\n\n" +
+                                        r.structured.dump(1, ' ', false, Json::error_handler_t::replace)));
+#endif
         return r;
     }
 }
@@ -341,12 +486,14 @@ Json Tools::MapSummary(ToolContext& c)
     }
     catch (const std::exception& e) { warnings.push_back(std::string("camera.snapshot: ") + e.what()); }
     summary["cameras"] = cameras;
+    // Quick pointers only; map_validate runs the wiki's rules properly.
     Json notes = Json::array();
     if (spawns["spy"].get<int>() < 3 || spawns["merc"].get<int>() < 3) notes.push_back("Fewer than 3 player starts for a team (wiki: spawn-points asks for at least 3 each).");
     if (story["missions"].empty()) notes.push_back("No SMission: Story mode cannot be played (wiki: game-modes).");
-    if (cameras["count"].get<int>() == 0) notes.push_back("No SCamNetwork camera: Mercs need a camera network.");
+    if (cameras["count"].get<int>() == 0) notes.push_back("No SCamNetwork camera: Mercs need a camera network (map_validate checks the CamNet rules).");
     summary["notes"] = notes;
     summary["warnings"] = warnings;
+    summary["next"] = Json::array({Next("map_validate", "Check every wiki rule, with fixes.", {{"profile", "draft"}})});
     return summary;
 }
 
@@ -365,9 +512,9 @@ void RegisterQueryTools(Registry& registry)
             "before that actors_edit and map-changes updates must match.\n"
             "- level (Level Properties), schema (property schemas, enum choices, writability of classes), assets (loaded assets of kind matching query), wiring "
             "(Tag/Event links, with the unresolved ones), spawns, missions, security, cameras, lights, stages (story sectors), design (blockout brushes with "
-            "bounds), ges.";
+            "bounds), ges, spec (the level spec last applied).";
         t.inputSchema = S::Input(
-            {{"what", S::Enum({"summary", "actors", "actor", "level", "schema", "assets", "wiring", "spawns", "missions", "security", "cameras", "lights", "stages", "design", "ges"},
+            {{"what", S::Enum({"summary", "actors", "actor", "level", "schema", "assets", "wiring", "spawns", "missions", "security", "cameras", "lights", "stages", "design", "ges", "spec"},
                               "What to read.")},
              {"classes", S::Array({{"type", "string"}}, "actors: class names or paths (IsA). schema: the classes.")},
              {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
@@ -404,6 +551,24 @@ void RegisterQueryTools(Registry& registry)
                                   {"preset", S::String("overview, spawn:spy, spawn:merc or objective:<name>.")}});
         t.readOnly = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Screenshot(a, c); }); };
+        registry.Add(std::move(t));
+    }
+    {
+        Tool t;
+        t.name = "plan_render";
+        t.title = "Draw a top-down plan";
+        t.description =
+            "A top-down PNG plan, north up: of a scct.level-spec (spec, or path to a .level.json or scct://examples/<name>; works offline: its pieces, polygon "
+            "brushes and volumes, actors, wiring and zones) or of the live map (neither: brushes as their outlines, spawns in team colours, objectives, cameras, "
+            "security, lights, Event links and zone names). Use it to check a spec against the source drawing or video frames before level_build, and the built map "
+            "against the spec. For a spec, the compiler's diagnostics come back too.";
+        t.inputSchema = S::Input({{"spec", S::Free("A scct.level-spec document to draw (scct://schema/level-spec). Omit spec and path to draw the live map.")},
+                                  {"path", S::String("Instead of spec: a .level.json file on this machine (absolute, or relative to the work directory), or scct://examples/<name>.")},
+                                  {"maxEdge", S::Integer("Longer side in pixels, 64-4096. Default 1024.", 64, 4096)},
+                                  {"options", S::Free("Renderer options: storey (an id: draw that storey only), labels, grid, legend, actorLabels, cones (camera and laser cones), title.")}});
+        t.readOnly = true;
+        t.idempotent = true;
+        t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return RenderPlan(a, c); }); };
         registry.Add(std::move(t));
     }
 }

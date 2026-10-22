@@ -16,6 +16,7 @@
 //       default: story, diskhunt, deathmatch
 //   wiki: [index, spawn-points, game-modes]
 //   docs: [tools]
+//   rules: true
 //   ---
 //
 // Placeholders in the body:
@@ -24,8 +25,8 @@
 // - {{^name}}...{{/name}} is kept only when it has none.
 //
 // prompts/get returns one user message: the filled body, then the wiki
-// digests and docs the template lists. The agent starts with the pages it
-// needs.
+// digests and docs the template lists, then the rule catalogue
+// (scct://rules). The agent starts with the pages it needs.
 //
 // Templates are checked when they are registered, and
 // tests/PromptsTests.cpp checks every one fills. Portable.
@@ -34,6 +35,10 @@
 #include <cctype>
 #include <set>
 #include <sstream>
+#if !defined(RE_MCP_STANDALONE) && __has_include("LevelRulesModel.h")
+#include "LevelRulesModel.h"
+#define RE_MCP_PROMPT_RULES 1
+#endif
 
 namespace Mcp
 {
@@ -45,6 +50,7 @@ namespace PromptTemplates
         std::string file, name, title, description, body;
         std::vector<Argument> arguments;
         std::vector<std::string> wiki, docs;
+        bool rules = true;
     };
 
     inline std::string Trim(const std::string& text)
@@ -127,6 +133,7 @@ namespace PromptTemplates
                 else if (key == "description") t.description = Scalar(value, where);
                 else if (key == "wiki") t.wiki = List(value, where);
                 else if (key == "docs") t.docs = List(value, where);
+                else if (key == "rules") t.rules = Flag(value, where);
                 else throw std::runtime_error(where + ": unknown front-matter key \"" + key + "\".");
                 continue;
             }
@@ -230,6 +237,16 @@ namespace PromptTemplates
         return out;
     }
 
+    inline std::string RulesMarkdown()
+    {
+#ifdef RE_MCP_PROMPT_RULES
+        return Rules::CatalogMarkdown();
+#else
+        if (const auto* file = Find("rules.md")) return Contents(*file);
+        return "Read scct://rules for the rule catalogue (this build has none to embed).\n";
+#endif
+    }
+
     // The message text: the filled recipe, then the reference pages.
     inline std::string Text(const Template& t, const Json& arguments)
     {
@@ -257,6 +274,12 @@ namespace PromptTemplates
             };
             for (const auto& slug : t.wiki) embed("scct://wiki/" + slug, "wiki/" + slug + ".md");
             for (const auto& doc : t.docs) embed("scct://docs/" + doc, "docs/" + doc + ".md");
+        }
+        if (t.rules)
+        {
+            auto rules = RulesMarkdown();
+            while (!rules.empty() && rules.back() == '\n') rules.pop_back();
+            text += "\n---\n\n<!-- scct://rules -->\n\n" + rules + "\n";
         }
         return text;
     }

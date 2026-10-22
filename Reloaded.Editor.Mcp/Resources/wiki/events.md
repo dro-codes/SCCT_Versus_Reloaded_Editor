@@ -111,3 +111,19 @@ Makes noises that show on the **Mercenary's reticle**.
 | `bEnabled` | Whether the actor is active when the level starts. Trigger/Untrigger events can also activate or deactivate it. |
 | `fIntensity` | The noise's intensity. **0.01 or lower does not appear** on the Mercenary reticle. **Maximum 1.0**, which reaches the **~15 metre** detection range. Lower values shorten how far away the noise shows on the HUD. |
 | `fTimeRateInSec` | Interval in seconds at which the noise updates or triggers on the reticle. |
+
+## How the MCP tools apply this
+
+`events` (spec `events`, built by `level_build`) writes:
+- `links[{from, to, delay}]`: sets `from`'s `Event` to `to`'s Tag. With a delay, it adds an SMagicEvent action. These are map-changes `link` ops.
+- `magic[{id, document}]`: an SMagicEvent, from a `scct.smagic-event` v1 document (`scct://schema/smagic-event`).
+- `messages[{id, spy, merc, time, priority}]`: an `SMessageTrigger`.
+- `shakers`: `SShaker`; `noises`: `SNotifyNoise`.
+- `level[{event, sendAtTime}]`: level events.
+- `triggerLights[{light, object, initiallyOn}]`: makes a spec light an `STriggerLight` and adds it to an `SGamePlayObject`'s `ObjectLights`.
+
+Spec ids become Tags, so `{"$ref": id}` and Tag/Event links stay consistent. Tag and Event values are literal Tags (no `$ref`). Renaming a Tag does not rename its dependants, except through `actors_edit` `rename_tag`.
+
+To inspect: `map_query what:"wiring"` lists every Tag/Event link and the unresolved ones.
+
+- Rules: `events.dangling`, `security.dangling-event`

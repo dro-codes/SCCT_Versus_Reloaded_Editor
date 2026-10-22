@@ -55,3 +55,16 @@ Steps:
 ## Select Static Meshes
 
 `Edit` → `Select Static Meshes...` opens a dialog listing every Static Mesh in the map. The search bar filters by Static Mesh name.
+
+## How the MCP tools apply this
+
+Placing meshes:
+- `environment` / spec `geometry.meshes[{id, mesh: "StaticMesh'Pkg.Grp.Name'", at, yaw, scale, fit: "floor"}]` places `StaticMeshActor`s.
+- The mesh's local bounds, from `map_query what:"assets" kind:"staticmesh"`, are used to sit it on the floor.
+- Movers, `SGamePlayObject`s and tutorial paths take a `StaticMesh` the same way.
+
+Importing:
+- Converting brushes to static meshes (Convert to Static Mesh) is a manual editor step (spike S7). The tools report the steps instead.
+
+Caution: replacing materials on stock StaticMesh packages modifies those packages. The release checks refuse stock package writes.
+- Rules: `release.package-names`, `release.naming-convention`

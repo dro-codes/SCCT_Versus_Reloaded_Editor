@@ -2,7 +2,7 @@
 // Embedded.gen.h, Prompts.cpp):
 // - every wiki digest, schema and document is present;
 // - every prompt template parses and fills;
-// - the tool names the pages cite exist.
+// - the tool and rule names the pages cite exist.
 //
 // Embedded.gen.h is generated, not committed: tools/test_mcp.cmd and
 // tools/test_mcp.sh write it first (tools/mcp/embed_resources.ps1 or .py).
@@ -40,8 +40,10 @@ const std::vector<std::string> kSlugs = {"home", "spawn-points", "game-modes", "
     "events", "alarms", "movers", "elevators", "lighting", "material-classes", "static-meshes", "sound-actors", "sound-browser", "gameplay-objects",
     "buttons-and-hacking-panels", "level-ingredients", "zones-and-volumes", "softbody-actors", "animated-meshes", "fish", "map-tutorials", "map-packaging"};
 const std::set<std::string> kTools = {"editor_status", "editor_launch", "editor_restart", "editor_undo", "approval_wait", "editor_log", "map_file", "map_build",
-    "map_query", "view_screenshot", "actors_edit", "map_changes_apply", "workflow_request", "editor_exec"};
-const std::set<std::string> kPrompts = {};
+    "map_query", "view_screenshot", "plan_render", "map_validate", "level_spec_validate", "level_build", "blockout", "gameplay", "security", "mechanisms",
+    "events", "environment", "geometric_events", "map_settings", "release", "actors_edit", "map_changes_apply", "workflow_request", "editor_exec"};
+const std::set<std::string> kPrompts = {"create_level_from_description", "versus_starter", "add_game_mode",
+    "design_security", "ge_pass", "review_map_against_wiki", "fix_validation", "prepare_release"};
 // snake_case words in backticks that are not tools: tool actions, error codes and outside names.
 const std::set<std::string> kOtherWords = {"rename_tag", "copy_properties", "save_as", "awaiting_approval", "not_connected", "protocol_mismatch", "dialog_blocked",
     "editor_error", "another_client", "io_scene_ase", "approval_pending", "outside_write_roots"};
@@ -73,7 +75,7 @@ void EmbeddedResources()
             Check(!Json::parse(Text(file), nullptr, false).is_discarded(), path + " parses");
         }
     }
-    // One digest per wiki page, each citing its source.
+    // One digest per wiki page, each citing its source and saying how the tools apply it.
     for (const auto& slug : kSlugs)
     {
         const auto* file = File("wiki/" + slug + ".md");
@@ -81,6 +83,7 @@ void EmbeddedResources()
         const auto text = Text(*file);
         Check(text.rfind("# ", 0) == 0, slug + " starts with its title");
         Check(text.find("\nSource: https://github.com/AllyPal/SCCT_Versus_Reloaded_Editor/wiki/") != std::string::npos && text.find("\nSource: ") < 400, slug + " has its Source line under the title");
+        Check(text.find("\n## How the MCP tools apply this\n") != std::string::npos, slug + " says how the MCP tools apply it");
         Check(text.find("](https://github.com/user-attachments") == std::string::npos && text.find("<img") == std::string::npos, slug + " copies no wiki images");
         CheckToolNames("wiki/" + slug + ".md", text);
     }
@@ -108,9 +111,9 @@ void TemplateSyntax()
     using namespace PromptTemplates;
     const auto t = Parse("prompts/x.md",
         "---\r\nname: sample\r\ntitle: \"Sample: quoted\"\r\ndescription: A test.\r\narguments:\r\n  - name: need\r\n    description: Needed.\r\n    required: true\r\n"
-        "  - name: maybe\r\n    description: Optional.\r\n  - name: mode\r\n    description: With a default.\r\n    default: story\r\nwiki: [index, game-modes]\r\n---\r\n"
+        "  - name: maybe\r\n    description: Optional.\r\n  - name: mode\r\n    description: With a default.\r\n    default: story\r\nwiki: [index, game-modes]\r\nrules: false\r\n---\r\n"
         "A {{need}} in {{mode}}.{{#maybe}} Maybe {{maybe}}{{#maybe}}!{{/maybe}}.{{/maybe}}{{^maybe}} No maybe.{{/maybe}}\r\n");
-    Check(t.name == "sample" && t.title == "Sample: quoted" && t.arguments.size() == 3 && t.wiki.size() == 2, "front matter parses");
+    Check(t.name == "sample" && t.title == "Sample: quoted" && t.arguments.size() == 3 && t.wiki.size() == 2 && !t.rules, "front matter parses");
     Check(t.arguments[0].required && !t.arguments[1].required && t.arguments[2].hasDefault && t.arguments[2].fallback == "story", "argument fields parse");
     Check(Render(t.body, Values(t, {{"need", "door"}}), t.file) == "A door in story. No maybe.\n", "defaults and inverted sections");
     Check(Render(t.body, Values(t, {{"need", "door"}, {"maybe", "{{need}}"}, {"mode", "deathmatch"}}), t.file) == "A door in deathmatch. Maybe {{need}}!.\n",
@@ -121,7 +124,7 @@ void TemplateSyntax()
     Reject([&] { Values(t, {{"need", "x"}, {"typo", "y"}}); });          // unknown argument
     Reject([&] { Values(t, Json::array()); });
     const auto text = Text(t, {{"need", "door"}});
-    Check(text.find("<!-- scct://wiki/game-modes -->") != std::string::npos, "listed pages embedded");
+    Check(text.find("<!-- scct://wiki/game-modes -->") != std::string::npos && text.find("<!-- scct://rules -->") == std::string::npos, "listed pages embedded, rules left out");
     auto parse = [](const std::string& source) { return Parse("prompts/bad.md", source); };
     Reject([&] { parse("name: x\n"); });                                                                       // no front matter
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\n"); });                                        // unclosed
@@ -131,6 +134,7 @@ void TemplateSyntax()
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\nwiki: [no-such-page]\n---\n"); });           // unknown slug
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\ndocs: [nothing]\n---\n"); });                // unknown document
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\nwiki: index\n---\n"); });                    // not a list
+    Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\nrules: maybe\n---\n"); });
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\narguments:\n  - name: a\n    description: A\n  - name: a\n    description: B\n---\n"); });
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\narguments:\n  - name: a\n---\n"); });        // argument without description
     Reject([&] { parse("---\nname: x\ntitle: T\ndescription: D\narguments:\n  - name: a\n    description: A\n    required: true\n    default: z\n---\n"); });
@@ -147,7 +151,7 @@ void RegisteredPrompts()
     RegisterPrompts(registry);
     std::set<std::string> names;
     for (const auto& p : registry.prompts) names.insert(p.name);
-    Check(names == kPrompts, "no prompts are registered");
+    Check(names == kPrompts, "exactly the eight prompts are registered");
     NoBridge bridge;
     ToolContext context{bridge, {}, {}};
     for (const auto& t : PromptTemplates::Templates())
@@ -174,6 +178,7 @@ void RegisteredPrompts()
             for (const auto& slug : t.wiki)
                 Check(text.find("<!-- scct://wiki/" + slug + " -->\n\n# ") != std::string::npos, t.name + " embeds scct://wiki/" + slug);
             for (const auto& doc : t.docs) Check(text.find("<!-- scct://docs/" + doc + " -->") != std::string::npos, t.name + " embeds scct://docs/" + doc);
+            if (t.rules) Check(text.find("<!-- scct://rules -->") != std::string::npos, t.name + " embeds the rules");
             Check(text.size() < 200000, t.name + " stays a reasonable size");
         }
         Check(PromptTemplates::Render(t.body, PromptTemplates::Values(t, full), t.file).find("## Recipe") != std::string::npos, t.name + " has a recipe");
@@ -183,7 +188,38 @@ void RegisteredPrompts()
                 Reject([&] { Json missing = full; missing.erase(argument.name); p->messages(missing, context); });
         Reject([&] { Json extra = minimal; extra["no_such_argument"] = "x"; p->messages(extra, context); });
     }
+    const auto described = registry.FindPrompt("create_level_from_description")->messages({{"description", "a dam"}, {"mapName", "HOOVER"}}, context)[0]["content"]["text"].get<std::string>();
+    Check(described.find("**Map name:** HOOVER") != std::string::npos && described.find("choose a short evocative name") == std::string::npos, "sections follow the arguments");
 }
+
+#ifdef RE_MCP_PROMPT_RULES
+// The rule ids the digests cite exist, and every rule's page is a digest.
+void RuleCitations()
+{
+    std::set<std::string> cited;
+    for (const auto& rule : Rules::Catalog())
+        Check(File("wiki/" + rule.wikiPage + ".md"), "rule " + rule.id + " cites wiki page " + rule.wikiPage + ", which has a digest");
+    for (const auto& file : EmbeddedFiles())
+    {
+        const std::string path = file.path;
+        if (path.rfind("wiki/", 0) != 0) continue;
+        std::istringstream lines(Text(file));
+        for (std::string line; std::getline(lines, line);)
+        {
+            if (line.rfind("- Rules: ", 0) != 0) continue;
+            static const std::regex id("`([a-z]+\\.[a-z-]+)`");
+            for (std::sregex_iterator it(line.begin(), line.end(), id), end; it != end; ++it)
+            {
+                const auto rule = (*it)[1].str();
+                Check(Rules::FindRule(rule) != nullptr, path + " cites rule " + rule + ", which the catalogue does not have");
+                cited.insert(rule);
+            }
+        }
+    }
+    for (const auto& rule : Rules::Catalog())
+        Check(cited.count(rule.id) || rule.id == "mapcheck.row" || rule.wikiPage == "home", "rule " + rule.id + " is cited on its digest's Rules line (" + rule.wikiPage + ")");
+}
+#endif
 
 int main()
 {
@@ -192,6 +228,9 @@ int main()
         EmbeddedResources();
         TemplateSyntax();
         RegisteredPrompts();
+#ifdef RE_MCP_PROMPT_RULES
+        RuleCitations();
+#endif
         std::cout << "PromptsTests passed (" << EmbeddedFiles().size() << " embedded files, " << PromptTemplates::Templates().size() << " prompts)\n";
         return 0;
     }

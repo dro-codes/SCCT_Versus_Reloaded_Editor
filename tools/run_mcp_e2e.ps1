@@ -1024,6 +1024,7 @@ try {
     $values['TestSystem'] = $testSystem
     $values['MapsEd'] = $testMapsEd
     $values['MapFile'] = $MapFile
+    $values['ExampleSpec'] = Join-Path $repository 'Reloaded.Editor.Mcp\Resources\examples\versus-starter.level.json'
     $values['EditorPid'] = [long]$editor.Id
     # A server that dies ends the steps; what it wrote to stderr says why.
     try { Invoke-Steps $steps $values $TimeoutSeconds }

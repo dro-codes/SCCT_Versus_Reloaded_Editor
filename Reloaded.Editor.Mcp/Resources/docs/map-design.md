@@ -1,8 +1,8 @@
 # Map Design: blockout, layout checks, devices and zones
 
-Abridged from RE+ `docs/MapDesign.md`, the **RE+ Tools > Map Design...** workspace, keeping what an agent driving it through MCP needs. The bridge ops `design.block` and `design.blockbatch` place the same parametric pieces, so the human can keep editing them in the panel.
+Abridged from RE+ `docs/MapDesign.md`, the **RE+ Tools > Map Design...** workspace, keeping what an agent driving it through MCP needs. The MCP compiler emits the same parametric pieces (`design.block` / `design.blockbatch`) and registers them, so the human can keep editing them in the panel.
 
-## Piece kinds
+## Piece kinds (`scct.level-spec` `geometry.pieces[].kind`)
 
 | Kind | What it builds |
 |---|---|
@@ -20,15 +20,15 @@ Abridged from RE+ `docs/MapDesign.md`, the **RE+ Tools > Map Design...** workspa
 
 The defaults:
 - **New blockout** is a 1024 × 1024 × 256 carved room.
-- Placed pieces take the texture browser's current material on every face. The `design.block` op's `spec.material` overrides it.
+- Placed pieces take the texture browser's current material on every face. The MCP `spec.material` overrides it.
 - A piece placed under its shape's plain name is numbered (Room 1, Room 2, ...).
 
 ### Construction
 
 This engine starts from **solid space**:
-- **`Carve`** (the default) builds a room or corridor from a single subtractive brush. It leaves far fewer surfaces to cut, light and break than **`Shell`**.
+- **`Carve`** (the default, and what the MCP compiler always uses) builds a room or corridor from a single subtractive brush. It leaves far fewer surfaces to cut, light and break than **`Shell`**.
 - **`Shell`** carves the outer volume and adds back a floor, four walls and an optional ceiling. The ceiling option applies to shell only.
-- **Wall thickness** sets the gap a carved room leaves between itself and its neighbours, and the depth its doorways cut.
+- **Wall thickness** sets the gap a carved room leaves between itself and its neighbours, and the depth its doorways cut. The spec default is 16.
 
 Further rules:
 - **Rotation is built into the brush shape. The brush actors stay unrotated:** the editor's wireframes apply actor Rotation, but its geometry build does not.
@@ -47,7 +47,7 @@ Editing:
 - The toolkit refuses to overwrite manual edits to a generated piece's brushes.
 - **Detach** turns a piece back into ordinary brushes.
 
-## Versus starter layout
+## Versus starter layout (and why the MCP example differs)
 
 The panel's **Versus starter layout** places:
 - an objective room in the middle;
@@ -55,7 +55,11 @@ The panel's **Versus starter layout** places:
 - a crouch vent from the spy room into the objective room's side wall;
 - **two starts per team**, a mission with an objective and a terminal, and ceiling lights.
 
-That breaks wiki rules: it has 2 starts instead of ≥3, the terminal at floor+64 instead of ~78, and no CamNet.
+That breaks wiki rules: it has 2 starts instead of ≥3, the terminal at floor+64 instead of ~78, and no CamNet. The MCP `versus_starter` prompt and `scct://examples/versus-starter` therefore reuse **only its geometry**, and supply:
+- 4 starts per team;
+- the terminal at floor+78;
+- a 3-camera CamNet loop;
+- zones and all three modes.
 
 ## Movement limits (defaults)
 
@@ -78,7 +82,7 @@ Blockout previews warn in these cases:
 
 These warnings are planning aids; confirm real limits in game.
 
-## Check design
+## Check design (folded into `map_validate`)
 
 It reports the following:
 - **Layout:**
@@ -176,4 +180,4 @@ Rules:
 Workspace data (pieces, references, annotations, movement limits) lives in `System/ReloadedEditor/library.json`, keyed by map path. It is copied to `System/ReloadedEditor/Workspaces/<map>.json` on each save.
 - Unsaved maps keep it in memory until their first save.
 - Group membership travels in each actor's native `Group` field.
-- The MCP bridge's `design.register` adds pieces to this library, so the panel can edit them.
+- The MCP bridge's `design.register` adds compiled pieces to this library, so the panel can edit them, and `mcp.sidecar.set` keeps the applied spec beside them.

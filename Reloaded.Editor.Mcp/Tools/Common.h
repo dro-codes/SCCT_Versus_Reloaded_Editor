@@ -496,6 +496,162 @@ namespace Mcp::Tools
     // (QueryTools.cpp).
     Json MapSummary(ToolContext& c);
 
+    // ---------------------------------------------------------- level builds
+    // level_build's path (SpecTools.cpp), which every intent tool
+    // (IntentTools.cpp) builds through too. BuildContext is what a build
+    // starts from: the editor's state, the stored sidecar less what the map no
+    // longer has, and whether an editor answered. LevelBuild compiles spec
+    // against it and previews or applies it, returning the report BuildResult
+    // turns into the tool result; images gets the plan PNG or the screenshot.
+    Json BuildContext(ToolContext& c, bool needEditor);
+    Json LevelBuild(ToolContext& c, const Json& context, const Json& spec, const Json& request, std::vector<Content>& images);
+    ToolResult BuildResult(ToolContext& c, const Json& report, const std::vector<Content>& images);
+
+    // ------------------------------------------------------- spec documents
+    // spec as given, or read from path: a .level.json on this machine (a
+    // relative path is looked for in the work directory first) or an
+    // embedded example, scct://examples/<name>. files is EmbeddedFiles()
+    // (Embedded.h), passed in so only the tools that read specs compile the
+    // embedded data.
+    template<class Files> std::vector<std::string> ExampleUris(const Files& files)
+    {
+        std::vector<std::string> out;
+        for (const auto& file : files)
+        {
+            std::string path = file.path;
+            if (path.rfind("examples/", 0) != 0) continue;
+            for (const std::string suffix : {".level.json", ".json"})
+                if (path.size() > suffix.size() && path.compare(path.size() - suffix.size(), std::string::npos, suffix) == 0) { path.resize(path.size() - suffix.size()); break; }
+            out.push_back("scct://" + path);
+        }
+        return out;
+    }
+    template<class Files> Json LoadSpec(const Json& a, ToolContext& c, std::string& source, const Files& files)
+    {
+        if (Has(a, "spec"))
+        {
+            if (Has(a, "path")) throw std::runtime_error("Give spec or path, not both.");
+            if (!a.at("spec").is_object()) throw std::runtime_error("spec must be a scct.level-spec object (scct://schema/level-spec).");
+            source = "spec";
+            return a.at("spec");
+        }
+        const auto path = String(a, "path");
+        if (path.empty()) throw std::runtime_error("Give spec (a scct.level-spec document) or path (a .level.json file, or scct://examples/<name>).");
+        source = path;
+        std::string text;
+        if (path.rfind("scct://", 0) == 0)
+        {
+            const auto wanted = path.substr(7);
+            bool found = false;
+            for (const auto& file : files)
+            {
+                const std::string name = file.path;
+                if (name != wanted && name != wanted + ".level.json" && name != wanted + ".json") continue;
+                text.assign(reinterpret_cast<const char*>(file.data), file.size);
+                found = true;
+                break;
+            }
+            if (!found)
+                throw std::runtime_error("No embedded spec " + path + ". path takes a file on this machine or one of the examples, " + Join(ExampleUris(files)) +
+                                         (path.rfind("scct://map/", 0) == 0 ? "; the live map's spec is map_query what:\"spec\"." : "."));
+        }
+        else
+        {
+            auto file = std::filesystem::path(std::u8string(path.begin(), path.end()));
+            std::error_code error;
+            if (file.is_relative() && !c.workDir.empty() && std::filesystem::exists(c.workDir / file, error)) file = c.workDir / file;
+            std::ifstream in(file, std::ios::binary);
+            if (!in) throw std::runtime_error("Cannot open " + path + ". Give a full path, or one relative to the work directory " + PathText(c.workDir) + ".");
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            if (text.size() > Bridge::kMaxDocument) throw std::runtime_error(path + " is larger than a level spec can be (128 MiB).");
+        }
+        Json spec;
+        try { spec = Json::parse(text); }
+        catch (const Json::parse_error& e) { throw std::runtime_error(path + " is not JSON: " + e.what()); }
+        if (!spec.is_object()) throw std::runtime_error(path + " does not hold a scct.level-spec object.");
+        return spec;
+    }
+
+    // Where each intent tool's arguments go in a scct.level-spec (the
+    // tools' own field lists, IntentTools.cpp; McpSpecToolsTests keeps the
+    // two in step), by tool and argument.
+    inline const std::map<std::string, std::map<std::string, std::string>>& SpecPointers()
+    {
+        static const std::map<std::string, std::map<std::string, std::string>> table{
+            {"blockout", {{"pieces", "/geometry/pieces"}, {"doorways", "/geometry/doorways"}, {"vertical", "/geometry/vertical"}, {"brushes", "/geometry/brushes"},
+                          {"surfaces", "/geometry/surfaces"}, {"meshes", "/geometry/meshes"}, {"storeys", "/storeys"}, {"defaults", "/defaults"}}},
+            {"gameplay", {{"spawns", "/spawns"}, {"modes", "/gameplay/modes"}, {"story", "/gameplay/story"}, {"diskhunt", "/gameplay/diskhunt"},
+                          {"deathmatch", "/gameplay/deathmatch"}, {"playerCounts", "/gameplay/playerCounts"}, {"targets", "/gameplay/targets"}}},
+            {"security", {{"alarms", "/security/alarms"}, {"devices", "/security/devices"}, {"camnet", "/security/camnet"}}},
+            {"mechanisms", {{"doors", "/mechanisms/doors"}, {"movers", "/mechanisms/movers"}, {"lifts", "/mechanisms/lifts"}, {"buttons", "/mechanisms/buttons"}}},
+            {"events", {{"links", "/events/links"}, {"magic", "/events/magic"}, {"messages", "/events/messages"}, {"shakers", "/events/shakers"},
+                        {"noises", "/events/noises"}, {"level", "/events/level"}, {"triggerLights", "/events/triggerLights"}}},
+            {"environment", {{"lights", "/environment/lights"}, {"sounds", "/environment/sounds"}, {"zones", "/zones"}, {"volumes", "/environment/volumes"},
+                             {"ingredients", "/environment/ingredients"}, {"objects", "/environment/objects"}, {"meshes", "/geometry/meshes"},
+                             {"vision", "/environment/vision"}, {"props", "/environment/props"}, {"fish", "/environment/fish"}, {"softbody", "/environment/softbody"},
+                             {"animated", "/environment/animated"}, {"tutorials", "/environment/tutorials"}}},
+            {"geometric_events", {{"ges", "/ges"}, {"geTriggers", "/geTriggers"}}},
+            {"map_settings", {{"level", "/level"}, {"interface", "/interface"}, {"mapSettings", "/settings"}, {"settings", "/settings"}, {"modes", "/settings/modes"},
+                              {"mapName", "/settings/mapName"}, {"briefSpy", "/settings/briefSpy"}, {"briefMerc", "/settings/briefMerc"}, {"legend", "/settings/legend"},
+                              {"legendInBrief", "/settings/legendInBrief"}}}};
+        return table;
+    }
+    // An intent tool: it changes the open map's stored spec and builds it.
+    inline bool IntentTool(const std::string& tool) { return SpecPointers().count(tool) != 0; }
+    // "" for an argument with no section of its own.
+    inline std::string SpecPointer(const std::string& tool, const std::string& argument)
+    {
+        const auto& table = SpecPointers();
+        const auto found = table.find(tool);
+        if (found == table.end()) return {};
+        const auto field = found->second.find(argument);
+        return field == found->second.end() ? std::string() : field->second;
+    }
+    // A finding's fix for a spec checked offline (level_spec_validate,
+    // map_validate with spec or path): an intent tool would change the open
+    // map's stored spec and build it, not the document under check, so its
+    // arguments become edits of that document, {spec: [{pointer, merge}]},
+    // merged at each pointer as the intent tools merge (objects field by
+    // field, lists item by item by id). A level_build fix is its note; any
+    // other tool's fix is for the built map and says so (live: true).
+    inline Json SpecFix(const Json& fix)
+    {
+        if (!fix.is_object() || !fix.contains("tool") || !fix.at("tool").is_string()) return fix;
+        const auto tool = fix.at("tool").get<std::string>();
+        const auto args = fix.value("args", Json::object());
+        Json out = Json::object();
+        if (tool == "level_build")
+        {
+            out["spec"] = Json::array();
+            out["note"] = fix.value("note", std::string("Change the spec, then check it again."));
+            return out;
+        }
+        Json edits = Json::array();
+        bool all = args.is_object() && !args.empty();
+        if (args.is_object())
+            for (auto it = args.begin(); it != args.end() && all; ++it)
+            {
+                const auto pointer = SpecPointer(tool, it.key());
+                if (pointer.empty()) { all = false; break; }
+                // Prose instead of a value says what to write there (only
+                // the Map Settings texts are strings themselves).
+                const bool text = pointer.rfind("/settings/", 0) == 0 && pointer != "/settings/modes";
+                if (it.value().is_string() && !text)
+                    edits.push_back({{"pointer", pointer}, {"change", it.value()}});
+                else edits.push_back({{"pointer", pointer}, {"merge", it.value()}});
+            }
+        if (!all)
+        {
+            out = fix;
+            out["live"] = true;
+            out["note"] = fix.value("note", std::string()) + (fix.contains("note") ? " " : "") + "This applies to the map once the spec is built (level_build).";
+            return out;
+        }
+        out["spec"] = edits;
+        if (fix.contains("note")) out["note"] = fix.at("note");
+        return out;
+    }
+
     // ---------------------------------------------------------------- files
     // One section of an INI file (Reloaded_Editor.ini), keys lower-cased.
     // The editor writes it through the profile API, so ANSI or UTF-16.

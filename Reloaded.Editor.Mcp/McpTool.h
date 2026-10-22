@@ -179,15 +179,23 @@ namespace Mcp
 
     // Each Tools/*.cpp contributes its part; Register calls them all.
     void RegisterSessionTools(Registry&);  // editor_status, editor_launch, editor_restart, editor_undo, approval_wait, editor_log, map_file, map_build
-    void RegisterQueryTools(Registry&);    // map_query, view_screenshot
+    void RegisterQueryTools(Registry&);    // map_query, view_screenshot, plan_render
+    void RegisterValidateTools(Registry&); // map_validate
+    void RegisterSpecTools(Registry&);     // level_spec_validate, level_build
+    void RegisterIntentTools(Registry&);   // blockout, gameplay, security, mechanisms, events, environment, geometric_events, map_settings
     void RegisterEscapeTools(Registry&);   // actors_edit, map_changes_apply, workflow_request, editor_exec
+    void RegisterReleaseTools(Registry&);  // release
     void RegisterResources(Registry&);     // scct:// resources
     void RegisterPrompts(Registry&);
     inline void Register(Registry& registry)
     {
         RegisterSessionTools(registry);
         RegisterQueryTools(registry);
+        RegisterValidateTools(registry);
+        RegisterSpecTools(registry);
+        RegisterIntentTools(registry);
         RegisterEscapeTools(registry);
+        RegisterReleaseTools(registry);
         RegisterResources(registry);
         RegisterPrompts(registry);
     }

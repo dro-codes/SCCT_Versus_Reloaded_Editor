@@ -3,7 +3,7 @@
 // stdout, and reaches the editor through its named pipe (BridgeClient).
 //   Reloaded.Editor.Mcp.exe              serve MCP on stdio
 //   Reloaded.Editor.Mcp.exe --version
-//   Reloaded.Editor.Mcp.exe --self-test  check the tools and resources it serves
+//   Reloaded.Editor.Mcp.exe --self-test  compile and check the embedded examples
 #ifdef _WIN32
 #define NOMINMAX // <windows.h> would turn std::min and std::max into macros
 #endif
@@ -20,6 +20,14 @@
 #include <windows.h>
 #include <fcntl.h>
 #include <io.h>
+#endif
+#if !defined(RE_MCP_STANDALONE) && __has_include("LevelSpecCompiler.h")
+#include "LevelSpecCompiler.h"
+#define RE_MCP_SPEC 1
+#endif
+#if !defined(RE_MCP_STANDALONE) && __has_include("LevelRulesModel.h")
+#include "LevelRulesModel.h"
+#define RE_MCP_RULES 1
 #endif
 
 namespace
@@ -79,7 +87,7 @@ namespace
         std::fputs("Reloaded.Editor.Mcp " RE_PLUS_VERSION ": the MCP server for the RE+ editor (SCCT Versus Reloaded Editor).\n"
                    "  Reloaded.Editor.Mcp.exe              serve MCP on stdin/stdout (what MCP clients run)\n"
                    "  Reloaded.Editor.Mcp.exe --version    print the version\n"
-                   "  Reloaded.Editor.Mcp.exe --self-test  check the tools and resources it serves\n"
+                   "  Reloaded.Editor.Mcp.exe --self-test  compile and check the embedded example levels\n"
                    "Claude Code: claude mcp add scct-reloaded -- \"<game>\\System\\Reloaded.Editor.Mcp.exe\"\n",
                    to);
     }
@@ -127,6 +135,36 @@ int Mcp::SelfTest(std::ostream& out)
         catch (const std::exception& e) { fail("prompt " + prompt.name + ": " + e.what()); }
     }
 
+    size_t examples = 0;
+    for (const auto& file : EmbeddedFiles())
+    {
+        const std::string path = file.path;
+        if (path.rfind("examples/", 0) != 0 || path.find(".json") == std::string::npos) continue;
+        ++examples;
+        Json spec;
+        try { spec = Json::parse(std::string(reinterpret_cast<const char*>(file.data), file.size)); }
+        catch (const std::exception& e) { fail(path + " is not JSON: " + e.what()); continue; }
+#ifdef RE_MCP_SPEC
+        try
+        {
+            const auto compiled = Spec::Compile(spec);
+            size_t errors = 0;
+            for (const auto& d : compiled.diagnostics)
+                if (d.severity == "error") { ++errors; fail(path + " " + d.pointer + ": " + d.message + " [" + d.rule + "]"); }
+            std::string profile = spec.value("profile", std::string("release"));
+            size_t findings = 0;
+#ifdef RE_MCP_RULES
+            for (const auto& finding : Rules::Check(Rules::SceneFromJson(compiled.scene), profile))
+                if (finding.severity == "error") { ++findings; fail(path + " (" + profile + "): " + finding.message + " [" + finding.rule + ", wiki " + finding.wikiPage + "]"); }
+#endif
+            out << path << ": compiled, " << compiled.diagnostics.size() << " diagnostics, " << errors << " compile errors, " << findings << " " << profile << " rule errors\n";
+        }
+        catch (const std::exception& e) { fail(path + " does not compile: " + e.what()); }
+#else
+        out << path << ": parsed (this build has no level-spec compiler)\n";
+#endif
+    }
+    if (!examples) out << "no embedded example levels\n";
     out << (failures ? "self-test failed (" + std::to_string(failures) + ")" : std::string("self-test passed")) << "\n";
     return failures ? 1 : 0;
 }

@@ -2,14 +2,16 @@
 
 `Reloaded.Editor.Mcp.exe` is an [MCP](https://modelcontextprotocol.io) server
 for the RE+ editor. It lets an AI agent such as Claude Code or Claude Desktop
-read, edit and build Versus maps in the running editor.
+read, edit, build and check Versus maps in the running editor, and build a
+whole level from a description.
 
-The agent does the thinking: it reads the wiki digests, which carry every rule
-of the
-[SCCT Versus Reloaded wiki](https://github.com/AllyPal/SCCT_Versus_Reloaded_Editor/wiki),
-and decides what to change. The server does the exact work: it previews each
-change, applies it in one Undo step, builds the geometry, runs Map Check and
-takes screenshots.
+The agent does the thinking: it reads the wiki digests, looks at your pictures
+and writes the level down. The server does the exact work: it compiles that
+description with the wiki's defaults, previews it, applies it in one Undo step,
+builds the geometry, runs the checks and takes screenshots. Every rule it
+applies or checks comes from the
+[SCCT Versus Reloaded wiki](https://github.com/AllyPal/SCCT_Versus_Reloaded_Editor/wiki)
+and cites the page it comes from.
 
 The server is off until you turn it on, and nothing it does can be turned on by
 the agent itself.
@@ -33,8 +35,8 @@ copy back with the DLL.
 Restart your MCP client after an update so it starts the new copy.
 
 `Reloaded.Editor.Mcp.exe --version` prints its version and
-`Reloaded.Editor.Mcp.exe --self-test` checks the tools and resources it serves;
-neither needs the editor. Run with no arguments, it waits for an MCP
+`Reloaded.Editor.Mcp.exe --self-test` compiles and checks the example levels it
+carries; neither needs the editor. Run with no arguments, it waits for an MCP
 client on stdin, so double-clicking it does nothing useful.
 
 ## Turning it on
@@ -73,7 +75,7 @@ WriteRoots=
 | `AllowPlay` | 0 | The `play.level` op may start Play Level. Only the INI sets it. |
 | `HistoryMaxMB` | 200 | The most the call history may take, 1 to 100,000 MB; the oldest files go first. |
 | `WriteRoots` | empty | Extra folders, separated by `;`, that may be written besides the work folder: by a release copy (besides `<Game>\Releases`) and by an `editor_exec` command's `FILE=`. |
-| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder. The editor allows a release copy and an `editor_exec` `FILE=` there too. Not written by default: add `WorkDir=<folder>` to move it. |
+| `WorkDir` | `%ProgramData%\REPlusMcp` | The server's work folder: saved specs. The editor allows a release copy and an `editor_exec` `FILE=` there too. Not written by default: add `WorkDir=<folder>` to move it. |
 
 The editor writes the missing keys (all but `WorkDir`) the first time it starts
 with this version. It reads them when it starts, so edit the INI with the editor
@@ -94,7 +96,8 @@ claude mcp add scct-reloaded -- "C:\Games\SCCT Versus\System\Reloaded.Editor.Mcp
 ```
 
 Add `--scope user` to have it in every project. In Claude Code, `/mcp` lists the
-server with its 14 tools and its resources.
+server with its 27 tools, its resources and its prompts; prompts appear as
+`/mcp__scct-reloaded__<prompt>` commands.
 
 **Claude Desktop.** **Settings > Developer > Edit Config** opens
 `claude_desktop_config.json`. Add the server and restart Claude Desktop:
@@ -173,7 +176,7 @@ Map JSON updates do, so an actor you changed is never overwritten blind.
 
 **One Undo step per call.** Every change a tool makes is one Undo step, named
 `MCP <n>: <label>` in **Edit > Undo History** (`label` defaults to the tool's
-name). If a part of that step
+name). A whole level from `level_build` is one step. If a part of that step
 fails, every map change of the call is rolled back and no Undo step is left; a
 failure after it (the build, Map Check, a save, or a dialog after a file was
 written) keeps the map changes and says so with `rolledBack: false`.
@@ -191,7 +194,8 @@ To take a call back:
 An MCP call is undone as a whole only while its steps are the newest in the
 Undo buffer; otherwise it is refused (`not_newest`) and Redo is kept.
 
-**Dry runs.** Every tool that changes something takes `dryRun: true`: the editor works out the same change, returns its
+**Dry runs.** Every tool that changes something takes `dryRun: true` (the spec
+tools also `mode: "preview"`): the editor works out the same change, returns its
 preview rows (the Map JSON preview's **Add**, **Modify**, **Move**, **Delete**,
 **Link**, **Package** and **Surface** rows) and changes nothing.
 
@@ -266,24 +270,32 @@ answer. While a change waits for approval, other calls get `busy` /
 
 ## Tools
 
-14 tools in three groups. Each tool's own description, as the client shows it,
+27 tools in seven groups. Each tool's own description, as the client shows it,
 is the full reference; this section gives each one's purpose and its main
 arguments.
 
 Every tool that changes something takes `dryRun` and `label`, and returns
 `summary`, `created`, `changed`, `warnings`, `undo` (`{call, steps}`;
 `editor_undo` takes the `call`) and `next` (suggested follow-up calls).
-Pictures (screenshots) come back as MCP image content.
+Pictures (screenshots, plans) come back as MCP image content.
 Errors come back as tool results marked `isError`, with `code`, `reason`, a
 `hint` and whether retrying can help. An error carries those details as
 `structuredContent` only when they fit the tool's `outputSchema`; otherwise
-they are in the text block, since
+(`map_validate`, `level_spec_validate`) they are in the text block, since
 clients validate any `structuredContent` they get, errors included.
 
-To keep `tools/list` small (about 22 KB for the 14 tools), the
-descriptions give each argument's shape and point at two documents the
+To keep `tools/list` small (about 57 KB for the 27 tools), the
+descriptions give each argument's shape and point at three documents the
 agent reads as resources: `scct://docs/tools` (the conventions every tool
-shares) and `scct://docs/ops` (the bridge ops).
+shares: units, ids, positions, how the intent tools merge, the two forms of a
+finding's fix), `scct://docs/tool-reference` (every field of every tool and
+the wiki defaults the compiler applies) and `scct://docs/ops` (the bridge
+ops). A description that names one tool's section writes it as a fragment,
+`scct://docs/tool-reference#<tool>` (such as `#level_build` or `#mechanisms`,
+each a heading of that document); the server reads a URI with a `#fragment` as
+the whole document. The intent tools' input schemas are outlines (each
+argument's type, and `id` where a list matches by id); the merged spec is
+checked in full, with the JSON pointer of any problem.
 
 ### Session
 
@@ -302,8 +314,47 @@ shares) and `scct://docs/ops` (the bridge ops).
 
 | Tool | Purpose and main arguments |
 | --- | --- |
-| `map_query` | Reads the map. `what`: `summary`, `actors`, `actor`, `level`, `schema`, `assets`, `wiring`, `spawns`, `missions`, `security`, `cameras`, `lights`, `stages`, `design` or `ges`. `actors` filters by `classes`, `tags`, `names`, `near {at, radius}`, `box {min, max}`, `selected`, with `fields` (names or `"all"`), `limit` and `cursor`; `actor` takes `actor` (path, name or `{path, class}`) and `includeSchema`; `assets` takes `kind` and `query`. Read-only. |
+| `map_query` | Reads the map. `what`: `summary`, `actors`, `actor`, `level`, `schema`, `assets`, `wiring`, `spawns`, `missions`, `security`, `cameras`, `lights`, `stages`, `design`, `ges` or `spec`. `actors` filters by `classes`, `tags`, `names`, `near {at, radius}`, `box {min, max}`, `selected`, with `fields` (names or `"all"`), `limit` and `cursor`; `actor` takes `actor` (path, name or `{path, class}`) and `includeSchema`; `assets` takes `kind` and `query`. Read-only. |
 | `view_screenshot` | A PNG of a viewport: `viewport` (`perspective` or `top`), `maxEdge` (64-2048, default 1024), `camera {location, rotation}`, `frame` (actors), or `preset`: `overview`, `spawn:spy`, `spawn:merc`, `objective:<name>`. The camera is put back afterwards. |
+| `plan_render` | A top-down plan PNG, north up, of a `spec` or `path` (a `.level.json`, or `scct://examples/<name>`; offline) or of the live map (neither): pieces, brushes, spawns in team colours, objectives, cameras, security, lights, Event links and zones. `maxEdge`, `options` (`storey`, `labels`, `grid`, `legend`, `actorLabels`, `cones`, `title`). |
+
+### Validate
+
+| Tool | Purpose and main arguments |
+| --- | --- |
+| `map_validate` | Checks the open map, or a `spec` or `path` offline, against the wiki. `profile` (`draft` or `release`), `include` (groups), `rules` (ids or prefixes), `modes`, `release`, `trace`, `info`, `limit`. See [Validation](#validation). Read-only. |
+
+### Spec
+
+| Tool | Purpose and main arguments |
+| --- | --- |
+| `level_spec_validate` | Parses and compiles a `scct.level-spec` offline, runs every rule and draws the plan. `spec` or `path` (a file, or `scct://examples/<name>`), `profile`, `render`, `maxEdge`, `options`, `limit`. Returns `valid`, `summary`, `diagnostics` (each with a JSON `pointer` into the spec, and a `fix` that is an edit of the spec), the plan's steps and the plan image. |
+| `level_build` | Builds a spec in the open map as one Undo step. `spec` or `path`; `mode` `preview` (default) or `apply`; `sync` `incremental`, `replace` or `merge`; `brushMode` `pieces` or `polygons`; `build` `geometry` (default), `all` or `none`; `screenshot` (default true); `save` (a path in `Packages\MapsEd`); `force` (apply despite errors); `profile`. A preview with errors, or with findings about other parts of the spec, saves the spec it built in the work folder (`specFile`) and points `level_spec_validate` at that file. See [The level spec](#the-level-spec). |
+
+### Intent
+
+Each intent tool changes one part of the level. Its arguments are that part of
+the spec, at the top level; they are laid over the spec the map was last built
+from (a map without one starts a new spec), and only what changed is built, as
+`level_build sync:"incremental"` does, in one Undo step. List items match by
+`id` and are updated field by field; `remove` takes ids out. Common arguments:
+`mode` (`apply`, the default, or `preview`), `dryRun`, `label`, `remove`,
+`existing` (live actors to refer to by id), `build` (`auto`, `geometry`, `all`,
+`none`), `screenshot`, `save`, `force`, `mapName` (for a map with no spec yet).
+Errors the change brings block it unless `force`; errors the spec already had
+are listed as standing and do not. Each description lists the fields;
+`scct://docs/tool-reference` has every field and the wiki defaults.
+
+| Tool | Purpose and main arguments |
+| --- | --- |
+| `blockout` | Rooms, corridors, vents, crawlways, doorways, stairs, ramps and platforms as Map Design pieces: `pieces`, `doorways`, `storeys`, `vertical`, `brushes`, `surfaces`, `meshes`, `defaults`, `brushMode`. |
+| `gameplay` | `spawns` (spy, merc, toggles), `modes` and `removeModes`, `story` (mission, objectives with terminal, flag and bomb triggers, sectors), `diskhunt`, `deathmatch`, `playerCounts`, `targets`. |
+| `security` | `alarms`, `devices` (laser, camera, motion, presence, mine) and `camnet` (the Mercenaries' camera loop). |
+| `mechanisms` | `doors`, other static-mesh `movers`, `lifts` (with `doorMesh`, `carDoorMesh`, `doorOpen`, `doorMoveTime`, `doors`, `switches`, `carSwitch`: the lift makes its own external doors, Key 0 open and Key 1 closed, and the car's SLiftDoor, all run by the SLift; never model them as `doors`), `buttons` (buttons and hacking panels). |
+| `events` | `links` (Event to Tag, with delay), `magic` (SMagicEvent documents), `messages`, `shakers`, `noises`, `level` (LevelInfo events at a time), `triggerLights`. |
+| `environment` | `lights` (presets ceiling, spot, sun, echelon-spot), `sounds`, `zones`, `volumes`, `ingredients`, `objects`, `meshes`, `vision`, `props`, `fish`, `softbody`, `animated`, `tutorials`. |
+| `geometric_events` | `ges` (ledge, hoh, pipe, ladder, zipline, fence, pole) and `geTriggers`. With no arguments it lists the GEs it knows. |
+| `map_settings` | `level` (Level Properties: song, deathPawnHeight, motionTracking, events, geActivationMask), the Map Settings (`mapName`, `briefSpy`, `briefMerc`, `legend`, `legendInBrief`, `modes`, or all of them as `mapSettings`), `interface` (menu, briefing, loadingAtt, loadingDef images) and `minimap`. |
 
 ### Escape hatches
 
@@ -313,6 +364,12 @@ shares) and `scct://docs/ops` (the bridge ops).
 | `map_changes_apply` | A `scct.map-changes` `document` as written by hand ([MapAuthoring.md](MapAuthoring.md)), with `baseDirectory` for relative texture paths. Its `texture` and `save` operations write only the map's own packages, `<Map>_<name>` (or a texture into `MyLevel`): another package is refused as `refused` / `not_map_owned` (or `package_name`, `interface_package`), and any before the map's first save as `unsaved_map`. A `load` alone is allowed. |
 | `workflow_request` | One bridge op by name: `op` and `args`. `scct://docs/ops` lists every op with its policy and arguments; see [Bridge ops](#bridge-ops). |
 | `editor_exec` | One console `command`. Off unless `AllowRawExec=1` (else `refused` / `raw_exec_off`). Even then it is refused (see [Limits and safety](#limits-and-safety) for the whole list) for commands that quit, crash or relaunch the editor, run a file of commands, replace, save, load, import or export the map, packages or files, undo blindly or reach the sound driver (`denied_command`); a `FILE=` outside the work folder and `WriteRoots` (`outside_write_roots`); a `PACKAGE=` other than the map's own (`not_map_owned`); and more than one command (`invalid`). The description lists the editor's deny list. Console commands skip the stale checks and may not be undoable. |
+
+### Release
+
+| Tool | Purpose and main arguments |
+| --- | --- |
+| `release` | `action`: `check` (read-only: file names, the MapsEd and Maps copies, package names, `<Map>-i.utc` and its interface textures, the `.uas`, the packages the map imports; `base` compares stock packages with a clean install), `sounds` (builds `Packages\Sounds\<Map>.uas` with Interface and `Amb_<Map>`, `quality` default 5.0), `optimise` (Optimise Map Assets' report, or a release copy with `packs`/`suggested`, in `<Game>\Releases\<Map>` or `folder`, which must be a full path inside `<Game>\Releases`, the work folder or `[Mcp] WriteRoots`: the editor refuses any other, since with `overwrite` the copy deletes and rewrites the map's files there), `package` (the archive's file list) or `interface` (`images` into `<Map>-i`). |
 
 ## Bridge ops
 
@@ -401,19 +458,22 @@ Arguments of the ops made for the MCP server (the others take the shapes
 
 | URI | What |
 | --- | --- |
-| `scct://wiki/index` | Start here: the page map and the minimum viable Versus map checklist. |
+| `scct://wiki/index` | Start here: the page map, the minimum viable Versus map checklist and which tool adds what. |
 | `scct://wiki/{page}` | One digest per wiki page, with class and property names exactly as the wiki writes them: `home`, `spawn-points`, `game-modes`, `map-settings`, `level-properties`, `vision-mode-properties`, `geometric-events`, `events`, `alarms`, `movers`, `elevators`, `lighting`, `material-classes`, `static-meshes`, `sound-actors`, `sound-browser`, `gameplay-objects`, `buttons-and-hacking-panels`, `level-ingredients`, `zones-and-volumes`, `softbody-actors`, `animated-meshes`, `fish`, `map-tutorials`, `map-packaging`. |
-| `scct://schema/{name}` | JSON Schemas: `map-changes`, `map-authoring`, `stages`, `smagic-event`, `build-plan`. |
-| `scct://docs/{name}` | `tools` (the agent's guide and the conventions every tool shares), `ops` (the bridge ops, their policies and arguments), `map-authoring` and `map-design` (abridged from this folder). |
+| `scct://rules` | Every validation rule with its draft and release severity, its wiki page and what it checks, generated from the checks themselves. |
+| `scct://schema/{name}` | JSON Schemas: `level-spec`, `map-changes`, `map-authoring`, `stages`, `smagic-event`, `build-plan`. |
+| `scct://docs/{name}` | `tools` (the agent's guide and the conventions every tool shares), `tool-reference` (every tool field and the wiki defaults), `ops` (the bridge ops, their policies and arguments), `map-authoring` and `map-design` (abridged from this folder). |
+| `scct://examples/{name}` | Example level specs (see [Examples](#examples)). |
 | `scct://editor/state` | Live: the open map's identity and state. |
 | `scct://map/summary` | Live: actor counts, spawns per team, missions, security, cameras. |
-| `scct://map/validation` | Live: the editor's Map Check of the map. |
+| `scct://map/validation` | Live: the map checked against the rules (draft). |
+| `scct://map/spec` | Live: the level spec last applied to the map (its sidecar), or null. |
 | `scct://map/screenshot/latest` | Live: a PNG of the perspective viewport. |
 | `scct://map/actor/{path}` | Live: one actor's editable values, such as `scct://map/actor/MyLevel.Light12`. |
 
-A URI may end in a `#fragment` naming a section, such as
-`scct://docs/tools#errors`: it is read, and subscribed to, as the resource
-without it.
+A URI may end in a `#fragment` naming a section, as the tool descriptions'
+`scct://docs/tool-reference#level_build` does: it is read, and subscribed to,
+as the resource without it.
 
 Clients can subscribe to the live resources; the server announces a change
 after each call that changed something in the editor (a bridge call that
@@ -430,6 +490,241 @@ not take, or one that is not a string, is `-32602`; reading
 The digests were written from the wiki's raw pages; each names its source page.
 `tools/mcp/build_wiki_resources.ps1` fetches the pages again and lists names and
 numbers a digest lacks, for when the wiki changes.
+
+## Prompts
+
+Each prompt is a step-by-step recipe that carries the wiki pages it needs and
+points at `scct://rules`, which it no longer embeds (the catalogue alone is
+18 KB).
+
+| Prompt | Arguments (required in bold) | What it does |
+| --- | --- | --- |
+| `create_level_from_description` | **description**, mapName, modes, profile | Designs and builds a complete map from a written description. |
+| `versus_starter` | mapName, roomSize, corridorLength, extras | The RE+ Versus starter layout with the wiki's gaps filled. |
+| `add_game_mode` | **mode**, details | Adds Story, Story sectors, Disk Hunt or Deathmatch with its Map Settings entry. |
+| `design_security` | area, intensity, details | Alarms, detectors, door locks and the CamNet. |
+| `ge_pass` | area, focus | The spies' climbing layer: ledges, hand-over-hand, pipes, ladders, ziplines, fences. |
+| `review_map_against_wiki` | profile, focus | Audits the open map and reports by wiki page, changing nothing. |
+| `fix_validation` | profile, scope, findings | Applies each finding's fix, dry run first, until the map is clean. |
+| `prepare_release` | **mapName**, images, briefing | Naming, Map Settings, interface textures, the `.uas`, package checks and the archive list. |
+
+## The level spec
+
+A level spec (`scct.level-spec`, version 1) describes a whole level as data:
+the spaces, who spawns where, what each mode plays, the security, the doors,
+the events, the lights and the settings. `level_build` compiles it with the
+wiki's defaults and applies it in one Undo step; the intent tools edit parts of
+it. Its schema is `scct://schema/level-spec`. Unknown fields are refused, and
+every problem is reported at its JSON pointer (`/security/devices/2`).
+
+| Section | What it holds |
+| --- | --- |
+| `format`, `version` | `"scct.level-spec"`, `1` (required). |
+| `map` | `name` (capitals, as in Map Settings) and `file` (default: the first four letters of the name plus `D`). |
+| `units` | `unit` (`uu`, `m` or `ft`) and `uuPerMetre` (100). |
+| `profile` | `draft` or `release`: how strictly it is checked. |
+| `defaults` | `construction` (Carve), `thickness` (16), `material`, `lights` (`rooms`: a ceiling light per room, or `none`), `startsPerTeam` (4). |
+| `storeys`, `zones` | Floors `{id, z, name}`; zones `{id, locationName, spaces, portals}`, each a ZoneInfo with portals where zones meet. |
+| `geometry` | `pieces` (Room, Corridor, Vent, Crawlway, Doorway, Platform, Stairs, Stairs L, Stairs U, Spiral, Ramp; with `size`, `at`, `storey`, `yaw`, `attach`), `doorways`, `vertical` (stairs or lifts between storeys), `brushes` (polygon brushes), `surfaces` (per-face textures), `meshes`. |
+| `spawns` | `spy` and `merc` (`{in, count, facing}` or a list of starts), `toggles`. |
+| `gameplay` | `modes`, `story` (mission, objectives and their triggers, sectors), `diskhunt`, `deathmatch`, `playerCounts`, `targets`. |
+| `security` | `alarms`, `devices`, `camnet`. |
+| `mechanisms` | `doors`, `movers`, `lifts`, `buttons`. |
+| `events` | `links`, `magic`, `messages`, `shakers`, `noises`, `level`, `triggerLights`. |
+| `environment` | `lights`, `sounds`, `volumes`, `ingredients`, `objects`, `vision`, `props`, `fish`, `softbody`, `animated`, `tutorials`. |
+| `ges`, `geTriggers` | Geometric events and the triggers that switch them. |
+| `settings` | Map Settings: `mapName`, `briefSpy`, `briefMerc`, `legend`, `legendInBrief`, `modes`. |
+| `level`, `interface` | Level Properties; the four interface images. |
+| `release`, `existing`, `extra`, `provenance` | Release notes; `existing.refs` (live actors the spec did not make); `extra.operations` (raw map-changes operations); where the level came from (`source`, `frames`, `notes`). |
+
+**Conventions.**
+
+- Lengths are in Unreal units unless `units` says otherwise (about 100 to the
+  metre; a standing player is 180 tall). Z is up, +X east, +Y north.
+- Yaw is in degrees: east 0, north 90. (Engine values use 65,536 per turn.)
+- Every `id` is 1 to 63 letters, digits and underscores, not starting with a
+  digit, unique in the spec ignoring case. It becomes the actor's Tag and its
+  create id, so alarms, links and `{"$ref": id}` name things by id.
+- A position is `[x, y, z]` (z may be `"floor+N"` or `"ceiling-N"`, or left
+  out for the usual height of that thing), `{in: pieceId, u, v, h}` (u and v
+  from -0.5 to 0.5 across and along the piece, h `"floor+N"` or
+  `"ceiling-N"`), `{near: id, offset: [dx, dy, dz]}` or `{doorway: id}`.
+
+### A minimal level
+
+Two spawn rooms, a vault with a terminal, two corridors and a two-camera
+CamNet:
+
+```json
+{
+  "format": "scct.level-spec",
+  "version": 1,
+  "map": {"name": "DEPOT"},
+  "geometry": {
+    "pieces": [
+      {"id": "SpyRoom", "kind": "Room", "size": [768, 768, 256], "at": [-1152, 0]},
+      {"id": "WestHall", "kind": "Corridor", "size": [192, 384, 256], "attach": {"to": "SpyRoom", "side": "east"}},
+      {"id": "Vault", "kind": "Room", "size": [768, 768, 320], "at": [0, 0]},
+      {"id": "EastHall", "kind": "Corridor", "size": [192, 384, 256], "attach": {"to": "Vault", "side": "east"}},
+      {"id": "MercRoom", "kind": "Room", "size": [768, 768, 256], "at": [1152, 0]}
+    ]
+  },
+  "spawns": {
+    "spy": {"in": "SpyRoom", "count": 4, "facing": {"toward": "Vault"}},
+    "merc": {"in": "MercRoom", "count": 4, "facing": {"toward": "Vault"}}
+  },
+  "gameplay": {
+    "modes": ["story"],
+    "story": {
+      "mission": {"id": "Mission", "description": "Hack the vault terminal", "descriptionDef": "Defend the vault"},
+      "objectives": [{
+        "id": "VaultObjective", "name": "Vault",
+        "triggers": [{"id": "VaultTerminal", "kind": "terminal", "at": {"in": "Vault", "u": 0.3}, "dominationCaptureTime": 10}]
+      }]
+    }
+  },
+  "security": {
+    "camnet": [
+      {"id": "CamVault", "camName": "Vault", "at": {"in": "Vault", "u": -0.45, "v": 0.45, "h": "ceiling-32"}, "first": true},
+      {"id": "CamHall", "camName": "East hall", "at": {"in": "EastHall", "h": "ceiling-32"}}
+    ]
+  }
+}
+```
+
+From these few lines the compiler makes:
+
+- five carved Map Design pieces, the corridors flush against the rooms' walls,
+  and a ceiling light in each room;
+- four PlayerStarts a team (TeamNumber 0 for the spies, 1 for the mercs) on a
+  128-unit grid at floor+48, facing the vault;
+- an SMission with GameMode GM_Multi listing the SObjective by name, and the
+  SObjective listing its SComputerObjectiveTrigger, placed at floor+78 with
+  DominationCaptureTime 10;
+- two SCamNetwork cameras linked NextCam/PrevCam in a closed loop, one
+  bFirstCam, collision on;
+- the file name `DepoD`.
+
+`level_spec_validate` reports no errors in either profile and two warnings:
+the map has no Disk Hunt and no Deathmatch mission. `level_build` with
+`mode:"apply"` builds it.
+
+### How it is built
+
+The compiler turns a spec into one plan (`scct://schema/build-plan`) that the
+editor runs:
+
+1. **Before** (not undoable): package loads, texture imports and package
+   saves.
+2. **One Undo step**, in this order, rolled back together if any part fails:
+   - the blockout pieces, in batches of up to 64;
+   - every actor through one Map JSON document (the same import as **View >
+     Import Map from JSON**);
+   - objective player counts;
+   - geometric events (`GE ADD`);
+   - Level Properties;
+   - the Map Design records, so the **Map Design** panel can keep editing the
+     pieces;
+   - the spec itself, stored with the map (the sidecar, `scct://map/spec`).
+3. **After**, each on its own: the geometry build, Map Check, Map Settings and
+   interface textures (when given; they may be unsupported, see
+   [Status](#status-and-known-limitations)), the save and a top-view
+   screenshot.
+
+**Sync.** The map remembers the spec it was built from and which actors and
+brushes each id made. `sync:"incremental"` (the default once a map has a
+stored spec) builds only the difference: new ids are created, changed pieces
+rebuilt, changed actors updated (or recreated when their class, team or Tag
+changes), and ids the spec dropped are deleted. `replace` (the default
+otherwise) deletes what the last build made and builds the spec afresh.
+`merge` lays the given spec over the stored one first, so a fragment adds to
+the level. Deletes only ever touch what an earlier build made.
+
+**Brush mode.** `pieces` (default) makes Map Design pieces you can keep editing
+in the panel. `polygons` makes plain polygon brushes, for per-face textures.
+
+### Examples
+
+| Example | What it shows |
+| --- | --- |
+| `scct://examples/versus-starter` | The Map Design Versus starter layout with the wiki's gaps filled: 4 starts a team, the terminal at floor+78, a three-camera CamNet loop, zones and all three modes. |
+| `scct://examples/three-modes-sectors` | Story in three sectors (zone missions under a chained top mission), doors and alarms. |
+| `scct://examples/diskhunt-arena` | An arena built for Disk Hunt: twelve disks on the floor and on two raised platforms reached by ramps, the score limit and handicap in Map Settings. |
+| `scct://examples/security-camnet` | Three alarms fed by lasers, a camera, a motion sensor, a presence detector and a mine, locking a door and an objective; a four-camera CamNet. |
+| `scct://examples/elevator-3floors` | Three storeys joined by stairs and an SLift with its doors and switches. |
+
+Every example plays all three modes, and all five compile with no errors or
+warnings in both profiles. The meshes and sounds in all but `versus-starter`
+are placeholders in the map's own packages: import real ones before applying
+those examples.
+
+## Building a level from any input
+
+**What the agent does, and what the server does.** The server never interprets
+pictures, video or prose. The agent looks at the images, reads the
+description, decides what the place is (rooms, doors, heights, objectives) and
+writes a spec, recording its sources in `provenance`. The server compiles the
+spec with the wiki's defaults, checks it, builds it and shows the result to
+compare with the source.
+
+The usual loop:
+
+1. `editor_status`; read `scct://wiki/index` and `scct://rules`.
+2. Turn the input into a spec: by hand from a description or from images.
+3. Calibrate the scale (below).
+4. `level_spec_validate` and `plan_render`: fix errors, compare the plan with
+   the source.
+5. `map_file action:"new"`, then `level_build mode:"preview"`, then
+   `mode:"apply"`.
+6. `view_screenshot` (overview, spawns, objectives) against the source.
+7. `map_validate`, fixing with each finding's `fix` or by editing the spec and
+   building again (incremental).
+8. `map_file action:"save_as"`, `editor_restart`, then `map_settings`,
+   `map_validate profile:"release"` and `release`.
+
+The `create_level_from_description` prompt walks an agent through this.
+
+**Scale.** Find something of known size and measure it in pixels: a standing
+player is about 180 units tall and 96 wide, a door about 96 by 128, a metre
+about 100 units, a stair riser at most 35. Then `uuPerPx` = its size in units
+divided by its size in pixels. A spec can also be written in metres or feet
+(`units`).
+
+## Validation
+
+`map_validate` checks the open map, or a spec offline, against the wiki rules.
+`scct://rules` lists every rule with its severity in each profile,
+its wiki page and what it checks.
+
+**Profiles.** `draft` (the default) suits a map in progress. `release` is
+stricter: fewer than 3 starts a team, missing Map Settings and interface
+textures, isolated rooms and objectives the spies cannot reach become errors.
+
+**Groups.** `include` runs only some, and makes only their editor calls:
+
+| Group | What it covers |
+| --- | --- |
+| `wiki` | Spawns, Story, Disk Hunt, Deathmatch, objectives, CamNet, actors, Level Properties, GE measurements. |
+| `design` | The Map Design pieces: layout, traversal (steps, slopes, clearance) and whether objectives can be reached. |
+| `security` | Alarms and detectors and their wiring. |
+| `mapcheck` | RE+'s **Build > Map Check**: zone leaks, starts in the void, floating meshes. |
+| `lighting` | The Lighting Budget. |
+| `release` | Map Settings, the `<Map>-i` interface textures, file and package names, the `.uas`. |
+
+**Findings.** Each has `severity` (error, warning or info), `rule`,
+`wikiPage` (read it as `scct://wiki/<page>`), `message`, `actors` (paths, or
+spec ids offline) and usually `fix`. On the live map the fix is the tool call
+that repairs it, `{tool, args, note?}`. For a spec checked offline
+(`map_validate` with `spec` or `path`, `level_spec_validate`, `level_build`
+with a spec) it is an edit of that spec, `{spec: [{pointer, merge | change}],
+note?}`: the intent tools would change the open map's stored spec instead of
+the document being checked. A fix only the built map can take keeps its tool
+call, marked `live: true`. Errors come first. On the live map, `trace` (on
+by default) measures the built level: the floor under terminals, disks and
+GEs, so heights and clearances are checked for real.
+
+`level_spec_validate` and `level_build` run the same rules on the compiled spec
+before anything reaches the editor.
 
 ## Limits and safety
 
@@ -449,7 +744,8 @@ What the server and the editor never do, whatever the agent asks:
   saved with the map. A name that another kind of package already has is
   refused too: packages of one base name are one package to the engine.
 - **Delete without asking for it.** A call deletes actors only when it says
-  `allowDeletes: true` (`actors_edit`, Map JSON version 3).
+  `allowDeletes: true` (`actors_edit`, Map JSON version 3), or when an
+  incremental build removes actors its own earlier build made.
 - **Discard unsaved work.** `map_file new` and `open` refuse while the map has
   unsaved changes, unless the call says `discardUnsaved`.
 - **Overwrite files.** Replacing another map's file, a package file or an
@@ -495,7 +791,8 @@ computer, one client at a time.
 
 ## Status and known limitations
 
-The server is covered by the model and server test suites (`tools/test_mcp.cmd`,
+The server, the level spec compiler and the rules are covered by the model and
+server test suites (`tools/test_mcp.cmd`,
 [tests/README.md](../tests/README.md#mcp-server)). The editor side (the pipe,
 the ops and the menu) has been checked against a stubbed editor; **the native
 probe and the end-to-end run in a real editor have not passed yet**, so treat
@@ -505,8 +802,9 @@ what follows as the current state, not a promise:
   IDs over the bridge: delete them in GE mode and set IDs with **Set GE ID**.
   `ge.list` knows only the GEs Map Design or the server added. Whether a GE
   added inside a plan is undone with the rest of the plan is not yet confirmed.
-- **Map Settings.** `mapsettings.set` is not supported: set them by hand
-  (right-click empty viewport space > **Map Settings**).
+- **Map Settings.** `mapsettings.set` is not supported: `map_settings` and
+  `level_build` report `applied: false` with a checklist of the values and the
+  manual steps (right-click empty viewport space > **Map Settings**).
   `mapsettings.get` reads what it can from `<Map>-i.utc` on disk. Level
   Properties and the interface textures go through paths RE+ already uses.
 - **Restarting the editor.** `editor_restart` needs the editor to close without
@@ -516,7 +814,21 @@ what follows as the current state, not a promise:
   collision can only be checked, not set. Mesh packages are saved as
   `Packages\StaticMeshes\<Map>_STM.usx`.
 - **Other unsupported ops.** `object.inspect` and `object.set` (non-actor
-  objects) refuse with manual steps.
+  objects) refuse with manual steps. Brush movers are not supported; movers
+  are static meshes.
+- **Engine names not yet confirmed in the editor:** `GM_DiskHunt`,
+  `ActionBeforeLock_None` and the shape of `UseRelativeRotation`. When the
+  editor's schema differs, `level_build` uses its enum choices.
+- **Lifts.** The external door movers' `InitialState TriggerControl`, the car
+  switch riding the car (AttachTag) and the SLiftDoors moving with the car
+  follow the wiki as far as it goes and need an in-game test.
+- **Incremental builds** do not notice edits you made by hand since the last
+  build, and an Undo of a build leaves its Map Design records and stored spec
+  behind (the next build recreates what is missing).
+- **Release.** `release action:"package"` lists the archive but does not write
+  it: use **File > Package Map for Sharing**. Whether a `.uas` holds Interface
+  and `Amb_<Map>` is read from the build log RE+ writes beside it. A map saved
+  under a new name must be reopened before its `.uas` can be built.
 - **Approval** has no time limit in the editor; the window stays until you
   answer or the client goes away.
 - The DLL sends no change events of its own yet: live resources are marked

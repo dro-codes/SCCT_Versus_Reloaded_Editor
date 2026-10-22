@@ -48,3 +48,9 @@ SCCT Versus is built on Unreal 2 technology, so people who know legacy Unreal ma
   - Text is JSON-quoted, such as `"\"Server room\""`.
   - Structs are complete objects.
 - Where a digest says "image-only", the wiki gives that information only in a screenshot. The digest marks it so you do not mistake an absent value for a default.
+
+## How the MCP tools apply this
+
+- Read `scct://wiki/index` first. Then read the digest for each feature you add. Each `map_validate` finding names its page in `wikiPage`.
+- `scct://rules` lists every check `map_validate` and `level_spec_validate` run, with its draft and release severities and its wiki page.
+- Rules: `info.summary`, `authoring.validate`, `authoring.unwritable`, `design.layout`, `design.traversal`, `design.stale-geometry`, `mapcheck.row`

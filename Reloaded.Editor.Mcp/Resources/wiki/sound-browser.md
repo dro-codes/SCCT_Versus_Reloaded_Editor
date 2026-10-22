@@ -84,3 +84,17 @@ How the engine finds it:
 6. Press OK to build the UAS.
 
 The dialogs are image-only.
+
+## How the MCP tools apply this
+
+`release` with `action:"sounds"` (bridge op `uas.build {packages, quality}`) builds `Sounds\<MapFile>.uas`:
+- It always includes `Interface`, plus `Amb_<Map>` when the map has one.
+- Quality defaults to 5.0 and is never below it unless asked.
+- When the headless build is not available, the tool returns the manual Sound Browser steps above.
+
+Importing sounds:
+- Import WAV files in the Sound Browser by hand, into the map-owned `Amb_<Map>` package. Set `Stream` for long loops and music.
+
+Release checks:
+- `release` and `map_validate profile:"release"` check that `Sounds\<MapFile>.uas` exists and includes `Interface` (and the map's own `Amb_` package when there is one).
+- Rules: `release.uas`, `release.package-names`

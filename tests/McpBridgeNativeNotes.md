@@ -140,8 +140,10 @@ code 0. The transcript (`mcp_e2e_transcript.txt`, long strings cut) and the
 exe's stderr (`mcp_stderr.log`) stay in the test folder.
 
 `tests/mcp/e2e/versus-starter.jsonl` follows the plan's end-to-end list:
-initialize, tools/list (14 tools, schemas, annotations), `editor_status`,
-`map_file new`, `map_build all`, `map_query summary`, `map_file save_as` (`VersD`),
+initialize, tools/list (27 tools, schemas, annotations), resources and
+prompts, `editor_status`, `map_file new`, `level_build` apply of
+`Resources/examples/versus-starter.level.json`, `map_build all`, `map_validate
+release` (no errors), `map_query summary`, `map_file save_as` (`VersD`),
 `editor_restart`, `map_query summary` again (the same counts), `view_screenshot`
 (a PNG over 256 px), then a one-light `map_changes_apply`, `editor_undo` and a
 summary showing the map as before.
@@ -151,7 +153,7 @@ save:{variable: path}, files:[{path, exists, minBytes}], timeoutSeconds,
 stopOnFail, progress}`. The runner adds `jsonrpc` and `id` (none for
 `notifications/...`), and `_meta.progressToken` when `progress` is true.
 `${name}` is a value the runner sets (`Repository`, `TestRoot`, `TestSystem`,
-`MapsEd`, `MapFile`, `EditorPid`) or a step saved; a string
+`MapsEd`, `MapFile`, `ExampleSpec`, `EditorPid`) or a step saved; a string
 that is exactly `${name}` keeps the value's type. An expectation is `{path,
 ...}` with any of `exists`, `equals`, `notEquals`, `gt`, `ge`, `lt`, `le`,
 `matches`, `type`, `oneOf`, `contains`, `notContains`, `length`, `minLength`,
@@ -225,5 +227,6 @@ refuses keys that differ only in case.
 - `tools/run_mcp_e2e.ps1 -CheckScripts` runs under pwsh 7 on Linux, and the
   script's own `Invoke-Steps` was run against a Linux build of
   Reloaded.Editor.Mcp (no editor) over stdio: initialize, tools/list,
-  resources, prompts, `editor_status` unconnected, saved values, a JSON-RPC error, and a failing check
+  resources, prompts, `editor_status` unconnected, `level_build` preview with
+  progress and a PNG, saved values, a JSON-RPC error, and a failing check
   reported. The embedded C# compiles as C# 5 with no warnings.

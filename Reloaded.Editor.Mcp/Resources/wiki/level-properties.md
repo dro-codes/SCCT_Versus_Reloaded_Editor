@@ -55,3 +55,19 @@ Tip: the UnrealEd viewport can switch to Motion Tracking Vision, so you can prev
 ## Also in Level Properties (from other pages)
 
 - `GEActivationMask`: which GE mask is active when the level begins. GEs with no ID are always enabled. See `scct://wiki/geometric-events`.
+
+## How the MCP tools apply this
+
+- `map_settings` with `level` (the spec's `level` section: `song`, `deathPawnHeight`, `motionTracking: standard|enhanced`, `events[{event, sendAtTime}]`, `geActivationMask`) writes these through the bridge op `settings.edit`.
+  - `settings.edit` checks the LevelInfo snapshot first.
+  - **The headings above (`Audio`, `Death`, `Events`, `MapSnapshotInfo`, `MotionTrackingTweak`) are property-sheet categories, not properties.** The properties are written by their own names: `Song`, `fDeathPawnHeight`, `Event`, `SendAtTime`, `SnapshotCamera`, `MapFloors`, `MTVOffset`, `MTVSlope` and `GEActivationMask`, through ImportText where the sheet does not offer one.
+- `motionTracking: "standard"` writes `MTVOffset` 52 and `MTVSlope` 85, and `"enhanced"` writes 8 and 8.
+- Level events: a LevelInfo has **one** `Event` and one `SendAtTime`, a whole number of seconds (an int property; a fraction is rounded, with a warning).
+  - One level event is written as that `Event` and `SendAtTime`.
+  - Several go through one `SMagicEvent` (`LevelEvents`): the LevelInfo sends it at the earliest time, and it sends each event delayed by how much later that one is due.
+  - **So the later events chain off the earliest one.** If the match's time limit is shorter than the earliest `|sendAtTime|` (for example `-600` in a 5-minute match), the earliest never fires, and none of the others do either. Give the earliest event a time every match reaches, or keep one level event.
+  - An `SMagicEvent` delays an event by at most 86400 seconds, so a level event due more than a day after the earliest is an error at its `sendAtTime` and is left out.
+- `map_query what:"level"` reads the current values.
+- `map_settings` with `minimap` (bridge op `minimap.apply`) fills `SnapshotCamera` and `MapFloors` (the `MapSnapshotInfo` category) from the RE+ minimap tool.
+- `map_validate` warns on a `SendAtTime` of 0 or more. It errors when anything players need lies below `fDeathPawnHeight`.
+- Rules: `level.death-height`, `level.send-at-time`, `level.motion-tracking`, `events.dangling`

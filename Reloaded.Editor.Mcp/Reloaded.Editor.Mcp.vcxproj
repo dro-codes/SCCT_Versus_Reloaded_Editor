@@ -53,7 +53,8 @@
     <CopyCppRuntimeToOutputDir>false</CopyCppRuntimeToOutputDir>
     <OutDir>$(SolutionDir)bin\</OutDir>
   </PropertyGroup>
-  <!-- The server needs no packages: nlohmann is in Reloaded.Editor\Include. -->
+  <!-- The server needs no packages: nlohmann is in Reloaded.Editor\Include, and
+       zlib's job (PNG) is done by ImageCodec.h. -->
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
@@ -67,6 +68,7 @@
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalIncludeDirectories>..\Reloaded.Editor;..\Reloaded.Editor\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- /bigobj: the spec compiler's translation units exceed 65,279 sections. -->
       <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -130,21 +132,43 @@
     <ClCompile Include="Prompts.cpp" />
     <ClCompile Include="Tools\SessionTools.cpp" />
     <ClCompile Include="Tools\QueryTools.cpp" />
+    <ClCompile Include="Tools\ValidateTools.cpp" />
+    <ClCompile Include="Tools\SpecTools.cpp" />
+    <ClCompile Include="Tools\IntentTools.cpp" />
     <ClCompile Include="Tools\EscapeTools.cpp" />
+    <ClCompile Include="Tools\ReleaseTools.cpp" />
+    <ClCompile Include="..\Reloaded.Editor\WorkflowModel.cpp" />
+    <ClCompile Include="..\Reloaded.Editor\RecoveredPolygonImport.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BridgeClient.h" />
     <ClInclude Include="Embedded.gen.h" />
     <ClInclude Include="Embedded.h" />
     <ClInclude Include="FakeBridge.h" />
+    <ClInclude Include="GeometricEventModel.h" />
+    <ClInclude Include="ImageCodec.h" />
+    <ClInclude Include="LevelRulesModel.h" />
+    <ClInclude Include="LevelSpecCompiler.h" />
+    <ClInclude Include="LevelSpecModel.h" />
     <ClInclude Include="McpProtocolModel.h" />
     <ClInclude Include="McpServer.h" />
     <ClInclude Include="McpTool.h" />
+    <ClInclude Include="PlanRender.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Tools\Common.h" />
+    <ClInclude Include="..\Reloaded.Editor\CameraNetworkModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\LevelSnapshotModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MagicEventModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MapAuthoringModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\MapDesignModel.h" />
     <ClInclude Include="..\Reloaded.Editor\McpBridgeModel.h" />
     <ClInclude Include="..\Reloaded.Editor\McpGuardModel.h" />
     <ClInclude Include="..\Reloaded.Editor\McpPlanModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\ObjectivePlayersModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\RecoveredBspGeometry.h" />
+    <ClInclude Include="..\Reloaded.Editor\RecoveredPolygonImport.h" />
+    <ClInclude Include="..\Reloaded.Editor\SecurityModel.h" />
+    <ClInclude Include="..\Reloaded.Editor\StageModel.h" />
     <ClInclude Include="..\Reloaded.Editor\Version.h" />
     <ClInclude Include="..\Reloaded.Editor\WorkflowModel.h" />
   </ItemGroup>

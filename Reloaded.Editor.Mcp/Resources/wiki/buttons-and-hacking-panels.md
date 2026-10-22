@@ -26,3 +26,17 @@ The **`SInterrupteur`** actor (French for "switch") is used for **every button a
 | `UseRelativeRotation` | Rotation offset of the interaction position. **Usually `32768`**, which makes the player face the object. Rarely needs changing. |
 
 Elevator switches: set `TriggerMethode` to `TriggerToggle`, and set initial usability by the lift's starting floor. See `scct://wiki/elevators`.
+
+## How the MCP tools apply this
+
+`mechanisms` with `buttons[{id, kind: button|panel, at, targets, hackTime, usableBy}]`, or a door's `trigger:{kind: "button"|"panel"}`, creates an `SInterrupteur` with the wiki defaults:
+- `fInteractionHeight` `120.0` and `fInteractionRadius` `60.0`, with `bInteractInFront` `True`.
+- `UseRelativeLocation`:
+  - button: `{"X":"55.0","Y":"0.0","Z":"0.0"}`;
+  - panel: `{"X":"39.5","Y":"3.0","Z":"0.0"}`, with `iHackingTime` from `hackTime`.
+- `UseRelativeRotation` `{"Pitch":"0","Yaw":"32768","Roll":"0"}`: a half turn, so the player faces the object.
+- `UsableBy` from `usableBy`: `spy` → `U_SPAWNOFFENSE`, `merc` → `U_SPAWNDEFENSE`, `both` → `U_BOTH`.
+- Its `Event` is the target's Tag. For several targets, an SMagicEvent fans out.
+
+A merc-usable panel with `hackTime > 0` gets a warning, because the wiki calls it unsupported.
+- Rules: `ingredients.interaction`, `events.dangling`

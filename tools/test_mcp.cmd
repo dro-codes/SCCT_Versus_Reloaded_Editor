@@ -2,8 +2,8 @@
 setlocal
 rem The MCP server's test suites. Run from an x86 Native Tools Command Prompt
 rem for Visual Studio. tools/test_mcp.sh is the same list for g++; keep the two
-rem in step. /utf-8: the server is built with it, and the tests compare UTF-8
-rem text.
+rem in step. /bigobj: the spec compiler's units exceed 65,279 sections; /utf-8:
+rem the server is built with it, and the tests compare UTF-8 text.
 pushd "%~dp0.."
 rem Embedded.gen.h is generated, not committed: write it from
 rem Reloaded.Editor.Mcp\Resources the way the Visual Studio build does.
@@ -29,17 +29,49 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpProtocolMode
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpProtocolModelTests.exe"
 if not "%errorlevel%"=="0" goto failed
-cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\PromptsTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\PromptsTests.exe"
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\LevelSpecModelTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\LevelSpecModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\LevelSpecModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\LevelSpecCompilerTests.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\LevelSpecCompilerTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\LevelSpecCompilerTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\LevelRulesModelTests.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\LevelRulesModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\LevelRulesModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\GeometricEventModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\GeometricEventModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\GeometricEventModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\ImageCodecTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ImageCodecTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\ImageCodecTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\PlanRenderTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\PlanRenderTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\PlanRenderTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\PromptsTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\PromptsTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\PromptsTests.exe"
 if not "%errorlevel%"=="0" goto failed
-cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpServerTests.cpp Reloaded.Editor.Mcp\McpServer.cpp Reloaded.Editor.Mcp\Resources.cpp Reloaded.Editor.Mcp\BridgeClient.cpp Reloaded.Editor.Mcp\Tools\SessionTools.cpp Reloaded.Editor.Mcp\Tools\QueryTools.cpp Reloaded.Editor.Mcp\Tools\EscapeTools.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpServerTests.exe"
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpServerTests.cpp Reloaded.Editor.Mcp\McpServer.cpp Reloaded.Editor.Mcp\Resources.cpp Reloaded.Editor.Mcp\BridgeClient.cpp Reloaded.Editor.Mcp\Tools\SessionTools.cpp Reloaded.Editor.Mcp\Tools\QueryTools.cpp Reloaded.Editor.Mcp\Tools\EscapeTools.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpServerTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpServerTests.exe"
 if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpSpecToolsTests.cpp Reloaded.Editor.Mcp\Tools\SpecTools.cpp Reloaded.Editor.Mcp\Tools\IntentTools.cpp Reloaded.Editor.Mcp\Tools\ValidateTools.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpSpecToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\McpSpecToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 tests\McpReleaseToolsTests.cpp Reloaded.Editor.Mcp\Tools\ReleaseTools.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpReleaseToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\McpReleaseToolsTests.exe"
+if not "%errorlevel%"=="0" goto failed
 rem The whole server from the sources Reloaded.Editor.Mcp.vcxproj lists, which
-rem also compiles main.cpp under /W4 /WX.
-cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 Reloaded.Editor.Mcp\main.cpp Reloaded.Editor.Mcp\McpServer.cpp Reloaded.Editor.Mcp\Resources.cpp Reloaded.Editor.Mcp\BridgeClient.cpp Reloaded.Editor.Mcp\Prompts.cpp Reloaded.Editor.Mcp\Tools\SessionTools.cpp Reloaded.Editor.Mcp\Tools\QueryTools.cpp Reloaded.Editor.Mcp\Tools\EscapeTools.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpServerSelfTest.exe" /link advapi32.lib shell32.lib
+rem also compiles main.cpp and ValidateTools.cpp under /W4 /WX.
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 /bigobj /utf-8 Reloaded.Editor.Mcp\main.cpp Reloaded.Editor.Mcp\McpServer.cpp Reloaded.Editor.Mcp\Resources.cpp Reloaded.Editor.Mcp\BridgeClient.cpp Reloaded.Editor.Mcp\Prompts.cpp Reloaded.Editor.Mcp\Tools\SessionTools.cpp Reloaded.Editor.Mcp\Tools\QueryTools.cpp Reloaded.Editor.Mcp\Tools\ValidateTools.cpp Reloaded.Editor.Mcp\Tools\SpecTools.cpp Reloaded.Editor.Mcp\Tools\IntentTools.cpp Reloaded.Editor.Mcp\Tools\EscapeTools.cpp Reloaded.Editor.Mcp\Tools\ReleaseTools.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpServerSelfTest.exe" /link advapi32.lib shell32.lib
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\McpServerSelfTest.exe" --version
 if not "%errorlevel%"=="0" goto failed

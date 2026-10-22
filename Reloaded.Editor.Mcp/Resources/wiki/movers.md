@@ -130,3 +130,32 @@ Special Behaviors let a mover respond differently depending on **which actor tri
 | `EventFromActor` | When this actor triggers the mover, the mover uses the associated Special Behavior settings instead of the defaults. |
 
 Example: a hacking panel or button (`SInterrupteur`) could keep a door open longer than the same door opened by an `SPresenceTrigger`. The rest of the Special Behaviors struct is image-only.
+
+## How the MCP tools apply this
+
+`mechanisms` (spec `mechanisms.doors` / `movers` / `buttons`, built by `level_build`) creates movers from a static mesh.
+
+Doors:
+- `Key 0` is closed. `Key 1` comes from `open:{offset}` or `{yaw}`, written as `KeyPos`/`KeyRot`.
+- `NumKeys` is 2.
+- `MoveTime` and `StayOpenTime` come from the spec.
+- RE+ uses `InitialState TriggerOpenTimed` and `MoverEncroachType ME_WaitAndRetryWhenEncroach` by default, and leaves the mover at `Key 0`.
+
+Triggers (`trigger:{kind}`):
+- `presence`: an `SPresenceTrigger` whose `Event` is the door's Tag, with `CollisionRadius`/`CollisionHeight`.
+- `button` or `panel`: an `SInterrupteur`. See `scct://wiki/buttons-and-hacking-panels`.
+- `event`: any Tag.
+
+Doors a story sector opens (`gameplay.story.sectors[].actions` `{kind: "open", target, hold}`):
+- With `hold` (the default) the door becomes `TriggerToggle`, so the sector's one Trigger leaves it open.
+- **Every other Trigger would toggle it shut again.** So a held door that something else also opens is an error (`story.action-door-trigger`): its own `presence`, `button` or `panel` trigger, a button's `targets`, an `events.links` link, an alarm's `outputs`, or another sector that holds it open.
+  - Give that door `trigger:{kind:"event"}`, so only the sector opens it, and the other team a door of its own (`three-modes-sectors` puts a merc hatch beside each shutter).
+  - Or set `hold: false`: the door then opens for its `stayOpen` time and stays `TriggerOpenTimed`.
+
+Locks and lifts:
+- An alarm's `lockMovers` puts a door into `MoversToLock`.
+- Elevators use `lifts` (see `scct://wiki/elevators`).
+
+Static-mesh movers only: brush movers are out of scope (spike S10).
+
+- Rules: `movers.static-mesh`, `events.dangling`

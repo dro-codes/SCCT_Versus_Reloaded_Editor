@@ -51,3 +51,25 @@ A release archive contains:
 > **WARNING:** **if you lose your `MapsEd` map file, you can no longer change the map in UnrealEd.** The file generated in `Packages\Maps` **cannot be converted back** into a `MapsEd` file.
 > - Back up your `MapsEd` file, or include it in the release archive.
 > - Losing the `Maps` file is not a problem: the `MapsEd` file can easily generate a new one in the editor.
+
+## How the MCP tools apply this
+
+`map_file action:"save_as"` names new maps by the convention:
+- First 4 letters of `mapName` + `D` (`Aquarius` → `AquaD`).
+- Saved in `Packages\MapsEd`, ASCII, without spaces.
+- Saves keep backups. The MapsEd file is never deleted.
+
+Package writes:
+- Every package the tools write is **map-owned**. Texture and mesh imports, package saves and a map-changes document's `texture` and `save` ops go only into `<Map>_<name>` packages such as `<Map>_TXT` and `<Map>_STM`; the interface textures go into `<Map>-i`; `release` builds `Sounds\<Map>.uas`. Sounds for `Amb_<Map>` are imported by hand in the Sound Browser.
+- None of these is written before the map's first save, since they are named after its file.
+- Stock packages and maps are never written or renamed.
+- Duplicate base names across folders are refused.
+
+`release` checks and assembles the release:
+- `.uas` built with `Interface` (`scct://wiki/sound-browser`);
+- `<Map>-i.utc` present and any `-i.utx` noted for deletion;
+- package names unique;
+- the archive file list above.
+
+`map_validate profile:"release"` reports naming problems. Given the `release` check's `findings` in its `release` argument, it also reports the files, dependencies and optimise suggestions only that check can see.
+- Rules: `release.package-names`, `release.file-name`, `release.naming-convention`, `release.uas`, `interface.textures`, `release.files`, `release.dependencies`, `release.optimise`

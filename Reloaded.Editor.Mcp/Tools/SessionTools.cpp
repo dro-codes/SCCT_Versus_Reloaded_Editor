@@ -180,7 +180,7 @@ namespace
                 next.push_back(Next("map_file", "No map is open: start one with action new, or open an existing .sdc.", {{"action", "new"}}));
             else
                 next.push_back(Next("map_query", "See what the map holds.", {{"what", "summary"}}));
-            next.push_back({{"read", "scct://wiki/index"}, {"why", "Read the wiki digests before designing: every gameplay default and check comes from the wiki."}});
+            next.push_back({{"read", "scct://wiki/index"}, {"why", "Read the wiki digests and scct://rules before designing: every gameplay default and check comes from the wiki."}});
         }
         catch (const Bridge::Error& e)
         {
@@ -428,6 +428,7 @@ namespace
                     }
                     o.extra["undo"] = {{"call", call}, {"steps", undo.value("steps", 0)}, {"how", "editor_undo with call " + std::to_string(call) + " reverts this whole call while it is the newest change"}};
                 }
+                o.next.push_back(Next("map_validate", "Check the map against the wiki rules."));
                 return Done(c, o, false);
             }
             if (waited >= timeout)
@@ -521,6 +522,7 @@ namespace
             const auto result = Call(c, "map.new", {{"discard", discard}}, label, dry, 300000);
             o.summary = dry ? "Dry run: would start a new, empty map." : "Started a new, empty map. It has no file until map_file save_as.";
             o.extra = {{"state", result}};
+            o.next.push_back(Next("level_spec_validate", "Write the level as a scct.level-spec (scct://schema/level-spec, scct://examples/versus-starter) and check it offline."));
             o.next.push_back(Next("map_file", "Name and save the map early: the wiki's Map Settings only work once a new map has been saved, the editor restarted and the map reopened.", {{"action", "save_as"}}));
             return Done(c, o, false);
         }
@@ -549,6 +551,7 @@ namespace
             o.extra = {{"file", file}, {"result", result}};
             if (!dry && action == "save_as" && state.value("mapFile", std::string()).empty())
                 o.next.push_back(Next("editor_restart", "The wiki (map-settings): Map Settings work only after a new map has been saved, the editor closed and the map reopened."));
+            o.next.push_back(Next("map_validate", "Check the map against the wiki rules before sharing it.", {{"profile", "release"}}));
             return Done(c, o, false);
         }
         return Fail("action is new, open, save or save_as.");
@@ -609,6 +612,7 @@ namespace
         }
         o.extra = report;
         o.changed.push_back(what == "all" ? "geometry, lighting and paths" : "geometry (BSP)");
+        o.next.push_back(Next("map_validate", "Check the map against the wiki rules."));
         o.next.push_back(Next("view_screenshot", "Look at the result.", {{"preset", "overview"}}));
         return Done(c, o, false);
     }
@@ -741,7 +745,7 @@ void RegisterSessionTools(Registry& registry)
         t.description =
             "Rebuilds the map, then runs Map Check. what geometry (default) rebuilds BSP after brushes or blockout pieces change, as Build Geometry does; "
             "all runs the editor's full build (geometry, lighting, paths) without the Lighting Budget prompt, which can take minutes on a large map. "
-            "Returns the build log's tail and the Map Check rows (errors first). Builds are not Undo steps.";
+            "Returns the build log's tail and the Map Check rows (errors first). Builds are not Undo steps. Follow with map_validate.";
         t.inputSchema = S::Mutating(S::Input({{"what", S::Enum({"geometry", "all"}, "Default geometry.")},
                                               {"check", S::Boolean("Run Map Check afterwards. Default true.")}}));
         t.outputSchema = S::MutationOutput();

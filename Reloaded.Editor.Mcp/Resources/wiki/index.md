@@ -6,6 +6,9 @@ These digests are curated, faithful copies of the SCCT Versus Reloaded Editor wi
 - Class, property and enum names are verbatim, including the wiki's spellings (`TriggerMethode`, `strenght`, `bInitialyOn`).
 - Every rule, number and gotcha is kept.
 - Values the wiki shows only in screenshots are marked "image-only".
+- Each page ends with **How the MCP tools apply this**: which tools write those actors and which `map_validate` rules check them.
+
+The full rule list, with severities, is `scct://rules`.
 
 ## Pages
 
@@ -39,11 +42,11 @@ These digests are curated, faithful copies of the SCCT Versus Reloaded Editor wi
 
 ## Minimum viable Versus map checklist
 
-A map that loads and plays in all three modes without softlocks. Each item names its page.
+A map that loads and plays in all three modes without softlocks. Each item names its page; tick each one with `map_validate profile:"release"`.
 
 1. **Geometry**
    - Carved, connected spaces. Spies must reach every objective from their starts.
-   - Built: `map_build`.
+   - Built: `map_build`. Rules `design.layout`, `layout.unreachable`, `design.stale-geometry`.
 2. **Spawns** (`spawn-points`)
    - At least **3** `PlayerStart`s with `TeamNumber 0` (Spy) and **3** with `TeamNumber 1` (Merc). RE+ places 4 each.
    - Not inside geometry.
@@ -101,6 +104,33 @@ A map that loads and plays in all three modes without softlocks. Each item names
 
 ## Key additions → tool
 
-| You want to add | Wiki page | MCP tool |
+| You want to add | Wiki page | MCP tool (spec section for `level_build`) |
 |---|---|---|
-| Anything / direct property edits | (any) | `actors_edit`, `map_changes_apply` |
+| Rooms, corridors, vents, stairs, doorways, lift shafts, polygon brushes | (Map Design, `scct://docs/map-design`) | `blockout` (`geometry`) |
+| `PlayerStart` / `STriggerPlayerStart` | `spawn-points` | `gameplay` (`spawns`) |
+| `SMission`, `SObjective`, terminals, flags + drop zones, bombs, sectors | `game-modes` | `gameplay` (`gameplay.story`) |
+| `SDisk` + Disk Hunt mission | `game-modes` | `gameplay` (`gameplay.diskhunt`) |
+| Deathmatch mission (security off at reset) | `game-modes` | `gameplay` (`gameplay.deathmatch`) |
+| `SAlarm`, `SLaserTrigger`, `SCamera`, `SVolumetricSensor` + `Volume`, mines, presence detectors | `alarms` | `security` (`security.alarms`, `security.devices`) |
+| `SCamNetwork` loop | `level-ingredients` | `security` (`security.camnet`) |
+| Doors (`Mover`), `SPresenceTrigger`, `SInterrupteur` buttons/panels | `movers`, `buttons-and-hacking-panels` | `mechanisms` (`mechanisms.doors`, `buttons`) |
+| `SLift`, `SLiftDoor` | `elevators` | `mechanisms` (`mechanisms.lifts`) |
+| Tag/Event links, `SMagicEvent`, `SMessageTrigger`, `SShaker`, `SNotifyNoise`, level events, `STriggerLight` | `events`, `level-properties`, `gameplay-objects` | `events` (`events`) |
+| Lights (static, Echelon, coronas) | `lighting` | `environment` (`environment.lights`) |
+| `SoundTrigger`, `MusicTrigger`, `SAmbientSoundTrigger` | `sound-actors` | `environment` (`environment.sounds`) |
+| `ZoneInfo` names, `Volume`, `SDamageVolume`, `ERainVolume`, `BlockingVolume` | `zones-and-volumes` | `environment` (`zones`, `environment.volumes`) |
+| `SAmmoStock`, `SInfirmary`, `SVitre`, `SExtincteur`, `SProjoFixe`, `SSprinkler`, `SFlaque`, `SBallTrap` | `level-ingredients` | `environment` (`environment.ingredients`) |
+| `SGamePlayObject`, static meshes | `gameplay-objects`, `static-meshes` | `environment` (`environment.objects`, `geometry.meshes`) |
+| Vision mode tweaks | `vision-mode-properties` | `environment` (`environment.vision`) |
+| SoftBody cloth, `SAnimatedMesh`, fish, tutorials | `softbody-actors`, `animated-meshes`, `fish`, `map-tutorials` | `environment` (`softbody`, `animated`, `fish`, `tutorials`) |
+| Ledge, hand-over-hand, pipe, ladder, zipline, fence, pole; `SGETrigger` | `geometric-events` | `geometric_events` (`ges`, `geTriggers`) |
+| Level Properties (`Song`, `fDeathPawnHeight`, `Event`/`SendAtTime`, `MTVOffset`/`MTVSlope`, `GEActivationMask`; `SnapshotCamera`/`MapFloors` through `minimap`) | `level-properties` | `map_settings` (`level`, `minimap`) |
+| `SMapSettings`, interface textures, minimap | `map-settings` | `map_settings` (`settings`, `interface`) |
+| `.uas`, package checks, release archive | `sound-browser`, `map-packaging` | `release` (`release`) |
+| Anything else / direct property edits | (any) | `actors_edit`, `map_changes_apply` |
+
+## How the MCP tools apply this
+
+- The workflow loop is in `scct://docs/tools`: `editor_status` → read wiki/rules → spec → `level_spec_validate` + `plan_render` → `level_build` (preview, then apply) → `map_build` → `map_validate` → fix → save, restart, Map Settings → `release`.
+- The prompts (`create_level_from_description`, `versus_starter`, `review_map_against_wiki`, ...) embed the relevant digests and the rules.
+- Rules: `info.summary`

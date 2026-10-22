@@ -112,7 +112,7 @@ void Handshake()
     Check(init.at("serverInfo").at("name")=="scct-reloaded" && init.at("serverInfo").at("title")=="SCCT Versus Reloaded Editor (RE+)" && init.at("serverInfo").at("version")=="test-1","server info");
     Check(init.at("capabilities").at("tools").at("listChanged")==true && init.at("capabilities").at("resources").at("subscribe")==true && init.at("capabilities").contains("logging"),"capabilities");
     const auto instructions=init.at("instructions").get<std::string>();
-    for(const char* step:{"editor_status","scct://wiki/index","map_file"})
+    for(const char* step:{"editor_status","scct://wiki/index","scct://rules","level_spec_validate","level_build","map_validate","map_file"})
         Check(instructions.find(step)!=std::string::npos,"instructions walk through the workflow");
     Check(h.Result("initialize",{{"protocolVersion","1999-01-01"}}).at("protocolVersion")=="2025-06-18","unknown versions get 2025-06-18");
     Check(h.Result("initialize",{{"protocolVersion","2024-11-05"}}).at("protocolVersion")=="2024-11-05","old versions kept");
@@ -189,7 +189,7 @@ void Lists()
         Check(t.contains("annotations") && t.at("annotations").contains("readOnlyHint"),"annotations");
     }
     for(const char* name:{"editor_status","editor_launch","editor_restart","editor_undo","approval_wait","editor_log","map_file","map_build",
-                          "map_query","view_screenshot","actors_edit","map_changes_apply","workflow_request","editor_exec"})
+                          "map_query","view_screenshot","plan_render","actors_edit","map_changes_apply","workflow_request","editor_exec"})
         Check(names.count(name)!=0,"tool listed");
     for(const auto& t:tools)
     {
@@ -204,12 +204,12 @@ void Lists()
     auto resources=h.Result("resources/list").at("resources");
     std::set<std::string> uris;
     for(const auto& r:resources)uris.insert(r.at("uri").get<std::string>());
-    for(const char* uri:{"scct://editor/state","scct://map/summary","scct://map/validation","scct://map/screenshot/latest"})
+    for(const char* uri:{"scct://rules","scct://editor/state","scct://map/summary","scct://map/validation","scct://map/spec","scct://map/screenshot/latest"})
         Check(uris.count(uri)!=0,"resource listed");
     auto templates=h.Result("resources/templates/list").at("resourceTemplates");
     std::set<std::string> patterns;
     for(const auto& r:templates)patterns.insert(r.at("uriTemplate").get<std::string>());
-    Check(patterns.count("scct://wiki/{page}") && patterns.count("scct://schema/{name}") && patterns.count("scct://map/actor/{path}"),"templates listed");
+    Check(patterns.count("scct://wiki/{page}") && patterns.count("scct://schema/{name}") && patterns.count("scct://examples/{name}") && patterns.count("scct://map/actor/{path}"),"templates listed");
 
     auto prompts=h.Result("prompts/list").at("prompts");
     Check(prompts.size()==1 && prompts[0].at("name")=="versus_starter" && prompts[0].at("arguments")[0].at("required")==true,"prompts listed");
@@ -282,6 +282,8 @@ void Queries()
     auto design=h.Call("map_query",{{"what","design"}});
     const auto& item=design.at("structuredContent").at("items")[0];
     Check(design.at("structuredContent").at("brushes")==1 && item.at("bounds").at("max")[1]==128 && !item.contains("edges") && item.at("edgeCount")==2,"design bounds instead of edges");
+    auto plan=h.Call("plan_render");
+    Check(plan.at("isError")==false && plan.at("structuredContent").at("pieces")==1 && plan.at("structuredContent").at("actors")==1,"live plan scene");
 }
 void Screenshot()
 {
@@ -300,7 +302,7 @@ void Mutations()
     Harness h;
     h.fake.On("editor.state",OpenState());
     h.Result("resources/subscribe",{{"uri","scct://editor/state"}});
-    h.Result("resources/subscribe",{{"uri","scct://wiki/index"}});
+    h.Result("resources/subscribe",{{"uri","scct://rules"}});
     h.fake.Progress("design.build",Json::array({{{"t","progress"},{"stage","building"}}}));
     h.fake.On("design.build",Json(true));
     h.fake.On("mapcheck.run",Json{{"rows",Json::array({{{"severity","warning"},{"message","Brush is not closed"}},{{"severity","error"},{"message","No PlayerStart"}}})},{"summary","1 error"}});
@@ -403,24 +405,28 @@ void Escape()
 void Resources()
 {
     Harness h;
+    auto rules=h.Result("resources/read",{{"uri","scct://rules"}});
+    Check(rules.at("contents")[0].at("mimeType")=="text/markdown" && !rules.at("contents")[0].at("text").get<std::string>().empty(),"rules");
     h.fake.On("editor.state",OpenState());
     auto state=h.Result("resources/read",{{"uri","scct://editor/state"}});
     Check(Json::parse(state.at("contents")[0].at("text").get<std::string>()).at("revision")==11,"live state");
     h.fake.On("view.screenshot",Json{{"png","AAAA"},{"width",4},{"height",4}});
     auto shot=h.Result("resources/read",{{"uri","scct://map/screenshot/latest"}});
     Check(shot.at("contents")[0].at("blob")=="AAAA" && shot.at("contents")[0].at("mimeType")=="image/png","screenshot blob");
+    h.fake.On("mcp.sidecar.get",Json{{"sidecar",nullptr}});
+    Check(h.Result("resources/read",{{"uri","scct://map/spec"}}).at("contents")[0].at("text")=="null","no spec yet");
     h.fake.On("mapcheck.run",Json{{"rows",Json::array()}});
-    Check(h.Request("resources/read",{{"uri","scct://map/validation"}}).contains("result"),"validation runs Map Check");
+    Check(h.Request("resources/read",{{"uri","scct://map/validation"}}).contains("result"),"validation falls back to Map Check without map_validate");
     h.fake.connected=false;
     auto offline=h.Request("resources/read",{{"uri","scct://map/summary"}});
     Check(offline.at("error").at("code")==-32603 && offline.at("error").at("message").get<std::string>().find("editor_launch")!=std::string::npos,"live reads explain a missing editor");
     Check(h.Request("resources/read",{{"uri","scct://wiki/no-such-page"}}).at("error").at("code")==-32002,"template miss is not found");
-    // A #fragment names a section of a document, such as
-    // scct://docs/tools#errors: the whole resource is read.
+    // A #fragment names a section of a document (the tool descriptions point
+    // at scct://docs/tool-reference#<tool>): the whole resource is read.
     h.fake.connected=true;
-    const auto whole=h.Result("resources/read",{{"uri","scct://docs/tools"}});
-    const auto section=h.Result("resources/read",{{"uri","scct://docs/tools#errors"}});
-    Check(section.at("contents")[0].at("text")==whole.at("contents")[0].at("text") && section.at("contents")[0].at("uri")=="scct://docs/tools","a #fragment reads the whole document");
+    const auto whole=h.Result("resources/read",{{"uri","scct://docs/tool-reference"}});
+    const auto section=h.Result("resources/read",{{"uri","scct://docs/tool-reference#mechanisms"}});
+    Check(section.at("contents")[0].at("text")==whole.at("contents")[0].at("text") && section.at("contents")[0].at("uri")=="scct://docs/tool-reference","a #fragment reads the whole document");
     Check(Json::parse(h.Result("resources/read",{{"uri","scct://editor/state#revision"}}).at("contents")[0].at("text").get<std::string>()).at("revision")==11,"live resources take a fragment too");
     const auto missing=h.Request("resources/read",{{"uri","scct://docs/no-such#x"}});
     Check(missing.at("error").at("code")==-32002 && missing.at("error").at("data").at("uri")=="scct://docs/no-such#x","a missing resource is not found, under the URI asked for");
@@ -806,13 +812,18 @@ void OpsDoc()
     std::set<std::string> uris;
     const auto resources=h.Result("resources/list").at("resources");
     for(const auto& r:resources)uris.insert(r.at("uri").get<std::string>());
-    Check(uris.count("scct://docs/ops") && uris.count("scct://docs/tools"),"the docs are resources");
+    Check(uris.count("scct://docs/ops") && uris.count("scct://docs/tool-reference") && uris.count("scct://docs/tools"),"the docs are resources");
     Check(Text(h.Call("workflow_request",{{"op","no.such"}})).find("scct://docs/ops")!=std::string::npos,"an unknown op points at the list");
     h.fake.On("editor.state",OpenState());
     Check(h.Call("editor_status").at("structuredContent").at("bridge").at("opsDoc")=="scct://docs/ops","editor_status points at it");
     const auto listed=h.Result("tools/list").at("tools");
     for(const auto& t:listed)
         if(t.at("name")=="workflow_request")Check(t.at("description").get<std::string>().find("scct://docs/ops")!=std::string::npos,"so does workflow_request");
+    // plan_render and the other spec readers take a path.
+    auto plan=h.Call("plan_render",{{"path","scct://examples/versus-starter"}});
+    Check(plan.at("isError")==false && plan.at("structuredContent").at("source").get<std::string>().find("versus-starter")!=std::string::npos && plan.at("content").size()==2,"plan_render draws a spec from a path");
+    auto wrong=h.Call("plan_render",{{"path","scct://map/spec"}});
+    Check(wrong.at("isError")==true && Text(wrong).find("map_query what:\"spec\"")!=std::string::npos,"the live spec is not a path");
 }
 void Stub()
 {

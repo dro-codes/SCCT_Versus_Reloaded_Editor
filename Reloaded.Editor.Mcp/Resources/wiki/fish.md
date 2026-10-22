@@ -52,3 +52,18 @@ A follower fish, for **formations**. It follows a leader `SFish` that has `bPilo
 | `fRefreshTimeMin` | Minimum time between formation updates, in seconds. |
 | `fRefreshTimeMax` | Maximum time between formation updates, in seconds. Lower values update more often, so followers stay closer to the leader. |
 | `Pilot` | The leader this fish follows. It must be an `SFish` or `SFish_Big` with `bPilote=True`. |
+
+## How the MCP tools apply this
+
+`environment` with `fish[{id, class, at, mesh?, properties}]` (spec `environment.fish`) places generic actors. `class` defaults to `SFish`; set `SFish_Big` or `SFish_Follow` explicitly.
+
+A `mesh` is the fish's animated mesh: the compiler writes it to `Mesh` with `DrawType DT_Mesh` and the build loads its package first. An explicit `StaticMesh'…'` reference is written as a static mesh instead.
+
+The compiler passes `properties` through, so write the wiki values yourself:
+- **Movement box:** use half-sizes. `fEloignementMaxX/Y/Z` = tank inner size / 2, centred on `at`.
+- **Leader:** set `bPilote: "True"`.
+- **Follower:** set `Pilot: {"$ref": leaderId}`, and place it around the pilot in its formation position.
+- **Animations:** `AnimsFish` names come from existing Ubisoft animations (Aquarius); there is no Animation Browser.
+
+`map_validate` checks that every follower's pilot is an `SFish`/`SFish_Big` with `bPilote True`.
+- Rules: `fish.pilot`

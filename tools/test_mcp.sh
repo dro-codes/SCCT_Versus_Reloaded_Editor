@@ -27,20 +27,30 @@ if [ $# -gt 0 ]; then out=$1; mkdir -p "$out" || exit 1; else out=$(mktemp -d); 
 CXX=${CXX:-g++}
 FLAGS=(-std=c++20 -Wall -Wextra -Wshadow -Werror -O1)
 PYTHON=${PYTHON:-python3}
+W=Reloaded.Editor/WorkflowModel.cpp
+P=Reloaded.Editor/RecoveredPolygonImport.cpp
 M=Reloaded.Editor.Mcp
 
 # name, then the sources and flags it builds from. Run from the repository
-# root: several suites read sources relative to it.
+# root: several suites read fixtures and sources relative to it.
 suites=(
     "McpBridgeModelTests|tests/McpBridgeModelTests.cpp"
     "McpPlanModelTests|tests/McpPlanModelTests.cpp"
     "McpOpCoverageTests|tests/McpOpCoverageTests.cpp"
     "MapCheckJsonModelTests|tests/MapCheckJsonModelTests.cpp"
     "McpProtocolModelTests|tests/McpProtocolModelTests.cpp"
-    "PromptsTests|tests/PromptsTests.cpp"
-    "McpServerTests|tests/McpServerTests.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/EscapeTools.cpp -pthread"
+    "LevelSpecModelTests|tests/LevelSpecModelTests.cpp $W"
+    "LevelSpecCompilerTests|tests/LevelSpecCompilerTests.cpp $W $P"
+    "LevelRulesModelTests|tests/LevelRulesModelTests.cpp $W $P"
+    "GeometricEventModelTests|tests/GeometricEventModelTests.cpp"
+    "ImageCodecTests|tests/ImageCodecTests.cpp"
+    "PlanRenderTests|tests/PlanRenderTests.cpp"
+    "PromptsTests|tests/PromptsTests.cpp $W"
+    "McpServerTests|tests/McpServerTests.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/EscapeTools.cpp $W $P -pthread"
+    "McpSpecToolsTests|tests/McpSpecToolsTests.cpp $M/Tools/SpecTools.cpp $M/Tools/IntentTools.cpp $M/Tools/ValidateTools.cpp $W $P -pthread"
+    "McpReleaseToolsTests|tests/McpReleaseToolsTests.cpp $M/Tools/ReleaseTools.cpp"
     # The server itself, from the sources Reloaded.Editor.Mcp.vcxproj lists.
-    "Reloaded.Editor.Mcp|$M/main.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Prompts.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/EscapeTools.cpp -pthread"
+    "Reloaded.Editor.Mcp|$M/main.cpp $M/McpServer.cpp $M/Resources.cpp $M/BridgeClient.cpp $M/Prompts.cpp $M/Tools/SessionTools.cpp $M/Tools/QueryTools.cpp $M/Tools/ValidateTools.cpp $M/Tools/SpecTools.cpp $M/Tools/IntentTools.cpp $M/Tools/EscapeTools.cpp $M/Tools/ReleaseTools.cpp $W $P -pthread"
 )
 
 failures=()

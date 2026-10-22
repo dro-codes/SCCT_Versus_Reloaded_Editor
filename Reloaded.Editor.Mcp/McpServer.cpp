@@ -16,7 +16,7 @@ namespace
 
     bool IsReply(const Json& message) { return message.is_object() && message.contains("id") && (message.contains("result") || message.contains("error")); }
 
-    // A URI without its #fragment: scct://docs/tools#errors
+    // A URI without its #fragment: scct://docs/tool-reference#level_build
     // names a section of one resource, which is read (and watched) whole.
     std::string WithoutFragment(const std::string& uri)
     {
@@ -93,17 +93,19 @@ std::string DefaultInstructions()
     return "RE+ MCP builds and edits Splinter Cell Chaos Theory Versus maps in the running RE+ editor (Reloaded_Editor.exe).\n"
            "1. Start with editor_status: it connects to the editor and shows the open map, unsaved changes and whether the user approves each change. "
            "editor_launch starts the editor when none is running (the user must have turned on RE+ Tools > MCP > Enable MCP server).\n"
-           "2. Before designing, read scct://wiki/index. The wiki digests (scct://wiki/<page>) are the source of truth for every "
-           "gameplay rule (spawns, game modes, CamNet, alarms, geometric events, map settings, packaging). "
-           "scct://docs/tools holds the conventions every tool shares, scct://docs/ops the bridge ops.\n"
-           "3. map_query reads the map; actors_edit edits its actors and map_changes_apply applies a scct.map-changes document (scct://docs/map-authoring, "
-           "scct://schema/map-changes).\n"
-           "4. map_build, and view_screenshot to compare with the source.\n"
+           "2. Before designing, read scct://wiki/index and scct://rules. The wiki digests (scct://wiki/<page>) are the source of truth for every "
+           "gameplay rule (spawns, game modes, CamNet, alarms, geometric events, map settings, packaging); validation cites them by page. "
+           "scct://docs/tools holds the conventions every tool shares (positions, ids, how the intent tools merge, fixes), scct://docs/tool-reference "
+           "every field with the wiki defaults applied, scct://docs/ops the bridge ops.\n"
+           "3. Write the level as a scct.level-spec (scct://schema/level-spec, examples at scct://examples/*). Check it offline with level_spec_validate "
+           "and plan_render, then level_build with mode preview, then mode apply. The intent tools (blockout, gameplay, security, mechanisms, events, "
+           "environment, geometric_events, map_settings) make focused changes the same way.\n"
+           "4. map_build, then map_validate (profile draft while iterating, release before sharing), and view_screenshot to compare with the source.\n"
            "5. map_file save_as names and saves the map in Packages\\MapsEd: the wiki names the file after the first four letters of the map name plus D "
            "(AquaD). A new map then needs editor_restart before its Map Settings can be edited.\n"
            "Every change is one Undo step (editor_undo), takes dryRun to preview and label to name it, and returns summary, created, changed, warnings, "
-           "undo and next steps. workflow_request (any bridge op) and editor_exec (a console command) reach what the other tools do not. "
-           "Units are Unreal units (about 100 per metre, 180 a standing character), Z up, +X east, +Y north; yaw is 65536 per "
+           "undo and next steps. map_query reads anything; actors_edit, map_changes_apply, workflow_request and editor_exec are escape hatches. "
+           "Units are Unreal units (about 100 per metre, 180 a standing character), Z up, +X east, +Y north; yaw is degrees in specs and 65536 per "
            "turn in engine values.";
 }
 
