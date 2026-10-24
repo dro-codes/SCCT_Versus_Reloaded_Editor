@@ -3,6 +3,7 @@
 #undef max
 #include "LightingBudget.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "LightingBudgetModel.h"
 #include "BudgetWindow.h"
 #include "RebuildAllMaps.h"
@@ -211,6 +212,8 @@ std::string ReportStatus()
     return text;
 }
 
+void Layout(HWND window);
+
 void Fill()
 {
     auto zones = GetDlgItem(budget.window, kZoneList), hotspots = GetDlgItem(budget.window, kHotspotList);
@@ -240,6 +243,7 @@ void Fill()
         Budget::Row(hotspots, static_cast<int>(i), static_cast<LPARAM>(i), {HotspotLabel(hotspot), zone, std::to_string(hotspot.lights.size()), names});
     }
     SetDlgItemTextA(budget.window, kIntro, Intro(report.thresholds).c_str());
+    Layout(budget.window); // the intro's height follows its text
     SetStatus(ReportStatus());
 }
 
@@ -381,9 +385,11 @@ void Layout(HWND window)
     RECT r{};
     GetClientRect(window, &r);
     const int w = r.right - 24, h = r.bottom;
-    const int top = 82, listsHeight = h - top - 48 - 34 - 34;
+    // The intro keeps all its lines in the larger modern font (up to a third of the window).
+    const int intro = Appearance::FitHeight(GetDlgItem(window, kIntro), w, 70, h / 3);
+    const int top = intro + 12, listsHeight = h - top - 48 - 34 - 34;
     const int zonesHeight = listsHeight * 3 / 5, hotspotTop = top + zonesHeight + 22;
-    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, top - 12, TRUE);
+    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, intro, TRUE);
     MoveWindow(GetDlgItem(window, kZoneList), 12, top, w, zonesHeight, TRUE);
     MoveWindow(GetDlgItem(window, 110), 12, top + zonesHeight + 4, w, 16, TRUE);
     MoveWindow(GetDlgItem(window, kHotspotList), 12, hotspotTop, w, h - 116 - hotspotTop, TRUE);
@@ -500,7 +506,7 @@ void Show(HWND owner)
 {
     if (IsWindow(budget.window))
     {
-        ShowWindow(budget.window, SW_RESTORE);
+        ShowWindow(budget.window, IsIconic(budget.window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(budget.window);
         Fill();
         return;

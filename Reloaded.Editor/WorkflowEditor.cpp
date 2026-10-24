@@ -8,6 +8,7 @@
 #include "MagicEventModel.h"
 #include "PropertyPasteModel.h"
 #include "MapAuthoringModel.h"
+#include "CompareBackupModel.h"
 #include "CameraNetworkModel.h"
 #include "MapDesignModel.h"
 #include "SecurityModel.h"
@@ -17,16 +18,25 @@
 #include "MapCheckModel.h"
 #include "MapCheckLog.h"
 #include "LightShadowModel.h"
+#include "ReachabilityModel.h"
 #include "LevelSnapshot.h"
 #include "CharacterSkinsModel.h"
 #include "ConveyorModel.h"
+#include "MoverModel.h"
 #include "ObjectivePlayersModel.h"
 #include "CharacterSkinsImage.h"
 #include "PlacementModel.h"
 #include "CharacterSkinPresetsModel.h"
 #include "MinimapModel.h"
+#include "ObjExportModel.h"
 #include "StairSmoothModel.h"
+#include "ScatterModel.h"
 #include "MapOptimiseModel.h"
+#include "PrefabModel.h"
+#include "ObjImportModel.h"
+#include "ObjImportWindow.h"
+#include "StaticMeshBrowserFavorites.h"
+#include "MapOutlinerModel.h"
 #include "UnsavedChangesModel.h"
 #include "LightmapFix.h"
 #include "logger.h"
@@ -35,9 +45,13 @@
 #include "MemoryWriter.h"
 #include "General.h"
 #include "resource.h"
+#include "Version.h"
 #include <zlib.h>
 #include <algorithm>
 #include <chrono>
+#include <deque>
+#include <future>
+#include <thread>
 #include <fstream>
 #include <cmath>
 #include <fstream>
@@ -165,7 +179,10 @@ namespace
         Observe(e);
         return e;
     }
-    Address Level() { return Read<Address>(Engine()+0x130); }
+    // Compare with Backup reads a loaded copy's level through the same code as the open one
+    // (CompareBackupNative.inl); only reads run while it is set.
+    Address levelOverride=0;
+    Address Level() { auto level=Read<Address>(Engine()+0x130); return levelOverride?levelOverride:level; }
     std::string String(Address a,size_t cap=2048)
     {
         if(!a) return {};
@@ -523,14 +540,17 @@ std::string MapKey()
     if(path.is_relative()) path=Directory().parent_path().parent_path()/"Packages"/"MapsEd"/path;
     return Fold(std::filesystem::weakly_canonical(path).string());
 }
+// UTF-8, as String gives the frame's name: read as UTF-8 too, so a name with
+// letters outside ASCII is the file itself, not its text read as ANSI.
 std::string MapFile()
 {
     auto window=Read<Address>(0x1165e80c); std::string file=window?String(window+0x58,1024):"";
     if(file.empty()) return {};
-    std::filesystem::path path(file);
+    std::filesystem::path path(std::u8string(file.begin(),file.end()));
     if(path.is_relative()) path=Directory().parent_path().parent_path()/"Packages"/"MapsEd"/path;
     std::error_code error; const auto canonical=std::filesystem::weakly_canonical(path,error);
-    return (error?path:canonical).string();
+    const auto text=(error?path:canonical).u8string();
+    return std::string(text.begin(),text.end());
 }
 void SetMapFile(const std::string& path)
 {
@@ -1496,70 +1516,8 @@ Json CaptureAssembly(const Json& members,const Pose& frame)
     if(!local.empty()) result["local"]=local;
     return result;
 }
-Json PlaceAssembly(const Json& definition,const Pose& frame,const std::map<std::string,std::string>& bindings)
-{
-    auto resolved=bindings;
-    for(const auto& dependency:PlacementDependencies(definition))
-    {
-        auto path=dependency.get<std::string>();
-        if(!Find(path))
-        {
-            auto package=path.substr(0,path.find('.'));
-            if(package.find_first_of("\"\r\n/\\")!=std::string::npos) throw std::runtime_error("Invalid dependency package.");
-            if(Fold(package)==Fold(LevelPath())) throw std::runtime_error(path+" was stored inside the map this entry was saved from, so this map does not have it. Move the asset into a shared package and save the entry again.");
-            // Loading the class/object by package leaves existing assets untouched.
-            // Ambient sounds are .uax packages; map sound banks are .uas.
-            const std::pair<const char*,const char*> folders[]={{"Textures",".utx"},{"StaticMeshes",".usx"},{"Sounds",".uax"},{"Sounds",".uas"},{"Animations",".ukx"}};
-            for(const auto& [directory,extension]:folders)
-            {
-                auto file=Directory().parent_path().parent_path()/"Packages"/directory/(package+extension);
-                if(std::filesystem::exists(file)) Exec("OBJ LOAD FILE=\""+file.string()+"\"");
-            }
-            if(!Find(path)) throw std::runtime_error("Load the required package before placing: "+path);
-        }
-    }
-    for(const auto& binding:definition.at("bindings"))
-    {
-        auto id=binding.at("id").get<std::string>(); auto it=resolved.find(id);
-        if(it==resolved.end()) throw std::runtime_error("Missing binding: "+binding.at("label").get<std::string>());
-        if(it->second.empty()) continue;
-        auto target=Find(it->second,true);
-        if(!target || !IsA(target,binding.at("type").get<std::string>())) throw std::runtime_error("Incompatible external actor: "+it->second);
-        if(binding.at("kind")=="event")
-        {
-            it->second=NameField(target,"Tag");
-            if(Fold(it->second)=="none") throw std::runtime_error("The bound Event target must have a Tag. Set its Tag before placement.");
-        }
-    }
-    auto prefix="RE_"+Id().substr(0,12)+"_";
-    auto prepared=PreparePlacement(definition,frame,prefix,LevelPath(),resolved);
-    if(!pasteHookReady) throw std::runtime_error("This editor build does not support verified assembly insertion.");
-    auto before=SelectedIdentities(); const std::string text=ConvertText(prepared.at("t3d").get<std::string>(),CP_UTF8,CP_ACP);
-    struct TextScope { TextScope(const char* value) {if(insertionText) throw std::runtime_error("Assembly insertion is already running.");insertionText=value;} ~TextScope(){insertionText=nullptr;} } source(text.c_str());
-    Json members=Json::array(), names=Json::object();
-    try
-    {
-        Transaction transaction("Place actor assembly");
-        Select(Json::array());
-        // Verified UUnrealEdEngine::edactPasteSelected. The native routine
-        // recentres pasted actors; restore the requested world poses before End.
-        Call(Engine(),0x26c,reinterpret_cast<void*>(Level()),0);
-        const ActorIndex index;
-        for(const auto& actor:prepared.at("actors"))
-        {
-            auto a=index.Find(LevelPath()+"."+actor.at("name").get<std::string>());
-            if(!a) throw std::runtime_error("Native paste did not create all assembly actors.");
-            Modify(a); SetPosition(a,actor.at("position").get<Vector>()); Write(Field(a,"Rotation"),actor.at("rotation").get<Rotation>()); Call(a,0x44);
-            members.push_back(Identity(a));
-            names[Path(a)]=actor.at("name").get<std::string>().substr(prefix.size());
-        }
-        index.Report(prepared.at("actors").size(),"PlaceAssembly");
-        if(SelectedIdentities().size()!=members.size()) throw std::runtime_error("Native paste created an unexpected actor count.");
-        transaction.Commit();
-    }
-    catch(...) { Select(before); throw; }
-    Select(members); return {{"id",Id()},{"assembly",definition.at("id")},{"members",members},{"names",names},{"tags",prepared.value("tags",Json::object())},{"position",frame.position},{"rotation",frame.rotation}};
-}
+// The body is in PrefabNative.inl, which also files a linked prefab's actors in its Group.
+Json PlaceAssembly(const Json& definition,const Pose& frame,const std::map<std::string,std::string>& bindings) { return PlaceAssembly(definition,frame,bindings,{}); }
 #include "MagicEventNative.inl"
 #include "MapAuthoringNative.inl"
 Json AddObjectiveActor(const Json& owner,const std::string& type)
@@ -1618,5 +1576,13 @@ Json AddObjectiveActor(const Json& owner,const std::string& type)
 #include "MinimapNative.inl"
 #include "MapRecoveryNative.inl"
 #include "StairSmoothNative.inl"
+#include "ScatterNative.inl"
 #include "MapOptimiseNative.inl"
+#include "PrefabNative.inl"
+#include "ObjExportNative.inl"
+#include "ObjImportNative.inl"
+#include "ReachabilityNative.inl"
+#include "MapOutlinerNative.inl"
+#include "CompareBackupNative.inl"
+#include "MoverNative.inl"
 }

@@ -427,7 +427,7 @@ Json PreviewMapAuthoring(const Json& given)
     return {{"changes",plan.summary},{"rows",plan.rows},{"tally",Authoring::Tally(plan.rows)},
         {"note",std::string(assets?"Package loads, texture imports and package saves run first and are not undone by Undo. ":"")+"Map changes apply in one Undo step. Save the map to retain changes. Lighting, geometry and navigation are not rebuilt; playtest the result."}};
 }
-Json ApplyMapAuthoring(const Json& given)
+Json ApplyMapAuthoring(const Json& given,const char* label)
 {
     const Json document=AuthoringDefaults(given);
     Authoring::Validate(document,AuthoringMapKey());
@@ -437,7 +437,7 @@ Json ApplyMapAuthoring(const Json& given)
     auto plan=PlanAuthoring(document);
     auto selection=SelectedIdentities();
     struct Restore{Json selection;~Restore(){try{Select(selection);Redraw();}catch(...){}}} restore{selection};
-    Transaction transaction("Import map JSON changes");Json created=Json::array();
+    Transaction transaction(label);Json created=Json::array();
     // Deletes go first, through the editor's own delete inside this transaction, so the same Undo brings them back.
     // Nothing else in the file may touch a deleted actor, so the order changes no result; but a delete after the
     // paste in one transaction makes Undo fault restoring the level's actor list (seen on ShipD), as the stock

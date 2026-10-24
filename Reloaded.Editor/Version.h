@@ -18,8 +18,8 @@
 // Bump this before packaging each release, or its users are offered the same
 // release again on every start.
 #define RE_PLUS_VERSION_MAJOR 2
-#define RE_PLUS_VERSION_MINOR 7
-#define RE_PLUS_VERSION_PATCH 0
+#define RE_PLUS_VERSION_MINOR 8
+#define RE_PLUS_VERSION_PATCH 1
 #define RE_PLUS_VERSION_PRERELEASE ""
 
 #define RE_PLUS_STRINGIZE_(x) #x

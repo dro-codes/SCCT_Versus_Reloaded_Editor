@@ -112,6 +112,14 @@ or foreign files rejected). The editor side imports the BMP with `TEXTURE
 IMPORT` into the loaded `<Map>-i` package and saves it with the stock
 `SAVEMAPPROP`, so it is exercised in the editor rather than here.
 
+`AppearanceModelTests.cpp` covers the Appearance setting's pure parts: the
+theme names read from and written to `Reloaded_Editor.ini`, which font faces
+and sizes become Segoe UI 9 pt, rewriting a dialog template's font (plain and
+extended templates, items with text, ordinal titles and creation data), checked
+by making the template into a real hidden dialog and comparing its controls,
+and the Modern Dark palette. Hooking the editor's window calls is checked in
+the editor with the smoke probe's `appearance` suite.
+
 `MinimapModelTests.cpp` covers Generate Minimap's pure parts: the game's
 world-to-picture transform through `LevelInfo.SnapshotCamera` (checked with
 AquaD's own camera: the centre, both corners, +X right and +Y down, a turned
@@ -392,6 +400,23 @@ in the selection along so they leave it too; Isolate needing a visible selection
 and hiding only the visible rest; Unhide all; and the messages when there is
 nothing to act on.
 
+## Map Outliner
+
+`tools/test_workflow_tools.cmd` runs `MapOutlinerModelTests.cpp`: the cells
+(the short class name, None shown blank, the location in whole units, Hidden
+and Locked as words, a broken location read as 0), Group fields split into
+names (trimmed, once each whatever their case, None left out), the search
+(every word must appear in some column, Tag, Event, the full class name,
+location and the Hidden / Locked words searched, a word never spanning two
+columns, None not a value), sorting by each kind of column (names with
+numbers in order, blanks last, descending), grouping by class and by group (an
+actor in two groups under both, ungrouped actors last, a collapsed group
+keeping its header and count, groups with no match left out), what selected
+lines stand for (a header for all its rows, each row once), Follow Selection's
+lines, hidden rows never selected, Delete keeping the level info and builder
+brush and its question, the footer, and 20,000 rows. The `outliner` smoke suite
+(tests/smoke/README.md) covers the window in a real editor.
+
 ## Copy and paste properties
 
 `tools/test_workflow_tools.cmd` runs `PropertyPasteModelTests.cpp`: which copied
@@ -518,13 +543,33 @@ actors and portal surfaces.
 `tools/test_workflow_tools.cmd` includes `LightShadowModelTests.cpp`: threshold
 clamping and banding (NaN counts as dark), lightmap luminance in the stored
 B,G,R,A order with bilinear sampling and the 2x display scale, light colour
-shares from hue and saturation, the squared falloff to a light's reach,
-walkable floors in either winding, grid sampling with no duplicates on shared
-edges and one patch per stacked storey, lights adding up to the 255 cap, BSP
-line of sight (a light behind a solid slab is blocked; one embedded a little in
-its fitting is not), the three brightness sources, summaries, legend and
-readout text, the drawn outline per band, the readout lookup, and the patch cap
-keeping small floors before vast ones.
+shares from hue and saturation, the engine's falloff (2 at the light,
+2(1 - 3x^2 + 2x^3) at a share x of the reach, the light's angle on a surface)
+and its NonIncidence, QuadraticNonIncidence, Cylinder and Sunlight variants,
+spotlight cones (inside, at the edge, behind, narrow and closed cones, the
+switch), the LE_ESpotShadow frustum widening from NearPlaneRatio to
+SpotWidth by SpotHeight at EchelonRange (and the box at 0.99), transforms and
+their inverse, segments against boxes and triangles, the bounding volume
+hierarchy checked against every box, a static mesh box blocking a light but
+not beside or over it, a lamp's small fitting not putting it out while a big
+hall around it still blocks, static mesh floors on the top face only (mirrored
+too) with their vertex baked lighting, walkable floors in either winding, grid
+sampling with no duplicates on shared edges and one patch per stacked storey,
+lights adding up to the 255 cap, BSP line of sight (a light behind a solid
+slab is blocked; one embedded a little in its fitting is not), the work kept
+between samples (an unchanged map reuses every light, a moved light or a mesh
+moved within a light's reach is worked out again, new patches are added, a
+setting or BSP change starts again, each matching a sample from nothing), the
+three brightness sources, summaries, legend and readout text, the drawn
+outline per band, the readout lookup, and the patch cap keeping small floors
+before vast ones.
+
+The smoke suite `lightshadow` (`tests/smoke/SmokeSuites.inl`) turns the map on
+in a disposable editor, checks there are patches and some on static meshes,
+moves an in-game light and then a static mesh near it and checks the next
+sample keeps the other lights, switches static mesh floors off and on in the
+settings window (Apply, the summary and `[LightShadowMap] MeshFloors`), and
+saves pictures of the editor and the settings window.
 
 Checked by hand in a disposable install on ShipD and BankD (not covered by the
 native suite): the menu toggle and its check mark, sampling and the log line,
@@ -779,6 +824,20 @@ Also check these cases manually: static-mesh replacement with material overrides
 game-specific array/structure actor links,
 Save As/map switching, GE selections, and external-binding changes during assembly edits.
 Use disposable source maps and include stale/deleted instance members and missing packages.
+
+## Mover Workbench
+
+`MoverModelTests.cpp` covers the key list behind RE+ Tools > Mover Workbench: where the
+mover stands on a key (BasePos + KeyPos, BaseRot + KeyRot), a place as a key, Add Key
+Here (a new last key, the mover not moving, at most 8 keys), Update Key, Delete Key (the
+mover staying on its key or the one taking its place, never the last key), Move Up and
+Down (the mover following its key), Go to Key, telling a move in the viewport (off its
+key, or the stock move that takes the base along at key 0 or rewrites a later key) from
+another edit, and measuring a new key against the path at rest after such a move; the
+preview's poses (legs of MoveTime, eased or not, a pause capped at 3 s, the way back,
+the short way round), ghost outlines carried and turned about the pivot and boxed past
+the cap, the plain names of InitialState and the other settings, and the key arrays as
+the editor reads and writes them. The editor side runs in the `mover` smoke suite.
 
 ## Map recovery
 

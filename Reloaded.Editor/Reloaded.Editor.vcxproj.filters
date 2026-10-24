@@ -25,6 +25,9 @@
     <ClInclude Include="MapOptimiseDialog.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapOptimiseModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapOptimiseNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjExportModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjExportNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjExportWindow.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapUsages.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapUsagesModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="UsageMarksModel.h"><Filter>Header Files</Filter></ClInclude>
@@ -37,10 +40,19 @@
     <ClInclude Include="MapCheckModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LightShadowMap.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LightShadowModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Reachability.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ReachabilityModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="WindowPlacement.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="WindowPlacementModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="BudgetWindow.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderBudget.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="CommandPalette.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="CommandPaletteModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MapOutliner.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MapOutlinerModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MoverWorkbench.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MoverModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MoverNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderBudgetModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LevelSnapshot.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PlayLevelPlayers.h"><Filter>Header Files</Filter></ClInclude>
@@ -56,6 +68,8 @@
     <ClInclude Include="UndoHistory.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="UndoHistoryModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="AnimImportOptionsModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Appearance.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="AppearanceModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="AssetNameGloss.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="AssetNameGlossModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="AssetNameDictionary.gen.h"><Filter>Header Files</Filter></ClInclude>
@@ -75,10 +89,16 @@
     <ClInclude Include="EmitterPreview.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterSkinsImage.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterSkinsModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="CompareBackup.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="CompareBackupModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="CompareBackupNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ConveyorModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ObjectivePlayersModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ObjectivePlayersNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ConveyorNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjImportModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjImportNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ObjImportWindow.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterSkinsWindow.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterSkinPresetsModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="CharacterSkinPresetsWindow.h"><Filter>Header Files</Filter></ClInclude>
@@ -100,7 +120,9 @@
     <ClInclude Include="LightingBudgetNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapCheckNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LightShadowNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ReachabilityNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="RenderBudgetNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="MapOutlinerNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MinimapNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="StagePanel.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="LightingPanel.inl"><Filter>Header Files</Filter></ClInclude>
@@ -118,6 +140,11 @@
     <ClInclude Include="PlacementNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="StairSmoothModel.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="StairSmoothNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PrefabModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="PrefabNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ScatterModel.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ScatterNative.inl"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="ScatterTool.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="PlacementTools.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapDesignNative.inl"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="MapDesignPanel.inl"><Filter>Header Files</Filter></ClInclude>
@@ -427,6 +454,9 @@
     <ClCompile Include="StaticMeshBrowserFavorites.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Appearance.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="AssetNameGloss.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -492,13 +522,19 @@
     <ClCompile Include="MapPackage.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapPackageDialog.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapOptimiseDialog.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="ObjExportWindow.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapUsages.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapUsagesWindow.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="LightingBudget.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapCheck.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="LightShadowMap.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="Reachability.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="WindowPlacement.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="ScatterTool.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="RenderBudget.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="CommandPalette.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="MapOutliner.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="MoverWorkbench.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MinimapWindow.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="LevelSnapshot.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="PlayLevelPlayers.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -512,8 +548,10 @@
     <ClCompile Include="CharacterPreview.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="EmitterPreview.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="CharacterSkinsWindow.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="ObjImportWindow.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="CharacterSkinPresetsWindow.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="EmitterLibraryWindow.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="CompareBackup.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MapAuthoringDialog.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="MagicEventWorkbench.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="CameraNetworkPanel.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -537,9 +575,15 @@
     <ResourceCompile Include="Reloaded.Editor.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+    <ResourceCompile Include="Appearance.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="Appearance.manifest">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GridSizeShortcut.h">

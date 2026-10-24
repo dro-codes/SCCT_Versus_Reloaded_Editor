@@ -2,6 +2,8 @@
 #include "MapAuthoringDialog.h"
 #include "WorkflowEditor.h"
 #include "MapAuthoringModel.h"
+#include "WindowPlacement.h"
+#include <algorithm>
 #include <commdlg.h>
 #include <commctrl.h>
 #include <vector>
@@ -13,7 +15,7 @@ namespace MapAuthoringDialog
 {
 namespace
 {
-    constexpr int kHeading=10,kList=11,kStatus=12;
+    constexpr int kHeading=10,kList=11,kStatus=12,kTickAll=13;
     constexpr std::streamoff kMaximumExport=256LL*1024*1024;
     // Streams the export to disk. Pretty-printing a large map's export into one string needs a contiguous block
     // the 32-bit editor rarely has once the map is loaded (ShipD failed with "bad allocation").
@@ -31,27 +33,30 @@ namespace
         std::filesystem::rename(temp,path,error);
         if(error){std::filesystem::remove(temp,error);throw std::runtime_error("Could not replace "+path.string());}
     }
-    // One list row: change, actor, property, before, after; and the existing actor a click selects.
-    struct Line { std::wstring cells[5];Workflow::Json select; };
-    struct Preview { std::wstring text;std::vector<Line> lines;bool accepted=false; };
+    struct Preview { const Review* review=nullptr;std::vector<bool> ticked;bool accepted=false; };
     std::wstring Wide(const std::string& text)
     {
         auto count=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
         std::wstring result(count,L'\0');MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),result.data(),count);return result;
     }
-    // Long values (whole arrays) are shortened in the list; the change file holds them in full.
-    std::wstring Cell(const std::string& text)
-    {
-        auto wide=Wide(text);for(auto& c:wide)if(c==L'\r' || c==L'\n' || c==L'\t')c=L' ';
-        if(wide.size()>300)wide=wide.substr(0,297)+L"...";
-        return wide;
-    }
     void Status(HWND window,const std::wstring& text){SetWindowTextW(GetDlgItem(window,kStatus),text.c_str());}
+    size_t Ticked(const Preview& state){return static_cast<size_t>(std::count(state.ticked.begin(),state.ticked.end(),true));}
+    void ShowTicked(HWND window,const Preview& state)
+    {
+        if(!state.review->checkboxes)return;
+        const auto n=Ticked(state);EnableWindow(GetDlgItem(window,IDOK),n>0);
+        Status(window,std::to_wstring(n)+L" row(s) ticked.");
+    }
+    void Toggle(HWND window,Preview& state,int index)
+    {
+        if(!state.review->checkboxes || index<0 || index>=static_cast<int>(state.ticked.size()) || !state.review->rows[index].checkable)return;
+        state.ticked[index]=!state.ticked[index];ListView_RedrawItems(GetDlgItem(window,kList),index,index);ShowTicked(window,state);
+    }
     void Choose(HWND window,Preview& state,int index)
     {
-        if(index<0 || index>=static_cast<int>(state.lines.size()))return;
-        const auto& line=state.lines[index];
-        if(line.select.is_null()){Status(window,line.cells[1]+L" is created by this file, so there is nothing to select yet.");return;}
+        if(index<0 || index>=static_cast<int>(state.review->rows.size()))return;
+        const auto& line=state.review->rows[index];
+        if(line.select.is_null()){Status(window,line.cells[1]+L" is not in the open map, so there is nothing to select.");return;}
         try{Workflow::Editor::Select(Workflow::Json::array({line.select}),true);Status(window,L"Selected "+line.cells[1]+L" in the map.");}
         catch(const std::exception& e){Status(window,L"Could not select "+line.cells[1]+L": "+Wide(e.what()));}
     }
@@ -61,40 +66,59 @@ namespace
         if(message==WM_CREATE)
         {
             state=static_cast<Preview*>(reinterpret_cast<CREATESTRUCT*>(l)->lpCreateParams);SetWindowLongPtr(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(state));
+            const auto& review=*state->review;
             // Created empty: an edit control refuses creation text beyond its default 30,000-character limit. Raise it, then set the text.
             auto edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,0,0,0,0,window,reinterpret_cast<HMENU>(kHeading),nullptr,nullptr);
-            SendMessage(edit,EM_SETLIMITTEXT,0,0);SetWindowTextW(edit,state->text.c_str());
+            SendMessage(edit,EM_SETLIMITTEXT,0,0);SetWindowTextW(edit,review.heading.c_str());
             // A virtual list: a large change file has tens of thousands of rows.
             auto list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|LVS_OWNERDATA,0,0,0,0,window,reinterpret_cast<HMENU>(kList),nullptr,nullptr);
-            ListView_SetExtendedListViewStyle(list,LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_LABELTIP);
-            const wchar_t* titles[]={L"Change",L"Actor",L"Property",L"Before",L"After"};const int widths[]={60,180,130,250,250};
-            for(int i=0;i<5;++i){LVCOLUMNW column{};column.mask=LVCF_TEXT|LVCF_WIDTH;column.pszText=const_cast<wchar_t*>(titles[i]);column.cx=widths[i];ListView_InsertColumn(list,i,&column);}
-            ListView_SetItemCountEx(list,static_cast<int>(state->lines.size()),0);
-            CreateWindowW(L"STATIC",L"Click a row to select its actor in the map.",WS_CHILD|WS_VISIBLE|SS_LEFTNOWORDWRAP,0,0,0,0,window,reinterpret_cast<HMENU>(kStatus),nullptr,nullptr);
-            CreateWindowW(L"BUTTON",L"Apply changes",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON,0,0,0,0,window,reinterpret_cast<HMENU>(IDOK),nullptr,nullptr);
-            CreateWindowW(L"BUTTON",L"Cancel",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,window,reinterpret_cast<HMENU>(IDCANCEL),nullptr,nullptr);
-            for(int id:{kHeading,kList,kStatus,IDOK,IDCANCEL})SendMessage(GetDlgItem(window,id),WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+            ListView_SetExtendedListViewStyle(list,LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_LABELTIP|(review.checkboxes?LVS_EX_CHECKBOXES:0));
+            // A virtual list keeps no item state: the tick boxes come from the rows, asked for row by row.
+            if(review.checkboxes)ListView_SetCallbackMask(list,LVIS_STATEIMAGEMASK);
+            for(int i=0;i<5;++i){LVCOLUMNW column{};column.mask=LVCF_TEXT|LVCF_WIDTH;column.pszText=const_cast<wchar_t*>(review.columns[i]);column.cx=review.widths[i];ListView_InsertColumn(list,i,&column);}
+            ListView_SetItemCountEx(list,static_cast<int>(review.rows.size()),0);
+            CreateWindowW(L"STATIC",review.hint.c_str(),WS_CHILD|WS_VISIBLE|SS_LEFTNOWORDWRAP,0,0,0,0,window,reinterpret_cast<HMENU>(kStatus),nullptr,nullptr);
+            CreateWindowW(L"BUTTON",review.apply.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON,0,0,0,0,window,reinterpret_cast<HMENU>(IDOK),nullptr,nullptr);
+            CreateWindowW(L"BUTTON",review.cancel.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,window,reinterpret_cast<HMENU>(IDCANCEL),nullptr,nullptr);
+            if(review.checkboxes)CreateWindowW(L"BUTTON",L"Tick &All",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,window,reinterpret_cast<HMENU>(kTickAll),nullptr,nullptr);
+            for(int id:{kHeading,kList,kStatus,static_cast<int>(IDOK),static_cast<int>(IDCANCEL),kTickAll})if(auto child=GetDlgItem(window,id))SendMessage(child,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+            if(review.checkboxes)EnableWindow(GetDlgItem(window,IDOK),FALSE);
             return 0;
         }
         if(message==WM_SIZE)
         {
-            int width=LOWORD(l),height=HIWORD(l);
+            int width=LOWORD(l),height=HIWORD(l);const bool ticks=state && state->review->checkboxes;
+            const int apply=ticks?170:130,left=ticks?100:0;
             MoveWindow(GetDlgItem(window,kHeading),12,12,width-24,96,TRUE);
             MoveWindow(GetDlgItem(window,kList),12,116,width-24,height-176,TRUE);
-            MoveWindow(GetDlgItem(window,kStatus),12,height-37,width-290,18,TRUE);
-            MoveWindow(GetDlgItem(window,IDOK),width-260,height-44,130,30,TRUE);
+            if(ticks)MoveWindow(GetDlgItem(window,kTickAll),12,height-44,88,30,TRUE);
+            MoveWindow(GetDlgItem(window,kStatus),12+left,height-37,width-160-apply-left,18,TRUE);
+            MoveWindow(GetDlgItem(window,IDOK),width-130-apply,height-44,apply,30,TRUE);
             MoveWindow(GetDlgItem(window,IDCANCEL),width-120,height-44,108,30,TRUE);return 0;
         }
         if(message==WM_NOTIFY && state)
         {
-            auto header=reinterpret_cast<NMHDR*>(l);
+            auto header=reinterpret_cast<NMHDR*>(l);const auto& rows=state->review->rows;
             if(header->idFrom==kList && header->code==LVN_GETDISPINFOW)
             {
                 auto& item=reinterpret_cast<NMLVDISPINFOW*>(l)->item;
-                if((item.mask&LVIF_TEXT) && item.iItem>=0 && item.iItem<static_cast<int>(state->lines.size()) && item.iSubItem>=0 && item.iSubItem<5)
-                    item.pszText=const_cast<wchar_t*>(state->lines[item.iItem].cells[item.iSubItem].c_str());
+                if(item.iItem>=0 && item.iItem<static_cast<int>(rows.size()))
+                {
+                    if((item.mask&LVIF_TEXT) && item.iSubItem>=0 && item.iSubItem<5)item.pszText=const_cast<wchar_t*>(rows[item.iItem].cells[item.iSubItem].c_str());
+                    // State image 0 is no box (a row that cannot be ticked), 1 unticked, 2 ticked.
+                    if((item.mask&LVIF_STATE) && state->review->checkboxes)
+                    {item.state=INDEXTOSTATEIMAGEMASK(rows[item.iItem].checkable?(state->ticked[item.iItem]?2:1):0);item.stateMask|=LVIS_STATEIMAGEMASK;}
+                }
                 return 0;
             }
+            if(header->idFrom==kList && header->code==NM_CLICK)
+            {
+                LVHITTESTINFO hit{};hit.pt=reinterpret_cast<NMITEMACTIVATE*>(l)->ptAction;
+                if(ListView_SubItemHitTest(header->hwndFrom,&hit)>=0 && (hit.flags&LVHT_ONITEMSTATEICON))Toggle(window,*state,hit.iItem);
+                return 0;
+            }
+            if(header->idFrom==kList && header->code==LVN_KEYDOWN && reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_SPACE)
+            {Toggle(window,*state,ListView_GetNextItem(header->hwndFrom,-1,LVNI_SELECTED));return 0;}
             if(header->idFrom==kList && header->code==LVN_ITEMCHANGED)
             {
                 auto change=reinterpret_cast<NMLISTVIEW*>(l);
@@ -103,8 +127,20 @@ namespace
             }
         }
         if(message==WM_GETMINMAXINFO){auto info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={560,380};return 0;}
-        if(message==WM_COMMAND && (LOWORD(w)==IDOK || LOWORD(w)==IDCANCEL)){state->accepted=LOWORD(w)==IDOK;DestroyWindow(window);return 0;}
+        if(message==WM_COMMAND && LOWORD(w)==kTickAll && state)
+        {
+            // Ticks every row that can be ticked; when they all are, unticks them.
+            bool all=true;for(size_t i=0;i<state->ticked.size();++i)if(state->review->rows[i].checkable && !state->ticked[i])all=false;
+            for(size_t i=0;i<state->ticked.size();++i)state->ticked[i]=state->review->rows[i].checkable && !all;
+            InvalidateRect(GetDlgItem(window,kList),nullptr,FALSE);ShowTicked(window,*state);return 0;
+        }
+        if(message==WM_COMMAND && (LOWORD(w)==IDOK || LOWORD(w)==IDCANCEL))
+        {
+            if(LOWORD(w)==IDOK && state->review->checkboxes && !Ticked(*state)){Status(window,L"Tick the rows to bring back first.");return 0;}
+            state->accepted=LOWORD(w)==IDOK;DestroyWindow(window);return 0;
+        }
         if(message==WM_CLOSE){DestroyWindow(window);return 0;}
+        if(message==WM_DESTROY && state && state->review->placement)WindowPlacement::Remember(window,state->review->placement);
         return DefWindowProc(window,message,w,l);
     }
     bool Confirm(HWND owner,const Workflow::Json& preview,const Workflow::Json& document)
@@ -114,25 +150,40 @@ namespace
         if(!document.value("description",std::string{}).empty())text+=document.at("description").get<std::string>()+"\r\n";
         text+="Changes: "+preview.value("tally",std::string{})+"\r\n"+preview.at("note").get<std::string>()+"\r\n";
         if(Workflow::Authoring::Deletes(document))text+="This file deletes actors (allowDeletes is on). Undo brings them back.\r\n";
-        Preview state{Wide(text)};
+        Review review;review.title=L"Preview Map JSON Import";review.heading=Wide(text);review.hint=L"Click a row to select its actor in the map.";review.apply=L"Apply changes";
         for(const auto& row:preview.value("rows",Workflow::Json::array()))
         {
-            Line line;int i=0;
+            ReviewRow line;int i=0;
             for(const char* key:{"change","target","property","before","after"})line.cells[i++]=Cell(row.value(key,std::string{}));
-            line.select=row.value("select",Workflow::Json());state.lines.push_back(std::move(line));
+            line.select=row.value("select",Workflow::Json());review.rows.push_back(std::move(line));
         }
-        WNDCLASSW cls{};cls.lpfnWndProc=PreviewProc;cls.hInstance=GetModuleHandle(nullptr);cls.lpszClassName=L"ReloadedMapAuthoringPreview";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
-        auto window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,L"Preview Map JSON Import",WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT,920,660,owner,nullptr,cls.hInstance,&state);
-        if(!window)throw std::runtime_error("Could not open the change preview.");
-        EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG message{};
-        while(IsWindow(window))
-        {
-            auto status=GetMessage(&message,nullptr,0,0);
-            if(status<=0){if(status==0)PostQuitMessage(static_cast<int>(message.wParam));break;}
-            if(!IsDialogMessage(window,&message)){TranslateMessage(&message);DispatchMessage(&message);}
-        }
-        if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);return state.accepted;
+        return Show(owner,review);
     }
+}
+std::wstring Cell(const std::string& text)
+{
+    // Long values (whole arrays) are shortened in the list; the change file holds them in full.
+    auto wide=Wide(text);for(auto& c:wide)if(c==L'\r' || c==L'\n' || c==L'\t')c=L' ';
+    if(wide.size()>300)wide=wide.substr(0,297)+L"...";
+    return wide;
+}
+bool Show(HWND owner,const Review& review,std::vector<size_t>* ticked)
+{
+    Preview state{&review,std::vector<bool>(review.rows.size(),false)};
+    WNDCLASSW cls{};cls.lpfnWndProc=PreviewProc;cls.hInstance=GetModuleHandle(nullptr);cls.lpszClassName=L"ReloadedMapAuthoringPreview";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
+    auto window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,review.title.c_str(),WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT,920,660,owner,nullptr,cls.hInstance,&state);
+    if(!window)throw std::runtime_error("Could not open the change list.");
+    if(review.placement)WindowPlacement::Restore(window,review.placement);
+    EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG message{};
+    while(IsWindow(window))
+    {
+        auto status=GetMessage(&message,nullptr,0,0);
+        if(status<=0){if(status==0)PostQuitMessage(static_cast<int>(message.wParam));break;}
+        if(!IsDialogMessage(window,&message)){TranslateMessage(&message);DispatchMessage(&message);}
+    }
+    if(IsWindow(window))DestroyWindow(window);EnableWindow(owner,TRUE);SetActiveWindow(owner);
+    if(ticked){ticked->clear();for(size_t i=0;i<state.ticked.size();++i)if(state.ticked[i])ticked->push_back(i);}
+    return state.accepted;
 }
 void Open(HWND owner,bool exporting)
 {

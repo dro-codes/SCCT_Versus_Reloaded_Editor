@@ -170,6 +170,9 @@
     <ClInclude Include="MapOptimiseDialog.h" />
     <ClInclude Include="MapOptimiseModel.h" />
     <ClInclude Include="MapOptimiseNative.inl" />
+    <ClInclude Include="ObjExportModel.h" />
+    <ClInclude Include="ObjExportNative.inl" />
+    <ClInclude Include="ObjExportWindow.h" />
     <ClInclude Include="MapUsages.h" />
     <ClInclude Include="MapUsagesModel.h" />
     <ClInclude Include="UsageMarksModel.h" />
@@ -182,10 +185,19 @@
     <ClInclude Include="MapCheckModel.h" />
     <ClInclude Include="LightShadowMap.h" />
     <ClInclude Include="LightShadowModel.h" />
+    <ClInclude Include="Reachability.h" />
+    <ClInclude Include="ReachabilityModel.h" />
     <ClInclude Include="WindowPlacement.h" />
     <ClInclude Include="WindowPlacementModel.h" />
     <ClInclude Include="BudgetWindow.h" />
     <ClInclude Include="RenderBudget.h" />
+    <ClInclude Include="CommandPalette.h" />
+    <ClInclude Include="CommandPaletteModel.h" />
+    <ClInclude Include="MapOutliner.h" />
+    <ClInclude Include="MapOutlinerModel.h" />
+    <ClInclude Include="MoverWorkbench.h" />
+    <ClInclude Include="MoverModel.h" />
+    <ClInclude Include="MoverNative.inl" />
     <ClInclude Include="RenderBudgetModel.h" />
     <ClInclude Include="LevelSnapshot.h" />
     <ClInclude Include="PlayLevelPlayers.h" />
@@ -209,10 +221,16 @@
     <ClInclude Include="EmitterPreview.h" />
     <ClInclude Include="CharacterSkinsImage.h" />
     <ClInclude Include="CharacterSkinsModel.h" />
+    <ClInclude Include="CompareBackup.h" />
+    <ClInclude Include="CompareBackupModel.h" />
+    <ClInclude Include="CompareBackupNative.inl" />
     <ClInclude Include="ConveyorModel.h" />
     <ClInclude Include="ObjectivePlayersModel.h" />
     <ClInclude Include="ObjectivePlayersNative.inl" />
     <ClInclude Include="ConveyorNative.inl" />
+    <ClInclude Include="ObjImportModel.h" />
+    <ClInclude Include="ObjImportNative.inl" />
+    <ClInclude Include="ObjImportWindow.h" />
     <ClInclude Include="CharacterSkinsWindow.h" />
     <ClInclude Include="CharacterSkinPresetsModel.h" />
     <ClInclude Include="CharacterSkinPresetsWindow.h" />
@@ -232,6 +250,11 @@
     <ClInclude Include="PlacementNative.inl" />
     <ClInclude Include="StairSmoothModel.h" />
     <ClInclude Include="StairSmoothNative.inl" />
+    <ClInclude Include="PrefabModel.h" />
+    <ClInclude Include="PrefabNative.inl" />
+    <ClInclude Include="ScatterModel.h" />
+    <ClInclude Include="ScatterNative.inl" />
+    <ClInclude Include="ScatterTool.h" />
     <ClInclude Include="PlacementTools.h" />
     <ClInclude Include="SecurityModel.h" />
     <ClInclude Include="SecurityNative.inl" />
@@ -246,7 +269,9 @@
     <ClInclude Include="LightingBudgetNative.inl" />
     <ClInclude Include="MapCheckNative.inl" />
     <ClInclude Include="LightShadowNative.inl" />
+    <ClInclude Include="ReachabilityNative.inl" />
     <ClInclude Include="RenderBudgetNative.inl" />
+    <ClInclude Include="MapOutlinerNative.inl" />
     <ClInclude Include="MinimapNative.inl" />
     <ClInclude Include="StagePanel.inl" />
     <ClInclude Include="LightingPanel.inl" />
@@ -291,6 +316,8 @@
     <ClInclude Include="UndoHistory.h" />
     <ClInclude Include="UndoHistoryModel.h" />
     <ClInclude Include="StaticMeshBrowserFavorites.h" />
+    <ClInclude Include="Appearance.h" />
+    <ClInclude Include="AppearanceModel.h" />
     <ClInclude Include="AssetNameGloss.h" />
     <ClInclude Include="AssetNameGlossModel.h" />
     <ClInclude Include="AssetNameDictionary.gen.h" />
@@ -329,13 +356,18 @@
     <ClCompile Include="MapPackage.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="MapPackageDialog.cpp" />
     <ClCompile Include="MapOptimiseDialog.cpp" />
+    <ClCompile Include="ObjExportWindow.cpp" />
     <ClCompile Include="MapUsages.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="MapUsagesWindow.cpp" />
     <ClCompile Include="LightingBudget.cpp" />
     <ClCompile Include="MapCheck.cpp" />
     <ClCompile Include="LightShadowMap.cpp" />
+    <ClCompile Include="Reachability.cpp" />
     <ClCompile Include="WindowPlacement.cpp" />
     <ClCompile Include="RenderBudget.cpp" />
+    <ClCompile Include="CommandPalette.cpp" />
+    <ClCompile Include="MapOutliner.cpp" />
+    <ClCompile Include="MoverWorkbench.cpp" />
     <ClCompile Include="MinimapWindow.cpp" />
     <ClCompile Include="LevelSnapshot.cpp" />
     <ClCompile Include="PlayLevelPlayers.cpp" />
@@ -347,8 +379,10 @@
     <ClCompile Include="CharacterPreview.cpp" />
     <ClCompile Include="EmitterPreview.cpp" />
     <ClCompile Include="CharacterSkinsWindow.cpp" />
+    <ClCompile Include="ObjImportWindow.cpp" />
     <ClCompile Include="CharacterSkinPresetsWindow.cpp" />
     <ClCompile Include="EmitterLibraryWindow.cpp" />
+    <ClCompile Include="CompareBackup.cpp" />
     <ClCompile Include="MapAuthoringDialog.cpp" />
     <ClCompile Include="MagicEventWorkbench.cpp" />
     <ClCompile Include="CameraNetworkPanel.cpp" />
@@ -387,6 +421,7 @@
     <ClCompile Include="MapUnlock.cpp" />
     <ClCompile Include="MeasureTool.cpp" />
     <ClCompile Include="PlacementTools.cpp" />
+    <ClCompile Include="ScatterTool.cpp" />
     <ClCompile Include="MapRecovery.cpp" />
     <ClCompile Include="MapRecoveryUi.cpp" />
     <ClCompile Include="RecoveredBspLighting.cpp" />
@@ -409,6 +444,7 @@
     <ClCompile Include="StoreyFilter.cpp" />
     <ClCompile Include="UndoHistory.cpp" />
     <ClCompile Include="StaticMeshBrowserFavorites.cpp" />
+    <ClCompile Include="Appearance.cpp" />
     <ClCompile Include="AssetNameGloss.cpp" />
     <ClCompile Include="DdsImportFix.cpp" />
     <ClCompile Include="LightCullFix.cpp" />
@@ -431,9 +467,11 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Reloaded.Editor.rc" />
+    <ResourceCompile Include="Appearance.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="Appearance.manifest" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

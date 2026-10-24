@@ -31,7 +31,7 @@ namespace Conveyor
 {
 // Raise with every change to a script or mesh: a map's older classes and meshes are
 // made again over their old versions, and its placed belts keep their settings.
-constexpr int Version = 1;
+constexpr int Version = 2;
 constexpr const char* BeltClass = "ConveyorBelt";
 constexpr const char* MotorClass = "ConveyorMotor";
 constexpr const char* ItemClass = "ConveyorItem";
@@ -48,8 +48,9 @@ constexpr const char* RollerMesh = "ConveyorRoller";
 constexpr const char* Texture = "ConveyorParts";
 constexpr int ItemSlots = 8;
 constexpr int MaxItems = 128;
-// Belts in one chain (NextBelt links) that share its items.
-constexpr int MaxChain = 16;
+// Belts in one chain (NextBelt links) that share its items: a closed loop of up to
+// this many, or the first this many of a longer line (the editor warns past it).
+constexpr int MaxChain = 64;
 // The meshes are 100 units long (X) and wide (Y); a belt's DrawScale3D is
 // (Length / 100, Width / 100, 1), its rollers' Y scale (Width * RollerSpan / 100).
 constexpr double Unit = 100.0;
@@ -271,13 +272,16 @@ simulated function BuildChain()
 	local ConveyorBelt B;
 	local int s;
 
-	for (B = self; B != None && Segs < @SEGS@; B = B.NextBelt)
+	// Back at this belt is a loop, even one of exactly as many belts as fit.
+	for (B = self; B != None; B = B.NextBelt)
 	{
 		if (Segs > 0 && B == self)
 		{
 			bLoop = true;
 			break;
 		}
+		if (Segs >= @SEGS@)
+			break;
 		Seg[Segs] = B;
 		Segs++;
 	}

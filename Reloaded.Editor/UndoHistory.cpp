@@ -3,6 +3,7 @@
 #undef max
 #include "UndoHistory.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "UndoHistoryModel.h"
 #include "MemoryWriter.h"
 #include <algorithm>
@@ -237,12 +238,20 @@ namespace
     }
 
     HWND Child(int id) { return GetDlgItem(window, id); }
+    void Layout(int width, int height);
 
     void ShowStatus()
     {
         std::string text = available ? StatusText(shown) : "Open a map to see its undo history.";
         if (!report.empty()) text = report + "\r\n" + text;
         SetWindowTextA(Child(Status), text.c_str());
+        if (Appearance::Current() != Appearance::Theme::Classic)
+        {
+            // The status block grows to keep its lines in the larger modern font.
+            RECT client{};
+            GetClientRect(window, &client);
+            Layout(client.right, client.bottom);
+        }
         const int current = Current(shown);
         EnableWindow(Child(UndoButton), available && current > 0);
         EnableWindow(Child(RedoButton), available && current < Count(shown));
@@ -586,7 +595,8 @@ namespace
 
     void Layout(int width, int height)
     {
-        const int buttons = height - 92, status = height - 56, top = 40;
+        const int statusHeight = Appearance::FitHeight(Child(Status), std::max(40, width - 16), 50, height / 3);
+        const int buttons = height - 42 - statusHeight, status = height - 6 - statusHeight, top = 40;
         const int add = 130;
         MoveWindow(Child(JumpList), 8, 9, std::max(40, width - 16 - add - 6), 300, TRUE);
         MoveWindow(Child(AddButton), std::max(54, width - 8 - add), 8, add, 26, TRUE);
@@ -596,7 +606,7 @@ namespace
         MoveWindow(Child(RedoButton), 8 + (w + 6), buttons, w, 28, TRUE);
         MoveWindow(Child(GoButton), 8 + 2 * (w + 6), buttons, w, 28, TRUE);
         MoveWindow(Child(CopyButton), 8 + 3 * (w + 6), buttons, w, 28, TRUE);
-        MoveWindow(Child(Status), 8, status, std::max(40, width - 16), 50, TRUE);
+        MoveWindow(Child(Status), 8, status, std::max(40, width - 16), statusHeight, TRUE);
     }
 
     int Selected() { return static_cast<int>(SendMessageA(Child(List), LB_GETCURSEL, 0, 0)); }
@@ -715,7 +725,7 @@ void Open()
 {
     if (window)
     {
-        ShowWindow(window, SW_RESTORE);
+        ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(window);
         Refresh(true);
         return;

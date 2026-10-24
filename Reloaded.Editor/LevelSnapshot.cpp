@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "LevelSnapshot.h"
+#include "Appearance.h"
 #include "EditorConfigBits.h"
 #include "LevelSnapshotModel.h"
 #include "EntryThumbnailModel.h"
@@ -567,13 +568,15 @@ HBITMAP LevelSnapshot::LoadThumbnail(const fs::path& file, int width, int height
 
 HBITMAP LevelSnapshot::ThumbnailPlaceholder(int width, int height)
 {
+    // Modern Dark: a dark grey box (the light one stands out in the dark lists).
+    const bool dark = Appearance::Dark();
     return Cell(width, height, [&](Gdiplus::Graphics& graphics) {
-        Gdiplus::SolidBrush fill(Gdiplus::Color(255, 200, 200, 200));
-        Gdiplus::Pen border(Gdiplus::Color(255, 150, 150, 150));
+        Gdiplus::SolidBrush fill(dark ? Gdiplus::Color(255, 52, 52, 52) : Gdiplus::Color(255, 200, 200, 200));
+        Gdiplus::Pen border(dark ? Gdiplus::Color(255, 85, 85, 85) : Gdiplus::Color(255, 150, 150, 150));
         graphics.FillRectangle(&fill, 2, 2, width - 5, height - 5);
         graphics.DrawRectangle(&border, 2, 2, width - 5, height - 5);
         Gdiplus::Font font(L"Segoe UI", 8.0f);
-        Gdiplus::SolidBrush text(Gdiplus::Color(255, 90, 90, 90));
+        Gdiplus::SolidBrush text(dark ? Gdiplus::Color(255, 160, 160, 160) : Gdiplus::Color(255, 90, 90, 90));
         Gdiplus::StringFormat format;
         format.SetAlignment(Gdiplus::StringAlignmentCenter);
         format.SetLineAlignment(Gdiplus::StringAlignmentCenter);

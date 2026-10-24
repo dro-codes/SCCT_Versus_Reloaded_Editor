@@ -13,4 +13,7 @@ namespace MapCheck
 
     bool HandleCommand(UINT command);
     void Open(HWND owner);
+    // A reachability run ended (Reachability.h): an open Map Check refreshes
+    // so its Reachability rows follow.
+    void ReachabilityChanged();
 }

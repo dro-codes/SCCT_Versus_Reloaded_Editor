@@ -4,6 +4,7 @@
 #include "MeasureTool.h"
 #include "MeasureModel.h"
 #include "LightShadowMap.h"
+#include "Reachability.h"
 #include "WorkflowEditor.h"
 #include "GridSizeShortcutState.h"
 #include "MemoryWriter.h"
@@ -313,6 +314,7 @@ namespace
         if (overlayPauses > 0) return;
         // The Light and Shadow map shares this hook, under the measurement.
         LightShadowMap::DrawViewportOverlay(viewport, node);
+        Reachability::DrawViewportOverlay(viewport, node);
         __try { DrawOverlayGuarded(viewport, node); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

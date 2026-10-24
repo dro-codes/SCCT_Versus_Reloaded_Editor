@@ -164,6 +164,34 @@ namespace MapCheck
         std::vector<std::pair<Vec3, Vec3>> soft;   // lo, hi
     };
 
+    // A static mesh's collision as the editor keeps it (UStaticMesh, editor
+    // layout; MapCheckNative.inl reads it):
+    // - +0x104 per-polygon collision triangles (data, count +0x108), and their
+    //   BSP at +0x114 (count +0x118);
+    // - +0x128 the hull vertices (24 bytes: position, normal), +0x148 the hull
+    //   triangles (MCDCX hulls; WORD v0, v1, v2, material), and their BSP at
+    //   +0x150 (count +0x154).
+    // A BSP node is six int16s (triangle, children...), so a tree stops at
+    // 32767 nodes (StaticMeshCollisionFix caps the build there) and triangles
+    // no node holds never collide. The importer stops a mesh's per-polygon
+    // set at 15000 triangles.
+    // The hull triangles are stored hull after hull, with corners shared
+    // between hulls (one vertex per position), so HullsOf finds the hulls
+    // again from the order and shape.
+    struct HullTriangle { int a = 0, b = 0, c = 0; };
+
+    struct MeshCollision
+    {
+        std::string path, name;
+        std::vector<std::string> actors;   // the map's actors that use it
+        bool colliding = false;            // one of them has bCollideActors
+        int drawnTriangles = 0;
+        int polyTriangles = 0, polyNodes = 0, polyInTree = -1;   // -1: not read
+        std::vector<Vec3> hullVertices;
+        std::vector<HullTriangle> hullTriangles;
+        int hullNodes = 0, hullInTree = -1;
+    };
+
     struct Scene
     {
         Bsp bsp;
@@ -176,6 +204,7 @@ namespace MapCheck
         bool stockRan = false;
         std::vector<StockEntry> stock;
         FloorScan floors;
+        std::vector<MeshCollision> meshes;                 // every static mesh the map's actors use
     };
 
     struct Settings
@@ -187,10 +216,21 @@ namespace MapCheck
         bool stockChecks = true;
         double floatMinGap = 1;          // a static mesh this far above the surface below it floats...
         double floatMaxGap = 48;         // ...up to this far (0 turns the check off)
+        // Static mesh collision limits (0 turns a check off). The game tags each
+        // collision triangle a trace tests in one fixed table of 5512 slots
+        // (SCCT Versus +0x147880, the table at 0x10C8BC10), for hulls and
+        // per-polygon sets alike, with no bounds check.
+        int collisionTriangleLimit = 5512;
+        int collisionNodeLimit = 32767;  // int16 BSP child indices
+        int polyTriangleCap = 15000;     // the importer's per-polygon cap
+        bool malformedHulls = true;
     };
 
     inline Settings ClampSettings(Settings s)
     {
+        s.collisionTriangleLimit = std::clamp(s.collisionTriangleLimit, 0, 1000000);
+        s.collisionNodeLimit = std::clamp(s.collisionNodeLimit, 0, 1000000);
+        s.polyTriangleCap = std::clamp(s.polyTriangleCap, 0, 1000000);
         s.geometryTolerance = std::clamp(s.geometryTolerance, 0.0, 64.0);
         s.farOutside = std::clamp(s.farOutside, 0.0, 262144.0);
         s.leakGridCells = std::clamp(s.leakGridCells, 10000, 20000000);
@@ -578,6 +618,124 @@ namespace MapCheck
         return total;
     }
 
+    // ----------------------------------------------------- collision hulls --
+
+    // One MCDCX hull found again in a mesh's hull triangles.
+    struct Hull
+    {
+        size_t first = 0, count = 0;   // its first triangle and how many it has
+        int corners = 0;               // distinct corner positions
+        bool closed = false;           // every edge is shared by an even number of triangles
+        Vec3 lo{}, hi{};               // mesh-space box
+        // A closed convex hull with V corners has 2V - 4 triangles (Euler);
+        // an open one fewer. More can only be faces that overlap.
+        bool Malformed() const { return static_cast<long long>(count) > 2LL * corners - 4; }
+    };
+
+    // The hulls in a mesh's hull triangles. They are stored one hull after
+    // another, and a hull is convex and (when whole) closed, so a hull ends at
+    // the triangle where the run so far is closed, or where the next triangle
+    // would make it concave (a corner of it in front of one of the run's
+    // planes while others are behind, or the reverse). Both windings occur.
+    // The tolerance (1 unit plus 1/1000 of the mesh's extent) keeps a hull
+    // with slightly bent faces together, so its extra faces still show.
+    inline std::vector<Hull> HullsOf(const std::vector<Vec3>& vertices, const std::vector<HullTriangle>& triangles)
+    {
+        std::vector<Hull> hulls;
+        double scale = 0;
+        for (const auto& v : vertices)
+            for (double x : v) scale = std::max(scale, std::fabs(x));
+        const double tolerance = 1 + 1e-3 * scale;
+        struct Plane { Vec3 normal; double distance; int side; };   // side: +1 corners in front, -1 behind, 0 not known yet
+        std::vector<Plane> planes;
+        std::set<int> corners;
+        std::map<uint64_t, int> edges;
+        int odd = 0;
+        size_t first = 0, count = 0;
+        auto close = [&]()
+        {
+            if (count)
+            {
+                Hull hull;
+                hull.first = first; hull.count = count; hull.closed = odd == 0;
+                std::set<Vec3> positions;
+                for (int index : corners) positions.insert(vertices[static_cast<size_t>(index)]);
+                hull.corners = static_cast<int>(positions.size());
+                hull.lo = hull.hi = *positions.begin();
+                for (const auto& p : positions)
+                    for (size_t k = 0; k < 3; ++k) { hull.lo[k] = std::min(hull.lo[k], p[k]); hull.hi[k] = std::max(hull.hi[k], p[k]); }
+                hulls.push_back(hull);
+            }
+            planes.clear(); corners.clear(); edges.clear(); odd = 0; count = 0;
+        };
+        auto valid = [&](int index) { return index >= 0 && static_cast<size_t>(index) < vertices.size(); };
+        for (size_t i = 0; i < triangles.size(); ++i)
+        {
+            const auto& t = triangles[i];
+            if (!valid(t.a) || !valid(t.b) || !valid(t.c)) continue;
+            const Vec3* points[3] = {&vertices[static_cast<size_t>(t.a)], &vertices[static_cast<size_t>(t.b)], &vertices[static_cast<size_t>(t.c)]};
+            Vec3 normal = Cross(Sub(*points[1], *points[0]), Sub(*points[2], *points[0]));
+            const double length = Length(normal);
+            const bool flat = length > 1e-9;
+            if (flat) normal = Scale(normal, 1 / length);
+            const double distance = flat ? Dot(normal, *points[0]) : 0;
+            if (count)
+            {
+                bool split = odd == 0;
+                if (!split && flat)
+                {
+                    double lowest = 0, highest = 0;
+                    for (int index : corners)
+                    {
+                        const double d = Dot(normal, vertices[static_cast<size_t>(index)]) - distance;
+                        lowest = std::min(lowest, d); highest = std::max(highest, d);
+                    }
+                    split = highest > tolerance && lowest < -tolerance;
+                }
+                for (size_t k = 0; k < planes.size() && !split; ++k)
+                {
+                    int side = planes[k].side;
+                    for (const auto* p : points)
+                    {
+                        const double d = Dot(planes[k].normal, *p) - planes[k].distance;
+                        if (side == 0 && std::fabs(d) > tolerance) side = d > 0 ? 1 : -1;
+                        else if (side != 0 && d * side < -tolerance) { split = true; break; }
+                    }
+                }
+                if (split) close();
+            }
+            if (!count) first = i;
+            ++count;
+            for (int index : {t.a, t.b, t.c}) corners.insert(index);
+            const int ends[3][2] = {{t.a, t.b}, {t.b, t.c}, {t.c, t.a}};
+            for (const auto& e : ends)
+            {
+                const uint64_t key = (static_cast<uint64_t>(std::min(e[0], e[1])) << 32) | static_cast<uint32_t>(std::max(e[0], e[1]));
+                odd += ++edges[key] % 2 ? 1 : -1;
+            }
+            // Which side of each plane the corners are on, now that this triangle's are in.
+            for (auto& plane : planes)
+                if (plane.side == 0)
+                    for (const auto* p : points)
+                    {
+                        const double d = Dot(plane.normal, *p) - plane.distance;
+                        if (std::fabs(d) > tolerance) { plane.side = d > 0 ? 1 : -1; break; }
+                    }
+            if (flat)
+            {
+                Plane plane{normal, distance, 0};
+                for (int index : corners)
+                {
+                    const double d = Dot(normal, vertices[static_cast<size_t>(index)]) - distance;
+                    if (std::fabs(d) > tolerance) { plane.side = d > 0 ? 1 : -1; break; }
+                }
+                planes.push_back(plane);
+            }
+        }
+        close();
+        return hulls;
+    }
+
     // ------------------------------------------------------------ checks --
 
     // A check group: one entry per kind of problem, run in order. Add a new
@@ -601,6 +759,7 @@ namespace MapCheck
         constexpr const char* kActors = "Actors";
         constexpr const char* kZones = "Zones";
         constexpr const char* kProps = "Props";
+        constexpr const char* kCollision = "Collision";
         constexpr const char* kStock = "Editor checks";
 
         inline void CheckActors(const Scene& scene, const Settings& settings, Report& report)
@@ -912,6 +1071,87 @@ namespace MapCheck
                     + " because the editor's line check failed, so the meshes after those were not checked. Refresh to try again."));
         }
 
+        inline std::string Point(const Vec3& p)
+        {
+            return "(" + Units(p[0]) + ", " + Units(p[1]) + ", " + Units(p[2]) + ")";
+        }
+
+        // Static mesh collision the game cannot use or that crashes it, one row
+        // per mesh and limit; each row selects the actors that use the mesh.
+        inline void CheckCollision(const Scene& scene, const Settings& settings, Report& report)
+        {
+            for (const auto& mesh : scene.meshes)
+            {
+                const int hullTriangles = static_cast<int>(mesh.hullTriangles.size());
+                const auto copies = mesh.actors.size();
+                const std::string used = "Used by " + std::to_string(copies) + (copies == 1 ? " actor." : " actors.");
+                // A mesh none of whose actors collide is never traced against.
+                auto add = [&](Severity severity, const char* check, const std::string& message)
+                {
+                    auto p = Make(mesh.colliding ? severity : Severity::Note, kCollision, check,
+                                  message + " " + used + (mesh.colliding ? "" : " None of them collide now, so this matters only once one does."));
+                    p.actors = mesh.actors;
+                    report.problems.push_back(std::move(p));
+                };
+
+                const int limit = settings.collisionTriangleLimit;
+                if (limit > 0 && (mesh.polyTriangles > limit || hullTriangles > limit))
+                {
+                    std::string sets;
+                    if (mesh.polyTriangles > limit) sets = Units(mesh.polyTriangles) + " per-polygon collision triangles";
+                    if (hullTriangles > limit) sets += (sets.empty() ? "" : " and ") + Units(hullTriangles) + " hull triangles";
+                    add(Severity::Error, "Crashes the game",
+                        mesh.name + " has " + sets + ", over the game's limit of " + Units(limit) + " per set: it crashes the game. The game marks each collision "
+                        "triangle a trace tests in a fixed table of " + Units(limit) + " slots without checking the count, so a trace that reaches a later "
+                        "triangle writes over the game's memory and the game crashes at random places. Split the mesh into parts or simplify its collision.");
+                }
+
+                const int cap = settings.polyTriangleCap;
+                if (cap > 0 && mesh.polyTriangles >= cap)
+                    add(Severity::Warning, "Per-polygon collision cut short",
+                        mesh.name + "'s per-polygon collision stopped at the importer's cap of " + Units(cap) + " triangles"
+                        + (mesh.drawnTriangles > mesh.polyTriangles ? " (it draws " + Units(mesh.drawnTriangles) + ")" : "")
+                        + ", so faces past it may have no collision" + (hullTriangles ? ": shots may pass through them (players collide with its hulls)." : ": players and shots may pass through them.")
+                        + " Split the mesh into parts.");
+
+                const int nodes = settings.collisionNodeLimit;
+                auto lost = [](int triangles, int inTree) { return inTree >= 0 && inTree < triangles ? triangles - inTree : 0; };
+                if (nodes > 0 && mesh.polyNodes >= nodes)
+                {
+                    const int missing = lost(mesh.polyTriangles, mesh.polyInTree);
+                    add(hullTriangles ? Severity::Warning : Severity::Error, "Collision BSP full",
+                        mesh.name + "'s per-polygon collision BSP is full (" + Units(mesh.polyNodes) + " nodes, the most its 16-bit indices hold)"
+                        + (missing ? ": " + Units(missing) + " of its " + Units(mesh.polyTriangles) + " collision triangles are in no node and never collide" : "; triangles it did not reach never collide")
+                        + (hullTriangles ? ". Players collide with its hulls, so this lets shots through." : ", so players and shots pass through them.")
+                        + " Split the mesh into parts.");
+                }
+                if (nodes > 0 && mesh.hullNodes >= nodes)
+                {
+                    const int missing = lost(hullTriangles, mesh.hullInTree);
+                    add(Severity::Error, "Hull BSP full",
+                        mesh.name + "'s hull collision BSP is full (" + Units(mesh.hullNodes) + " nodes, the most its 16-bit indices hold)"
+                        + (missing ? ": " + Units(missing) + " of its " + Units(hullTriangles) + " hull triangles are in no node" : "")
+                        + ", so the hulls past it do not collide and players fall through them. Use fewer, simpler hulls, or split the mesh.");
+                }
+
+                if (settings.malformedHulls && hullTriangles)
+                {
+                    std::vector<Hull> bad;
+                    for (const auto& hull : HullsOf(mesh.hullVertices, mesh.hullTriangles))
+                        if (hull.Malformed()) bad.push_back(hull);
+                    if (!bad.empty())
+                    {
+                        const auto& h = bad.front();
+                        add(Severity::Error, "Malformed collision hull",
+                            mesh.name + (bad.size() == 1 ? " has a malformed collision hull: " : " has " + std::to_string(bad.size()) + " malformed collision hulls. The first: ")
+                            + std::to_string(h.count) + " triangles over " + std::to_string(h.corners) + " corners, where a convex hull has at most "
+                            + std::to_string(std::max(0, 2 * h.corners - 4)) + " (2 x corners - 4), so its faces overlap and the game ignores it: players fall or walk through it. "
+                            "It spans " + Point(h.lo) + " to " + Point(h.hi) + " in the mesh's own space. Export it again with flat faces, one per set of corners.");
+                    }
+                }
+            }
+        }
+
         inline void CheckStock(const Scene& scene, const Settings&, Report& report)
         {
             for (const auto& entry : scene.stock)
@@ -929,6 +1169,7 @@ namespace MapCheck
             {"actors", "Actors outside the world or stuck in geometry", Detail::CheckActors},
             {"zones", "BSP leaks and zones that are not sealed", Detail::CheckZones},
             {"props", "Static meshes floating above the surface below them", Detail::CheckProps},
+            {"collision", "Static mesh collision past the game's limits", Detail::CheckCollision},
             {"stock", "The editor's own Check Map for Errors", Detail::CheckStock},
         };
         return groups;

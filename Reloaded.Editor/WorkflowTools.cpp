@@ -4,6 +4,7 @@
 #include "WorkflowTools.h"
 #include "WindowPlacement.h"
 #include "CharacterSkinsWindow.h"
+#include "ObjImportWindow.h"
 #include "CharacterSkinPresetsWindow.h"
 #include "EmitterLibraryWindow.h"
 #include "EditorExtras.h"
@@ -11,9 +12,12 @@
 #include "PropertySearch.h"
 #include "UndoHistory.h"
 #include "FavoritesWindow.h"
+#include "CompareBackup.h"
 #include "LightingBudget.h"
 #include "MapCheck.h"
 #include "RenderBudget.h"
+#include "MapOutliner.h"
+#include "MoverWorkbench.h"
 #include "MinimapWindow.h"
 #include "WorkflowEditor.h"
 #include "EmitterLibraryModel.h"
@@ -24,6 +28,7 @@
 #include "MapAuthoringModel.h"
 #include "MapPackageDialog.h"
 #include "MapOptimiseDialog.h"
+#include "ObjExportWindow.h"
 #include "MapUsagesWindow.h"
 #include "MapRecovery.h"
 #include "MemoryWriter.h"
@@ -34,12 +39,17 @@
 #include "EmitterPreview.h"
 #include "CharacterPreview.h"
 #include "MeasureTool.h"
+#include "CommandPalette.h"
 #include "PlacementTools.h"
+#include "ScatterTool.h"
 #include "PropertyPaste.h"
 #include "LightShadowMap.h"
 #include "LightShadowModel.h"
+#include "Reachability.h"
+#include "ReachabilityModel.h"
 #include "EntryThumbnailModel.h"
 #include "ViewBookmarkModel.h"
+#include "PrefabModel.h"
 #include "UsageMarksModel.h"
 #include "SaveBackupModel.h"
 #include "CrashRecoveryModel.h"
@@ -65,7 +75,9 @@ using namespace Workflow;
 namespace
 {
     constexpr int kList=100,kName=101,kStatus=102,kFollow=103,kScope=104;
-    enum Button { Refresh=200,Primary,Secondary,Third,Fourth,Fifth,Sixth,Seventh,Eighth,Ninth,Tenth,Eleventh,Twelfth };
+    enum Button { Refresh=200,Primary,Secondary,Third,Fourth,Fifth,Sixth,Seventh,Eighth,Ninth,Tenth,Eleventh,Twelfth,
+                  // Actor Assemblies' linked prefab buttons.
+                  PlaceLinkedButton,SelectInstanceButton,SelectAllInstancesButton,UpdatePrefabButton,BreakLinkButton,LastButton=BreakLinkButton };
     constexpr int UpdateThumbnail=Twelfth; // List right-click menu only.
     enum class Kind { Assets,Connections,Views,Assemblies };
     // [WindowPlacement] keys, one per kind of window: Working Views opens
@@ -709,6 +721,159 @@ namespace
         auto answer=DialogBoxIndirectParamW(GetModuleHandle(nullptr),dlg,owner,TagPreviewProc,reinterpret_cast<LPARAM>(&data));
         if(answer==-1)throw std::runtime_error("Could not open tag rename preview.");return answer==IDOK;
     }
+    // ---- Linked prefabs (PrefabModel.h) ----------------------------------------------------------
+    // An instance is the actors filed in its Group, so actors added to that
+    // group belong to it and a deleted actor is simply gone; the map's record
+    // holds what the Group cannot (assembly, pose, the members' assembly poses).
+    Json& MapInstances(Json& library) { return library["maps"][mapKey]["instances"]; }
+    std::map<std::string,std::vector<Json>> PrefabMembers()
+    {
+        std::map<std::string,std::vector<Json>> result;
+        for(const auto& actor:Editor::PrefabActors())
+            for(const auto& group:Prefab::InstanceGroups(actor.at("groups").get<std::string>())) result[Fold(group)].push_back(actor);
+        return result;
+    }
+    const std::vector<Json>& MembersOf(const std::map<std::string,std::vector<Json>>& members,const Json& record)
+    {
+        static const std::vector<Json> none;
+        auto found=members.find(Fold(record.at("group").get<std::string>())); return found==members.end()?none:found->second;
+    }
+    Json Identities(const std::vector<Json>& actors)
+    {
+        Json result=Json::array(); for(const auto& a:actors) result.push_back({{"path",a.at("path")},{"class",a.at("class")}}); return result;
+    }
+    std::vector<Prefab::MemberPose> MemberPoses(const std::vector<Json>& actors)
+    {
+        std::vector<Prefab::MemberPose> result;
+        for(const auto& a:actors) result.push_back({a.at("name").get<std::string>(),{a.at("position").get<Vector>(),a.at("rotation").get<Rotation>()}});
+        return result;
+    }
+    const Json* AssemblyEntry(const std::string& id)
+    {
+        for(const auto& entry:document.at("assemblies")) if(entry.value("id",std::string{})==id) return &entry;
+        return nullptr;
+    }
+    // The linked instances of each assembly that still have actors in the map.
+    std::map<std::string,size_t> LinkedCounts()
+    {
+        std::map<std::string,size_t> counts; const auto members=PrefabMembers();
+        const auto& instances=document.at("maps").at(mapKey).value("instances",Json::array());
+        for(const auto& record:instances) if(Prefab::Linked(record) && !MembersOf(members,record).empty()) ++counts[Prefab::AssemblyOf(record)];
+        return counts;
+    }
+    // The one linked instance the map selection belongs to.
+    Json SelectedInstance()
+    {
+        Sync();
+        const auto records=Prefab::RecordsNamed(document.at("maps").at(mapKey).value("instances",Json::array()),Editor::SelectedGroups());
+        if(records.empty()) throw std::runtime_error("Select an actor of a linked prefab first: a copy placed with Actor Assemblies > Place Linked.");
+        if(records.size()>1) throw std::runtime_error("The selection spans "+std::to_string(records.size())+" linked instances. Select actors of one instance.");
+        return records[0];
+    }
+    bool SelectionIsLinked()
+    {
+        try { SelectedInstance(); return true; } catch(const std::exception&) { return false; }
+    }
+    void RefreshAssemblyWindows();
+    Json PlaceLinked(const Json& entry,const Pose& frame,const std::map<std::string,std::string>& bindings)
+    {
+        const auto id=Id(); const auto group=Prefab::GroupName(entry.at("name").get<std::string>(),id);
+        auto placed=Editor::PlaceAssembly(entry,frame,bindings,group); placed["id"]=id;
+        auto record=Prefab::NewRecord(placed,group,entry);
+        Json next=document; MapInstances(next).push_back(record);
+        try { Save(next); }
+        catch(...) { Editor::Exec("TRANSACTION UNDO"); throw; }
+        return record;
+    }
+    std::string SelectInstance()
+    {
+        const auto record=SelectedInstance(); const auto all=PrefabMembers(); const auto& members=MembersOf(all,record);
+        Editor::Select(Identities(members),false);
+        const auto* entry=AssemblyEntry(Prefab::AssemblyOf(record));
+        return "Selected the "+std::to_string(members.size())+" actors of this instance of '"+(entry?entry->at("name").get<std::string>():std::string("a deleted assembly"))+"' ("+record.at("group").get<std::string>()+").";
+    }
+    // Every linked instance of the assembly (the selection's when `assembly` is empty).
+    std::string SelectAllInstances(std::string assembly)
+    {
+        Sync();
+        if(assembly.empty()) assembly=Prefab::AssemblyOf(SelectedInstance());
+        const auto members=PrefabMembers(); std::vector<Json> all; size_t count=0;
+        for(const auto& record:Prefab::LinkedOf(document.at("maps").at(mapKey).value("instances",Json::array()),assembly))
+        {
+            const auto& own=MembersOf(members,record); if(own.empty()) continue;
+            ++count; all.insert(all.end(),own.begin(),own.end());
+        }
+        if(all.empty()) throw std::runtime_error("No linked instance of this assembly is in the map. Place one with Place Linked.");
+        Editor::Select(Identities(all),false);
+        return "Selected "+Prefab::CountText(count)+" ("+std::to_string(all.size())+" actors).";
+    }
+    // Update Prefab from This Instance: the selection's instance becomes the
+    // assembly's content and every other linked instance in this map is
+    // rebuilt where it stands, in one Undo step. Returns what happened, or
+    // nothing when the confirmation was cancelled.
+    std::string UpdatePrefab(HWND owner,bool confirm)
+    {
+        const auto record=SelectedInstance();
+        const auto* found=AssemblyEntry(Prefab::AssemblyOf(record));
+        if(!found) throw std::runtime_error("This instance's assembly is no longer in the library. Break Link keeps its actors as they are.");
+        const Json entry=*found; const auto name=entry.at("name").get<std::string>();
+        const auto members=PrefabMembers(); const auto own=MembersOf(members,record);
+        if(own.empty()) throw std::runtime_error("This instance has no actors left in the map.");
+        const Pose frame=Prefab::InstanceFrame(record,MemberPoses(own));
+        Json captured=Editor::CaptureAssembly(Identities(own),frame);
+        const bool local=captured.contains("local"); captured.erase("local");
+        const auto names=record.value("names",Json::object()).get<std::map<std::string,std::string>>();
+        captured=Prefab::WithoutInstanceGroupsInText(CanonicalizeAssembly(captured,names));
+        captured["pivot"]=entry.at("pivot");
+        Json jobs=Json::array(); std::vector<Json> rebuilt; size_t missing=0;
+        for(const auto& other:Prefab::LinkedOf(document.at("maps").at(mapKey).value("instances",Json::array()),entry.at("id")))
+        {
+            if(other.at("id")==record.at("id")) continue;
+            const auto& theirs=MembersOf(members,other);
+            if(theirs.empty()) { ++missing; continue; }
+            const Pose at=Prefab::InstanceFrame(other,MemberPoses(theirs));
+            jobs.push_back({{"members",Identities(theirs)},{"group",other.at("group")},{"position",at.position},{"rotation",at.rotation}});
+            rebuilt.push_back(other);
+        }
+        if(confirm)
+        {
+            std::string text="Update the prefab '"+name+"' from this instance?\n\nIts "+std::to_string(own.size())+" actors become the assembly's content, and ";
+            text+=jobs.empty()?std::string("there is no other linked instance in this map to rebuild."):Prefab::CountText(jobs.size())+" elsewhere in this map "+(jobs.size()==1?"is":"are")+" rebuilt where "+(jobs.size()==1?"it stands":"they stand")+", each keeping its own position and rotation. Changes made to those copies are replaced.";
+            if(!captured.at("bindings").empty())
+            {
+                text+="\n\nOutside actors they point at (the same for every copy):\n";
+                for(const auto& b:captured.at("bindings")) text+="  "+b.at("label").get<std::string>()+"\n";
+            }
+            if(missing) text+="\n\n"+std::to_string(missing)+(missing==1?" instance has":" instances have")+" no actors left in the map and "+(missing==1?"is":"are")+" left out.";
+            if(local) text+="\n\nIt uses assets stored inside this map, so it places correctly only in this map.";
+            text+="\n\nOne Undo step puts the map back; the library keeps the new content. Unlinked copies and other maps are not changed.";
+            if(MessageBoxA(owner,text.c_str(),"Update Prefab from This Instance",MB_OKCANCEL|MB_ICONINFORMATION)!=IDOK) return {};
+        }
+        const auto results=jobs.empty()?Json::array():Editor::RebuildPrefabInstances(captured,jobs);
+        Json next=document; auto& instances=MapInstances(next);
+        UpdateEntry(next["assemblies"],entry.at("id"),captured);
+        Json edited=record; edited["members"]=Identities(own); edited["names"]=Json::object();
+        for(const auto& a:captured.at("actors")) edited["names"][a.at("sourcePath").get<std::string>()]=a.at("name");
+        edited["position"]=frame.position; edited["rotation"]=frame.rotation; edited["locals"]=Prefab::Locals(captured);
+        Prefab::Replace(instances,edited);
+        for(size_t i=0;i<rebuilt.size();++i) Prefab::Replace(instances,Prefab::Rebuilt(rebuilt[i],results.at(i),captured));
+        try { Save(next); }
+        catch(...) { if(!jobs.empty()) Editor::Exec("TRANSACTION UNDO"); throw; }
+        Editor::Select(Identities(own),false);
+        std::string done="Updated '"+name+"' from this instance"+(jobs.empty()?std::string("."):" and rebuilt "+Prefab::CountText(jobs.size())+".");
+        if(Prefab::HasBrushes(captured)) done+=" The prefab holds brushes: rebuild the geometry to see their new shape.";
+        return done;
+    }
+    // Break Link: the instance's actors leave its Group (one Undo step) and the record goes.
+    std::string BreakLink()
+    {
+        const auto record=SelectedInstance(); const auto all=PrefabMembers(); const auto& own=MembersOf(all,record);
+        const auto group=record.at("group").get<std::string>();
+        if(!own.empty()) Editor::DesignGroupMembers(Identities(own),group,"remove");
+        Json next=document; MapInstances(next)=Prefab::WithoutRecord(MapInstances(next),record.at("id"));
+        Save(next);
+        return "Unlinked "+std::to_string(own.size())+" actors from their prefab; they stay in the map as ordinary actors.";
+    }
     struct State
     {
         Kind kind; HWND window{},list{},status{}; Json rows=Json::array(); std::string selectedId,source,connectionActor; bool mesh=false;
@@ -800,9 +965,12 @@ namespace
             auto add=[&](HBITMAP bitmap){int index=-1;if(images && bitmap)index=ImageList_Add(images,bitmap,nullptr);if(bitmap)DeleteObject(bitmap);return index;};
             const int placeholder=add(LevelSnapshot::ThumbnailPlaceholder(Thumbnail::kCellWidth,Thumbnail::kCellHeight));
             if(auto old=ListView_SetImageList(s.list,images,LVSIL_SMALL)) ImageList_Destroy(old);
+            std::map<std::string,size_t> linked;
+            if(s.kind==Kind::Assemblies) { try { linked=LinkedCounts(); } catch(const std::exception& e) { Logger::log(std::string("Linked prefabs: ")+e.what()); } }
             for(const auto& j:s.rows)
             {
                 std::string info=s.kind==Kind::Views?std::to_string(j.at("cameras").size())+" viewports":std::to_string(j.at("actors").size())+" actors / "+std::to_string(j.at("bindings").size())+" external bindings";
+                if(s.kind==Kind::Assemblies) { const auto count=linked.find(j.value("id",std::string{})); if(count!=linked.end()) info+=" / "+Prefab::CountText(count->second)+" in this map"; }
                 if(s.kind==Kind::Views && Bookmarks::SlotOf(j)) info+=", key "+std::to_string(Bookmarks::SlotOf(j));
                 int image=placeholder;
                 try
@@ -816,7 +984,14 @@ namespace
                 ++i;
             }
             if(s.editing.is_object() && !s.editing.empty()) Status(s,"Editing "+s.editing.at("name").get<std::string>()+" — "+std::to_string(s.members.size())+" members. Add/Remove Selected changes membership; Save Changes updates the library.");
-            else Status(s,s.kind==Kind::Views?"Restore a view, adjust the workspace, then Update Selected from Current. Right-click an entry to update its thumbnail.":"Edit Contents to add/remove members. Saving affects future placements; other placed copies stay independent. Right-click an entry to update its thumbnail.");
+            else Status(s,s.kind==Kind::Views?"Restore a view, adjust the workspace, then Update Selected from Current. Right-click an entry to update its thumbnail.":"Place Linked keeps a copy linked: Update Prefab from Instance rebuilds every linked copy from the one you edited. Other placed copies stay independent. Right-click an entry to update its thumbnail.");
+        }
+    }
+    void RefreshAssemblyWindows()
+    {
+        for(auto s:windows) if(s->kind==Kind::Assemblies)
+        {
+            try { Populate(*s); } catch(const std::exception& e) { Status(*s,e.what()); }
         }
     }
     void StoreEntry(State& s,Json value,bool update)
@@ -948,13 +1123,16 @@ namespace
         if(session) { s.editing=Json{}; s.members=Json::array(); s.editLevel=0; }
         CaptureThumbnail(s,s.selectedId,members);
     }
-    Json Place(State& s,const Json& entry)
+    // Place Assembly, or with `linked` Place Linked: one copy that stays linked
+    // to the entry as a prefab instance (PrefabModel.h).
+    Json Place(State& s,const Json& entry,bool linked=false)
     {
         auto frame=Editor::BuilderPose(); std::vector<InputField> fields;
         const char* labels[]={"Position X","Position Y","Position Z","Pitch (degrees)","Yaw (degrees)","Roll (degrees)"};
         for(int i=0;i<6;++i) fields.push_back({labels[i],i<3?std::to_string(frame.position[i]):"0",{}});
-        fields.push_back({"Copies","1",{}});fields.push_back({"Spacing X","128",{}});fields.push_back({"Spacing Y","0",{}});fields.push_back({"Spacing Z","0",{}});fields.push_back({"Yaw snap (degrees, 0=off)","15",{}});
-        if(!Ask(s.window,"Place Assembly",fields)) return {};
+        if(!linked){fields.push_back({"Copies","1",{}});fields.push_back({"Spacing X","128",{}});fields.push_back({"Spacing Y","0",{}});fields.push_back({"Spacing Z","0",{}});}
+        fields.push_back({"Yaw snap (degrees, 0=off)","15",{}});
+        if(!Ask(s.window,linked?"Place Linked Prefab":"Place Assembly",fields)) return {};
         for(int i=0;i<6;++i)
         {
             size_t used=0; double v=std::stod(fields[i].value,&used);
@@ -971,8 +1149,9 @@ namespace
             if(!Ask(s.window,"Bind External Actor",binding)) return {};
             bindings[b.at("id")]=binding[0].value==choices[0]?"":binding[0].value;
         }
-        double copies=Design::Number(fields[6].value,1,128);if(copies!=std::floor(copies))throw std::runtime_error("Copy count must be a whole number.");
-        double snap=Design::Number(fields[10].value,0,360);if(snap>0){double degrees=frame.rotation[1]*360.0/65536;frame.rotation[1]=static_cast<int>(std::round(degrees/snap)*snap*65536/360);}
+        double copies=linked?1:Design::Number(fields[6].value,1,128);if(copies!=std::floor(copies))throw std::runtime_error("Copy count must be a whole number.");
+        double snap=Design::Number(fields.back().value,0,360);if(snap>0){double degrees=frame.rotation[1]*360.0/65536;frame.rotation[1]=static_cast<int>(std::round(degrees/snap)*snap*65536/360);}
+        if(linked) return PlaceLinked(entry,frame,bindings);
         auto definition=entry;
         if(copies>1){if(!entry.at("bindings").empty())throw std::runtime_error("Repeated assemblies must contain their linked actors. Place a single bound copy otherwise.");definition=Design::Repeat(entry,static_cast<int>(copies),{Design::Number(fields[7].value),Design::Number(fields[8].value),Design::Number(fields[9].value)},0);}
         Json instance=Editor::PlaceAssembly(definition,frame,bindings); Json next=document;
@@ -1083,6 +1262,17 @@ namespace
         if(s.kind==Kind::Assemblies)
         {
             if(command==Primary) { Activate(s); return; }
+            if(command==PlaceLinkedButton) { auto placed=Place(s,Entry(s),true); Populate(s); if(!placed.empty()) Status(s,"Placed a linked instance ("+placed.at("group").get<std::string>()+"). Edit any instance, then Update Prefab from Instance to change them all."); return; }
+            if(command==SelectInstanceButton) { auto text=SelectInstance(); Status(s,text); return; }
+            if(command==SelectAllInstancesButton)
+            {
+                // The listed entry's instances, or the map selection's when no entry is chosen.
+                const int row=Selected(s); std::string assembly;
+                if(row>=0 && row<static_cast<int>(s.rows.size())) assembly=s.rows[row].value("id",std::string{});
+                auto text=SelectAllInstances(assembly); Status(s,text); return;
+            }
+            if(command==UpdatePrefabButton) { auto text=UpdatePrefab(s.window,true); if(!text.empty()) { Populate(s); Status(s,text); } return; }
+            if(command==BreakLinkButton) { auto text=BreakLink(); Populate(s); Status(s,text); return; }
             if(command==Secondary) { SaveAssembly(s,false,false); return; }
             if(command==Third) { EditContents(s); return; }
             if(command==Sixth) { SaveAssembly(s,true,false); return; }
@@ -1146,7 +1336,8 @@ namespace
                 if(s->kind==Kind::Assets) {button(Primary,"Select and Focus");button(Secondary,"Replace Checked...");button(Third,"Search All Maps...");Control(window,"BUTTON","Limit to selection captured at Refresh",BS_AUTOCHECKBOX,kScope,0,0,300,24);}
                 if(s->kind==Kind::Connections) {button(Primary,"Select and Focus");button(Secondary,"Add Objective / Trigger...");button(Third,"Graph...");auto f=Control(window,"BUTTON","Follow Selection",BS_AUTOCHECKBOX,kFollow,0,0,200,24);SendMessage(f,BM_SETCHECK,BST_CHECKED,0);}
                 if(s->kind==Kind::Views) {button(Primary,"Restore");button(Secondary,"Save New...");button(Third,"Update Selected from Current");button(Fourth,"Rename...");button(Fifth,"Delete...");}
-                if(s->kind==Kind::Assemblies) {button(Primary,"Place...");button(Secondary,"Save Selection as New...");button(Third,"Edit Contents...");button(Sixth,"Update from Selection...");button(Fourth,"Rename...");button(Fifth,"Delete...");button(Seventh,"Add Selected");button(Eighth,"Remove Selected");button(Ninth,"Select Members");button(Tenth,"Save Changes...");button(Eleventh,"Cancel Editing");}
+                if(s->kind==Kind::Assemblies) {button(Primary,"Place...");button(Secondary,"Save Selection as New...");button(Third,"Edit Contents...");button(Sixth,"Update from Selection...");button(Fourth,"Rename...");button(Fifth,"Delete...");button(Seventh,"Add Selected");button(Eighth,"Remove Selected");button(Ninth,"Select Members");button(Tenth,"Save Changes...");button(Eleventh,"Cancel Editing");
+                    button(PlaceLinkedButton,"Place Linked...");button(SelectInstanceButton,"Select Instance");button(SelectAllInstancesButton,"Select All Instances");button(UpdatePrefabButton,"Update Prefab from Instance...");button(BreakLinkButton,"Break Link");}
                 s->list=Control(window,WC_LISTVIEWA,"",LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|WS_BORDER,kList,0,0,500,300);
                 ListView_SetExtendedListViewStyle(s->list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|(s->kind==Kind::Assets?LVS_EX_CHECKBOXES:0));
                 const char* columns=s->kind==Kind::Connections?"Direction|Actor|Relationship":s->kind==Kind::Assets?"Actor|Property / surface|Usage":"Name|Contents|Updated (UTC epoch ms)";
@@ -1162,6 +1353,7 @@ namespace
                 if(point.x==-1 && point.y==-1) {RECT r{};ListView_GetItemRect(s->list,row,&r,LVIR_LABEL);point={r.left,r.bottom};ClientToScreen(s->list,&point);}
                 auto menu=CreatePopupMenu(); if(!menu) return 0;
                 AppendMenuA(menu,MF_STRING,UpdateThumbnail,"Update &Thumbnail");
+                if(s->kind==Kind::Assemblies) AppendMenuA(menu,MF_STRING,SelectAllInstancesButton,"Select All &Linked Instances");
                 AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
                 AppendMenuA(menu,MF_STRING,Fourth,"&Rename...");
                 AppendMenuA(menu,MF_STRING,Fifth,"&Delete...");
@@ -1172,7 +1364,7 @@ namespace
             if(message==WM_GETMINMAXINFO) {auto m=reinterpret_cast<MINMAXINFO*>(l);m->ptMinTrackSize={680,430};return 0;}
             if(message==WM_COMMAND)
             {
-                if(LOWORD(w)>=Refresh && LOWORD(w)<=Twelfth) {Command(*s,LOWORD(w));return 0;}
+                if(LOWORD(w)>=Refresh && LOWORD(w)<=LastButton) {Command(*s,LOWORD(w));return 0;}
                 if(LOWORD(w)==kScope || LOWORD(w)==kFollow) {Populate(*s,true);return 0;}
             }
             if(message==WM_NOTIFY)
@@ -1209,12 +1401,15 @@ namespace
     }
     HWND Open(Kind kind,HWND owner,std::string source={},bool mesh=false)
     {
-        for(auto s:windows) if(s->kind==kind && (kind!=Kind::Assets || s->source==source)) {ShowWindow(s->window,SW_RESTORE);SetForegroundWindow(s->window);return s->window;}
+        for(auto s:windows) if(s->kind==kind && (kind!=Kind::Assets || s->source==source)) {ShowWindow(s->window,IsIconic(s->window)?SW_RESTORE:SW_SHOW);SetForegroundWindow(s->window);return s->window;}
+        // Another Find Usages window open (one per asset) has the place: this one
+        // opens where Windows puts it, not exactly over it.
+        const bool another=std::any_of(windows.begin(),windows.end(),[&](const State* o){return o->kind==kind;});
         Sync(); WNDCLASSA wc{}; wc.lpfnWndProc=WindowProc; wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ReloadedWorkflowTools";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassA(&wc);
         auto s=new State{kind}; s->source=std::move(source);s->mesh=mesh; windows.push_back(s);
         const char* title=kind==Kind::Assets?"Asset Find and Replace":kind==Kind::Connections?"Gameplay Connections":kind==Kind::Views?"Working Views":"Actor Assemblies";
         HWND window=CreateWindowExA(WS_EX_CONTROLPARENT,wc.lpszClassName,title,WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1000,650,owner,nullptr,wc.hInstance,s);
-        if(window) {WindowPlacement::Restore(window,PlacementKey(kind));ShowWindow(window,SW_SHOW);} return window;
+        if(window) {if(another)WindowPlacement::Track(window);else WindowPlacement::Restore(window,PlacementKey(kind));ShowWindow(window,SW_SHOW);} return window;
     }
     void __fastcall VertexClickHook(void* self,void*,void* cause,void* hit)
     {
@@ -1317,6 +1512,13 @@ namespace
             if(reinterpret_cast<uintptr_t>(resource)==107) if(auto sub=GetSubMenu(menu,0))
             {
                 AppendMenuA(sub,MF_STRING,kSaveAssembly,"Save Selection as &Assembly...");
+                if(SelectionIsLinked())
+                {
+                    AppendMenuA(sub,MF_STRING,kPrefabSelectInstance,"Select Prefab &Instance");
+                    AppendMenuA(sub,MF_STRING,kPrefabSelectAll,"Select All Instances of This Prefab");
+                    AppendMenuA(sub,MF_STRING,kPrefabUpdate,"&Update Prefab from This Instance...");
+                    AppendMenuA(sub,MF_STRING,kPrefabBreakLink,"Break Prefab Lin&k");
+                }
                 try {if(!Editor::SelectedEmitters().empty())AppendMenuA(sub,MF_STRING,kSaveToEmitterLibrary,"Save to &Emitter Library...");}
                 catch(const std::exception&) { /* Only available with emitters selected in a source map. */ }
                 AppendMenuA(sub,MF_STRING,MagicEventWorkbench::Command,"Edit SMagicEvent...");
@@ -1330,6 +1532,8 @@ namespace
                     }
                 }
                 catch(const std::exception&) { /* Only with one conveyor belt selected. */ }
+                try {if(!Editor::SelectedMover().is_null())AppendMenuA(sub,MF_STRING,MoverWorkbench::kOpen,"M&over Workbench...");}
+                catch(const std::exception&) { /* Only with one mover selected. */ }
                 try {ObjectiveMenu(sub,ObjectiveOwner());}catch(const std::exception&){}
                 try
                 {
@@ -1460,18 +1664,48 @@ bool HandleCommand(UINT command)
         try{FavoritesWindow::Open();}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Favorites",MB_OK|MB_ICONERROR);}
         return true;
     }
+    if(CommandPalette::HandleCommand(command))return true;
+    if(command==CompareBackup::kCompare)
+    {
+        try{CompareBackup::Open(Editor::MainWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Compare with Backup",MB_OK|MB_ICONERROR);}
+        return true;
+    }
     if(MeasureTool::HandleCommand(command))return true;
     if(PlacementTools::HandleCommand(command))return true;
+    if(ScatterTool::HandleCommand(command))return true;
     if(PropertyPaste::HandleCommand(command))return true;
     if(LightShadowMap::HandleCommand(command))return true;
+    if(Reachability::HandleCommand(command))return true;
     if(LightingBudget::HandleCommand(command))return true;
     if(MapCheck::HandleCommand(command))return true;
     if(RenderBudget::HandleCommand(command))return true;
+    if(MapOutliner::HandleCommand(command))return true;
+    if(MoverWorkbench::HandleCommand(command))return true;
     if(MinimapWindow::HandleCommand(command))return true;
+    if(ObjExportWindow::HandleCommand(command))return true;
     if(MapRecovery::HandleCommand(command))return true;
     if(command==StoreyFilter::kOpen)
     {
         try{StoreyFilter::Open();}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Storeys",MB_OK|MB_ICONERROR);}
+        return true;
+    }
+    if(command>=kPrefabSelectInstance && command<=kPrefabBreakLink)
+    {
+        const char* titles[]={"Select Prefab Instance","Select All Instances","Update Prefab from This Instance","Break Prefab Link"};
+        const auto title=titles[command-kPrefabSelectInstance]; HWND owner=GetActiveWindow();
+        try
+        {
+            std::string text;
+            if(command==kPrefabSelectInstance) text=SelectInstance();
+            else if(command==kPrefabSelectAll) text=SelectAllInstances({});
+            else if(command==kPrefabUpdate) text=UpdatePrefab(owner,true);
+            else text=BreakLink();
+            if(!text.empty()) Logger::log("Linked prefabs: "+text);
+            RefreshAssemblyWindows();
+            // Only a brush note needs the user's eyes; the rest shows in the viewports.
+            if(command==kPrefabUpdate && text.find("rebuild the geometry")!=std::string::npos) MessageBoxA(owner,text.c_str(),title,MB_OK|MB_ICONINFORMATION);
+        }
+        catch(const std::exception& e){MessageBoxA(owner,e.what(),title,MB_OK|MB_ICONINFORMATION);}
         return true;
     }
     if(command==kBrushVisibility)
@@ -1563,7 +1797,8 @@ bool HandleCommand(UINT command)
             if(belt.is_null())throw std::runtime_error("Select one conveyor belt first.");
             Json spec={{"after",belt.at("path")}};
             if(command!=kAddNextConveyorBelt)spec["turn"]=command==kAddNextConveyorBeltLeft?"left":"right";
-            Editor::AddConveyorBelt(spec);
+            const auto added=Editor::AddConveyorBelt(spec);
+            if(added.contains("warning"))MessageBoxA(GetActiveWindow(),added.at("warning").get<std::string>().c_str(),"Conveyor Belt",MB_OK|MB_ICONINFORMATION);
         }
         catch(const std::exception& e) { MessageBoxA(GetActiveWindow(),e.what(),"Conveyor Belt",MB_OK|MB_ICONINFORMATION); }
         return true;
@@ -1590,6 +1825,7 @@ bool HandleCommand(UINT command)
     if(command==MapAuthoringDialog::Export || command==MapAuthoringDialog::Import){MapAuthoringDialog::Open(GetActiveWindow(),command==MapAuthoringDialog::Export);return true;}
     if(command==MagicEventWorkbench::Command){try{MagicEventWorkbench::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"SMagicEvent Workbench",MB_OK|MB_ICONERROR);}return true;}
     if(command==CameraNetworkPanel::Command){try{CameraNetworkPanel::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"SCamNetwork Manager",MB_OK|MB_ICONERROR);}return true;}
+    if(command==ObjImportWindow::Command){try{ObjImportWindow::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Import OBJ",MB_OK|MB_ICONERROR);}return true;}
     if(command==CharacterSkinsWindow::Command){try{CharacterSkinsWindow::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Character Skins",MB_OK|MB_ICONERROR);}return true;}
     if(command==CharacterSkinPresetsWindow::Command){try{CharacterSkinPresetsWindow::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Character Skin Presets",MB_OK|MB_ICONERROR);}return true;}
     if(command==EmitterLibraryWindow::Command){try{EmitterLibraryWindow::Open(GetActiveWindow());}catch(const std::exception& e){MessageBoxA(GetActiveWindow(),e.what(),"Emitter Library",MB_OK|MB_ICONERROR);}return true;}
@@ -1603,6 +1839,56 @@ bool HandleCommand(UINT command)
     }
     catch(const std::exception& e) {MessageBoxA(GetActiveWindow(),e.what(),"RE+ Tools",MB_OK|MB_ICONERROR);}
     return true;
+}
+Json PrefabRequest(const std::string& op,const Json& q)
+{
+    Sync();
+    auto assembly=[&]()->Json {
+        const auto key=q.at("assembly").get<std::string>();
+        for(const auto& entry:document.at("assemblies")) if(entry.value("id",std::string{})==key || entry.value("name",std::string{})==key) return entry;
+        throw std::runtime_error("No assembly called "+key);
+    };
+    Json result;
+    if(op=="prefab.save")
+    {
+        // Save Selection as New with the selection centre as its pivot.
+        const auto members=q.contains("members")?q.at("members"):Editor::SelectedIdentities();
+        auto snapshot=Editor::CaptureAssembly(members,Pose{}); Vector lo{},hi{}; bool first=true;
+        for(const auto& a:snapshot.at("actors")) { Vector p=a.at("position").get<Vector>(); if(first) {lo=hi=p; first=false;} else for(int i=0;i<3;++i){lo[i]=std::min(lo[i],p[i]);hi[i]=std::max(hi[i],p[i]);} }
+        Pose frame; for(int i=0;i<3;++i) frame.position[i]=(lo[i]+hi[i])/2;
+        auto captured=CanonicalizeAssembly(Editor::CaptureAssembly(members,frame),{}); captured.erase("local");
+        captured["name"]=q.value("name",std::string("Prefab")); captured["id"]=Id(); captured["modified"]=Timestamp();
+        Json next=document; next["assemblies"].push_back(captured); Save(next); result=captured;
+    }
+    else if(op=="prefab.place")
+        result=PlaceLinked(assembly(),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})},q.value("bindings",Json::object()).get<std::map<std::string,std::string>>());
+    else if(op=="prefab.instances")
+    {
+        const auto members=PrefabMembers(); result=Json::array();
+        for(const auto& record:document.at("maps").at(mapKey).value("instances",Json::array())) if(Prefab::Linked(record))
+        {
+            auto row=record; row.erase("locals"); row["live"]=Identities(MembersOf(members,record)); result.push_back(row);
+        }
+    }
+    else if(op=="prefab.counts") { result=Json::object(); for(const auto& [id,count]:LinkedCounts()) result[id]=count; }
+    else if(op=="prefab.update") result=UpdatePrefab(nullptr,false);
+    else if(op=="prefab.break") result=BreakLink();
+    else if(op=="prefab.selectinstance") result=SelectInstance();
+    else if(op=="prefab.selectall") result=SelectAllInstances(q.value("assembly",std::string{}));
+    else throw std::runtime_error("Unknown prefab request.");
+    RefreshAssemblyWindows();
+    return result;
+}
+Json MapMovementLimits()
+{
+    Sync();
+    const auto maps=document.find("maps");
+    if(maps==document.end() || !maps->is_object())return nullptr;
+    const auto map=maps->find(mapKey);
+    if(map==maps->end() || !map->is_object())return nullptr;
+    const auto design=map->find("design");
+    if(design==map->end() || !design->is_object() || !design->contains("movement"))return nullptr;
+    return Design::Movement(*design);
 }
 void FindUsages(HWND owner,void*,bool mesh)
 {
@@ -1653,7 +1939,10 @@ void Initialize()
 static Workflow::Json MoreWorkflowRequests(const std::string& op,const Workflow::Json& q)
 {
     using namespace Workflow;
+    if(op=="objimport.preview") return Editor::ObjImportPreview(q);
+    if(op=="objimport.import") return Editor::ImportObjMesh(q);
     if(op=="objectiveplayers.state") return Editor::ObjectivePlayerRules();
+    if(op.rfind("prefab.",0)==0) return WorkflowTools::PrefabRequest(op,q);
     if(op=="conveyor.state") return Editor::ConveyorState();
     if(op=="conveyor.prepare") {Editor::PrepareConveyors();return Editor::ConveyorState();}
     if(op=="conveyor.add") return Editor::AddConveyorBelt(q);
@@ -1661,6 +1950,15 @@ static Workflow::Json MoreWorkflowRequests(const std::string& op,const Workflow:
     if(op=="objectiveplayers.set") return Editor::SetObjectivePlayers(q.at("objective"),q.value("min",0),q.value("max",0),q.value("open",false));
     if(op=="objectiveplayers.playlevel") return Editor::SetObjectivePlayLevelPlayers(q.value("players",0));
     if(op=="objectiveplayers.targets") return Editor::SetMissionTargets(q.at("mission"),q.at("sizes"));
+    if(op=="mover.selected") return Editor::SelectedMover();
+    if(op=="mover.state") return Editor::MoverState(q.at("actor"));
+    if(op=="mover.path") return Editor::SetMoverPath(q.at("actor"),q.at("path"),q.value("label",std::string("edit keys")));
+    if(op=="mover.settings") return Editor::SetMoverSettings(q.at("actor"),q.at("changes"));
+    if(op=="mover.outline") return Editor::MoverOutline(q.at("actor"));
+    if(op=="mover.candidates") return Editor::MoverTriggerCandidates(q.at("actor"));
+    if(op=="mover.wire") return Editor::WireMoverTrigger(q.at("actor"),q.at("trigger"));
+    if(op=="mover.preview") {Editor::MoverPreviewPose(q.at("actor"),{q.at("position").get<Vector>(),q.value("rotation",Rotation{})});return true;}
+    if(op=="mover.restore") {Editor::MoverRestorePose();return true;}
     throw std::runtime_error("Unknown workflow request.");
 }
 
