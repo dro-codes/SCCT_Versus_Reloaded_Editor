@@ -5,6 +5,7 @@
 #include "McpBridge.h"
 #include "McpBridgeModel.h"
 #include "McpEditor.h"
+#include "MapAuthoringModel.h"
 #include "McpPlanModel.h"
 #include "McpSafetyModel.h"
 #include "WorkflowEditor.h"
@@ -135,7 +136,7 @@ namespace
     void CheckRawCommand(const std::string& command)
     {
         Mcp::Safety::RawContext context;
-        try{const auto file=Editor::MapFile();if(!file.empty())context.mapStem=std::filesystem::path(file).stem().string();}
+        try{const auto file=Editor::MapFile();if(!file.empty())context.mapStem=Workflow::Authoring::Utf8Text(Workflow::Authoring::Utf8Path(file).stem());}
         catch(const std::exception&){}
         std::error_code error;context.base=std::filesystem::current_path(error);
         context.roots=McpBridge::WriteRoots();

@@ -71,6 +71,33 @@ void Monitors()
 
     Check(!Usable({100, 100, 0, 560}, one) && !Usable({100, 100, 900, -1}, one), "no size");
     Check(!Usable({2147483000, 100, 900, 560}, one), "far beyond any monitor, without overflowing");
+    Check(TitleMonitor({-1000, 100, 640, 480}, two) == &two[1], "the monitor the title bar is on");
+}
+
+bool Is(const Placement& p, int x, int y, int w, int h)
+{
+    return p.x == x && p.y == y && p.width == w && p.height == h;
+}
+
+void Fitting()
+{
+    const std::vector<Rect> laptop{{0, 0, 1366, 728}};
+    const std::vector<Rect> sideBySide{{0, 0, 1920, 1040}, {1920, 0, 3840, 1040}};
+
+    // Saved on a 2560x1440 monitor, opened on a laptop screen.
+    Check(Is(Fit({100, 100, 1600, 1000}, laptop), 0, 0, 1366, 728), "too large: made to fit and moved inside");
+    Check(Is(Fit({100, 100, 1366, 780}, laptop), 0, 0, 1366, 728), "as wide as the screen, too tall");
+    Check(Is(Fit({600, 400, 700, 500}, laptop), 600, 228, 700, 500), "its size fits: only moved up, so its bottom is on screen");
+    Check(Fit({100, 100, 1600, 1000, true}, laptop).maximised, "a maximised window stays maximised");
+
+    Check(Is(Fit({100, 100, 900, 560}, laptop), 100, 100, 900, 560), "on the screen: left as it is");
+    Check(Is(Fit({-7, 0, 1380, 735}, laptop), -7, 0, 1380, 735), "its resize border just off the screen: left as it is");
+    Check(Is(Fit({1500, 100, 900, 560}, sideBySide), 1500, 100, 900, 560), "across two monitors: left as it is");
+    Check(Is(Fit({-800, 100, 900, 560}, laptop), -800, 100, 900, 560), "off to the left with its far corner on screen: left as it is");
+
+    Check(Is(Fit({100, 100, 1600, 1000}, laptop, 520, 800), 0, 0, 1366, 800), "never below the window's own minimum");
+    Check(Is(Fit({100, 100, 1600, 1000}, laptop, 1600, 1000), 0, 0, 1600, 1000), "a fixed size is only moved");
+    Check(Is(Fit({100, 1030, 900, 560}, laptop), 100, 1030, 900, 560), "no monitor has its title bar: nothing to fit to");
 }
 
 int main()
@@ -80,6 +107,7 @@ int main()
         Text();
         Sizes();
         Monitors();
+        Fitting();
         std::cout << "WindowPlacementModelTests: " << checks << " checks passed\n";
         return 0;
     }

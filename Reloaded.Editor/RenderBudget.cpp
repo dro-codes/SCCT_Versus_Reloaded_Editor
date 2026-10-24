@@ -3,6 +3,7 @@
 #undef max
 #include "RenderBudget.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "RenderBudgetModel.h"
 #include "BudgetWindow.h"
 #include "WorkflowEditor.h"
@@ -108,7 +109,7 @@ std::string Intro(const Guidelines& g)
            "Camera repaints the perspective viewport: View marks the camera's zone, the zones Visible through the portals "
            "and those no portal shows where the engine still Drew an actor. Click a row to select its actors; "
            "double-click to frame them too. Below, Meshes by cost lists each static mesh with its copies and triangles, "
-           "for the whole map or the zone clicked last.";
+           "for the whole map, the camera's view or the zone clicked last.";
 }
 
 std::string Status(const ZoneReport& zone)
@@ -218,6 +219,8 @@ void ShowLowerView()
     if (budget.lastList != kZoneList) { budget.lastList = meshes ? kMeshList : kHotspotList; budget.lastRow = -1; }
 }
 
+void Layout(HWND window);
+
 void Fill()
 {
     auto zones = GetDlgItem(budget.window, kZoneList), hotspots = GetDlgItem(budget.window, kHotspotList);
@@ -252,8 +255,17 @@ void Fill()
         Budget::Row(hotspots, static_cast<int>(i), static_cast<LPARAM>(i), {HotspotLabel(hotspot), zone, HotspotText(hotspot), what});
     }
     FillMeshes();
+    // The zone Meshes by cost counts stays highlighted; the buttons keep the row they had.
+    if (budget.meshScope != kMapRow)
+    {
+        const int lastList = budget.lastList, lastRow = budget.lastRow;
+        Budget::SelectRowByData(zones, budget.meshScope);
+        budget.lastList = lastList;
+        budget.lastRow = lastRow;
+    }
     ShowLowerView();
     SetDlgItemTextA(budget.window, kIntro, Intro(report.guidelines).c_str());
+    Layout(budget.window); // the intro's height follows its text
     SetStatus(snapshot.hasView ? ViewStatus() : ReportStatus());
 }
 
@@ -262,6 +274,9 @@ void Refresh()
     budget.snapshot = Measure(LoadGuidelines());
     budget.measured = true;
     budget.lastRow = -1;
+    // Zones are rows by index, which a new measure (another map, a BSP rebuild)
+    // can give to another zone: Meshes by cost counts the whole map again.
+    budget.meshScope = kMapRow;
     if (IsWindow(budget.window)) Fill();
 }
 
@@ -390,6 +405,9 @@ void Choose(int list, int row, bool frame)
     const auto found = Workflow::Editor::SelectActorPaths(paths, frame);
     std::string text = "Selected " + std::to_string(found) + " actor(s) in " + what + (frame && found ? ", framed in the viewports." : ".");
     if (found < paths.size()) text += " " + std::to_string(paths.size() - found) + " no longer exist; Refresh.";
+    // The rows are as measured: a mesh changed or an actor added since is not in them.
+    else if (budget.snapshot.revision != Workflow::Editor::ContentRevision())
+        text += " The map has changed since it was measured; Refresh to count it again.";
     SetStatus(text);
 }
 
@@ -398,9 +416,11 @@ void Layout(HWND window)
     RECT r{};
     GetClientRect(window, &r);
     const int w = r.right - 24, h = r.bottom;
-    const int top = 96, listsHeight = h - top - 48 - 34;
+    // The intro keeps all its lines in the larger modern font (up to a third of the window).
+    const int intro = Appearance::FitHeight(GetDlgItem(window, kIntro), w, 84, h / 3);
+    const int top = intro + 12, listsHeight = h - top - 48 - 34;
     const int zonesHeight = listsHeight * 3 / 5, hotspotTop = top + zonesHeight + 30;
-    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, top - 12, TRUE);
+    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, intro, TRUE);
     MoveWindow(GetDlgItem(window, kZoneList), 12, top, w, zonesHeight, TRUE);
     MoveWindow(GetDlgItem(window, kLowerView), 12, top + zonesHeight + 4, 440, 200, TRUE);
     MoveWindow(GetDlgItem(window, kMeshScope), 462, top + zonesHeight + 8, std::max(40, w - 450), 18, TRUE);
@@ -519,7 +539,7 @@ void Show(HWND owner)
 {
     if (IsWindow(budget.window))
     {
-        ShowWindow(budget.window, SW_RESTORE);
+        ShowWindow(budget.window, IsIconic(budget.window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(budget.window);
         Fill();
         return;

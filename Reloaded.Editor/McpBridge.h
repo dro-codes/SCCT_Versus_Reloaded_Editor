@@ -14,11 +14,11 @@
 
 namespace McpBridge
 {
-    // RE+ Tools > MCP (41460-41479, routed by General.cpp's dispatcher).
-    constexpr UINT kMenuFirst = 41460;
-    constexpr UINT kEnable = 41460, kRequireApproval = 41461, kUndoLast = 41462, kDisconnect = 41463,
-                   kCopyClaudeCode = 41464, kCopyClaudeDesktop = 41465, kOpenHistory = 41466;
-    constexpr UINT kMenuLast = 41479;
+    // RE+ Tools > MCP (41720-41739, routed by General.cpp's dispatcher).
+    constexpr UINT kMenuFirst = 41720;
+    constexpr UINT kEnable = 41720, kRequireApproval = 41721, kUndoLast = 41722, kDisconnect = 41723,
+                   kCopyClaudeCode = 41724, kCopyClaudeDesktop = 41725, kOpenHistory = 41726;
+    constexpr UINT kMenuLast = 41739;
 
     // From dllmain after WorkflowTools::Initialize: reads [Mcp] only (loader lock).
     void Initialize();

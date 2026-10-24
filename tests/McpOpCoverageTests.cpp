@@ -5,7 +5,7 @@
 // the repository root, or pass it as the first argument.
 //
 // Also what the bridge refuses before an op writes (McpSafetyModel.h): stock
-// packages in Map JSON texture and save operations, folders outside the
+// packages in Map JSON texture and save operations and OBJ imports, folders outside the
 // write roots, raw commands that write files, and the dialog watchdog's
 // button; and that no DLL source uses std::min/std::max where windows.h's
 // min/max macros are live, which only MSVC's windows.h defines.
@@ -100,6 +100,16 @@ void Packages()
     Check(Safety::DocumentRefusal(document(Json::array({op("texture","NEWD_TXT")})),"",existing).reason=="unsaved_map","an unsaved map has no packages of its own yet");
     Check(!Safety::DocumentRefusal(document(Json::array({op("texture","MyLevel")})),"",existing),"a texture inside the map itself");
     Check(Safety::DocumentRefusal(document(Json::array({op("texture","MyLevel"),op("save","MyLevel")})),"NEWD",existing).reason=="not_map_owned","the map's package is not saved as a texture package");
+    // objimport.import (File > Import OBJ Mesh) writes its mesh and textures into one package.
+    auto obj=[&](const Json& args,const std::string& stem){return Safety::ObjImportRefusal(args,stem,existing);};
+    const auto stockObj=obj(Json{{"file","C:/in/crate.obj"},{"package","SCCT_Generic"},{"place",true}},"NEWD");
+    Check(stockObj && stockObj.code==Mcp::Bridge::Code::Refused && stockObj.reason=="not_map_owned" && stockObj.message.find("SCCT_Generic")!=std::string::npos,"an OBJ import into a stock package is refused");
+    Check(obj(Json{{"package","Engine"}},"NEWD").reason=="not_map_owned","an OBJ import into Engine is refused");
+    Check(!obj(Json{{"package","NEWD_STM"}},"NEWD") && !obj(Json{{"package","newd_Props"}},"NEWD"),"an OBJ import into the map's own mesh package");
+    Check(!obj(Json{{"file","C:/in/crate.obj"}},"") && !obj(Json{{"package","mylevel"}},""),"an OBJ import into the map itself (the default), even before its first save");
+    Check(obj(Json{{"package","NEWD_STM"}},"").reason=="unsaved_map","the map's own package needs its first save");
+    Check(obj(Json{{"package","Stock_Tex"}},"NEWD").reason=="not_map_owned" && obj(Json{{"package","NEWD"}},"NEWD").reason=="package_name","stock and clashing names");
+    Check(obj(Json{{"package",3}},"NEWD").code==Mcp::Bridge::Code::Invalid && obj(Json{{"package","NEWD STM"}},"NEWD").code==Mcp::Bridge::Code::Invalid,"a package that is not a console name");
 }
 
 // The release folder and raw commands: only inside the write roots.

@@ -5,6 +5,7 @@
 #include "AssetNameGloss.h"
 #include "McpBridge.h"
 #include "ViewportKeysModel.h"
+#include "Appearance.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
@@ -22,8 +23,9 @@
 #define IDC_CHECK_NO_DUPE_OFFSET    1009
 #define IDC_CHECK_MIN_PLAY          1010
 #define IDC_CHECK_ENGLISH_NAMES     1011
-#define IDC_CHECK_MCP_ENABLED       1012
-#define IDC_CHECK_MCP_APPROVAL      1013
+#define IDC_COMBO_APPEARANCE        1012
+#define IDC_CHECK_MCP_ENABLED       1013
+#define IDC_CHECK_MCP_APPROVAL      1014
 
 // In-memory DLGTEMPLATE builder
 struct OptionsDialogBuf
@@ -79,15 +81,28 @@ static void EmitEdit(OptionsDialogBuf& b,
     b.w(0);
 }
 
+// Emit a drop-down list COMBOBOX (atom 0x0085).
+static void EmitCombo(OptionsDialogBuf& b,
+    DWORD style, short x, short y, short cx, short cy, WORD id)
+{
+    b.a4();
+    b.dw(style); b.dw(0);
+    b.w(x); b.w(y); b.w(cx); b.w(cy);
+    b.w(id);
+    b.atom(0x0085);
+    b.ws(L"");
+    b.w(0);
+}
+
 static std::vector<uint8_t> BuildReloadedOptionsDlgTemplate()
 {
     OptionsDialogBuf b;
 
     b.dw(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_CENTER | DS_SETFONT);
     b.dw(0);
-    b.w(28);              // number of controls
+    b.w(31);              // number of controls
     b.w(0);  b.w(0);      // x, y (DS_CENTER overrides)
-    b.w(290); b.w(262);   // width, height
+    b.w(290); b.w(280);   // width, height
     b.w(0);               // no menu
     b.w(0);               // default class
     b.ws(L"RE+ Options");
@@ -164,9 +179,9 @@ static std::vector<uint8_t> BuildReloadedOptionsDlgTemplate()
                 | ES_LEFT | ES_UPPERCASE | ES_AUTOHSCROLL,
              214, 126, 20, 12, IDC_EDIT_GE_FENCE);
 
-    // General group (y = 150 to 192)
+    // General group (y = 150 to 210)
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-               5, 150, 280, 42, 0xFFFF, L"General");
+               5, 150, 280, 60, 0xFFFF, L"General");
 
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
                13, 163, 265, 10, IDC_CHECK_MIN_PLAY,
@@ -176,24 +191,31 @@ static std::vector<uint8_t> BuildReloadedOptionsDlgTemplate()
                13, 175, 265, 10, IDC_CHECK_ENGLISH_NAMES,
                L"Show English for French asset names");
 
-    // MCP server group (y = 196 to 236): the same switches as RE+ Tools > MCP
+    EmitStatic(b, WS_CHILD | WS_VISIBLE | SS_LEFT,
+               13, 192, 42, 8, 0xFFFF, L"Appearance:");
+    EmitCombo(b, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST,
+              58, 190, 80, 60, IDC_COMBO_APPEARANCE);
+    EmitStatic(b, WS_CHILD | WS_VISIBLE | SS_LEFT,
+               144, 192, 136, 8, 0xFFFF, L"Applies when the editor next starts.");
+
+    // MCP server group (y = 214 to 254): the same switches as RE+ Tools > MCP
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-               5, 196, 280, 40, 0xFFFF, L"MCP Server (AI agents)");
+               5, 214, 280, 40, 0xFFFF, L"MCP Server (AI agents)");
 
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-               13, 209, 265, 10, IDC_CHECK_MCP_ENABLED,
+               13, 227, 265, 10, IDC_CHECK_MCP_ENABLED,
                L"Enable MCP server (Claude Code, Claude Desktop)");
 
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-               13, 221, 265, 10, IDC_CHECK_MCP_APPROVAL,
+               13, 239, 265, 10, IDC_CHECK_MCP_APPROVAL,
                L"Require approval for each MCP change");
 
     // OK and Cancel buttons (right-aligned to the wider dialog)
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP,
-               180, 242, 50, 14, IDOK, L"OK");
+               180, 260, 50, 14, IDOK, L"OK");
 
     EmitButton(b, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-               235, 242, 50, 14, IDCANCEL, L"Cancel");
+               235, 260, 50, 14, IDCANCEL, L"Cancel");
 
     return b.buf;
 }
@@ -335,6 +357,13 @@ static INT_PTR CALLBACK ReloadedOptionsDlgProc(
             CheckDlgButton(hDlg, IDC_CHECK_MCP_APPROVAL, mcp.requireApproval ? BST_CHECKED : BST_UNCHECKED);
         }
 
+        // The saved choice, which may differ from the one in effect until a restart.
+        for (Appearance::Theme theme : { Appearance::Theme::Classic, Appearance::Theme::ModernLight, Appearance::Theme::ModernDark })
+            SendDlgItemMessageA(hDlg, IDC_COMBO_APPEARANCE, CB_ADDSTRING, 0,
+                                reinterpret_cast<LPARAM>(Appearance::ThemeLabel(theme)));
+        SendDlgItemMessageA(hDlg, IDC_COMBO_APPEARANCE, CB_SETCURSEL,
+                            static_cast<WPARAM>(Appearance::Saved()), 0);
+
         return TRUE;   // let Windows set default focus
 
     case WM_COMMAND:
@@ -429,6 +458,9 @@ static INT_PTR CALLBACK ReloadedOptionsDlgProc(
                 const bool englishNames = IsDlgButtonChecked(hDlg, IDC_CHECK_ENGLISH_NAMES) == BST_CHECKED;
                 if (englishNames != AssetNameGloss::Enabled())
                     AssetNameGloss::SetEnabled(englishNames);
+                const LRESULT look = SendDlgItemMessageA(hDlg, IDC_COMBO_APPEARANCE, CB_GETCURSEL, 0, 0);
+                if (look >= 0 && look <= 2 && static_cast<Appearance::Theme>(look) != Appearance::Saved())
+                    Appearance::Save(static_cast<Appearance::Theme>(look));
                 // The bridge saves its own keys in [Mcp] and starts or stops the
                 // server, as its menu entries do.
                 const McpBridge::Settings mcp = McpBridge::Current();

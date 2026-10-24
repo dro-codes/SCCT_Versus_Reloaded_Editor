@@ -5,9 +5,12 @@
 
 namespace MapCheck { struct Scene; struct Settings; struct FloorScan; }
 
+namespace LightShadow { struct Scene; struct Settings; }
 namespace LightShadow { struct Scene; }
+namespace Reach { struct Scene; class World; }
 namespace Minimap { struct Camera; struct Scene; }
 namespace UnsavedChanges { struct Opened; }
+namespace Outliner { struct Row; }
 
 namespace Workflow::Editor
 {
@@ -67,6 +70,18 @@ namespace Workflow::Editor
     Pose BuilderPose();
     Json CaptureAssembly(const Json& members, const Pose& frame);
     Json PlaceAssembly(const Json& definition, const Pose& frame, const std::map<std::string,std::string>& bindings);
+    // The same, one Undo step, with every placed actor also filed in `group`
+    // (a linked prefab instance's Group, PrefabModel.h) when it is not empty.
+    Json PlaceAssembly(const Json& definition, const Pose& frame, const std::map<std::string,std::string>& bindings, const std::string& group);
+    // Linked prefabs: every live actor whose Group names an instance, as
+    // {path,class,name,groups,selected,position,rotation}.
+    Json PrefabActors();
+    // The Group field of each selected actor.
+    std::vector<std::string> SelectedGroups();
+    // Deletes each job's members ({members,group,position,rotation}) and
+    // places `definition` in their place, filed in the job's group, all in one
+    // Undo step. Returns per job {members,names,tags,position,rotation,removed}.
+    Json RebuildPrefabInstances(const Json& definition, const Json& jobs);
     bool Compatible(const std::string& actorPath, const std::string& type);
     bool Exec(const std::string& command);
     // The same, with what the command printed (the bridge's exec op).
@@ -84,7 +99,14 @@ namespace Workflow::Editor
     // mutations reject stale snapshots and use one native transaction.
     Json ExportMapAuthoring();
     Json PreviewMapAuthoring(const Json& document);
-    Json ApplyMapAuthoring(const Json& document);
+    Json ApplyMapAuthoring(const Json& document, const char* label = "Import map JSON changes");
+    // File > Compare with Backup (CompareBackupModel.h). Loads a map file beside the open map under a package
+    // name of its own, reads both levels' actors the way Map JSON export does, unloads the copy and returns
+    // {rows, tally, current, backup, ...}: what differs, the backup's values as "before".
+    Json CompareWithMapFile(const std::filesystem::path& file);
+    // Brings back the given rows of that comparison through the Map JSON import, as one Undo step. Refuses
+    // when the map changed since the comparison.
+    Json BringBackFromComparison(const Json& comparison, const std::vector<size_t>& rows);
     Json EventClasses();
     Json CameraNetworks();
     void OrderCameras(const Json& snapshot,const Json& paths,bool loop,const std::string& detach = "");
@@ -151,8 +173,21 @@ namespace Workflow::Editor
     size_t SelectMapCheckRow(const std::vector<std::string>& actors, const std::vector<int>& surfaces, bool frame);
     // Light and Shadow map (LightShadowModel.h): walkable BSP floor triangles
     // with their lightmap UVs and atlases, the in-game lights at their render
+    // spheres, the BSP planes for line of sight, and (as the settings ask) the
+    // static meshes as blockers and floors. Atlases and mesh shapes are kept
+    // between calls while they stay the same; LightShadowForget drops the atlases.
+    struct LightShadowSceneStats { size_t bspFloors=0, meshFloors=0, meshTriangles=0; };
+    LightShadowSceneStats LightShadowScene(LightShadow::Scene& scene, const LightShadow::Settings& settings);
+    void LightShadowForget();
     // spheres, and the BSP planes for line of sight.
     void LightShadowScene(LightShadow::Scene& scene);
+    // Reachability (ReachabilityModel.h): the player starts with their teams,
+    // the objectives and pickups, the BSP's bounds and the pawn sizes of the
+    // loaded spy and merc classes; and the engine's collision queries on the
+    // open level (a swept box and the spawn test), which throw once another
+    // map is opened.
+    Reach::Scene ReachabilityScene();
+    std::unique_ptr<Reach::World> ReachabilityWorld();
     // Player count rules (ObjectivePlayersModel.h): the map's SPlayerCountRules actor
     // (or a version 1 SObjectivePlayers one, moved over on the next change). Rules:
     // {placed, legacy, extra, compiled, actor, playLevel (the count an editor Play Level
@@ -186,6 +221,14 @@ namespace Workflow::Editor
     // The one selected actor when it is a conveyor belt (an identity), else null.
     Json SelectedConveyorBelt();
     size_t SyncConveyorBelts();
+    // Import OBJ (ObjImportModel.h, ObjImportNative.inl). spec: file, package (MyLevel is
+    // the open map), group, name, scale, up ("y"/"z"), collision (none, box, polygons,
+    // groups, parts, file), split, partTriangles, place. Preview reads the files and says
+    // what the import would make (triangles, hulls, parts, each material's source) without
+    // changing anything; Import makes the meshes and, with place, puts them where the
+    // viewport was last clicked in one Undo step.
+    Json ObjImportPreview(const Json& spec);
+    Json ImportObjMesh(const Json& spec);
     // Character Skins (CharacterSkinsModel.h): the map's Character Skins actor.
     // Settings: {placed, legacy, extra, compiled, slots:{SpyBody,...: material path or ""},
     // models:{SpyModel,...: skeletal mesh path or ""}, goggles:{SpyGoggleOffset,...: [x,y,z]}}.
@@ -242,9 +285,36 @@ namespace Workflow::Editor
     // unused:[Floor textures past the new count, left from an earlier run]}.
     Minimap::Scene MinimapScene();
     Json ApplyMinimap(const Minimap::Camera& camera, const std::vector<std::pair<double, std::filesystem::path>>& images);
+    // File > Export > Map to OBJ (ObjExportModel.h). Options: folder, meshes,
+    // textures, selectedOnly (bools) and centimetres (per Unreal unit).
+    // Writes <Map>.obj, <Map>.mtl and textures/*.png into the folder and
+    // returns what it wrote: obj, mtl, polygons, actors, meshes, faces,
+    // vertices, objects, materials, textures, texturesFailed, seconds.
+    Json ExportMapObj(const Json& options);
     // Selects exactly the live actors with these paths, one pass over the
     // level; focus frames them in the viewports. Returns how many were found.
     size_t SelectActorPaths(const std::vector<std::string>& paths, bool focus);
+    // Map Outliner (MapOutlinerModel.h). OutlinerRows reads every actor but the
+    // viewport cameras in one pass, in the level's order: name, path, class,
+    // Tag, Event, Group, location, hidden, selected and bLockLocation, with
+    // the class's property offsets found once per class. The key changes
+    // whenever the rows may be stale: a map opened, an edit, the actor list
+    // grown or moved, a stock Undo or Redo. With the key unchanged the row
+    // handles are live, and OutlinerFlags re-reads only the hidden and
+    // selected bits (1 when a selection bit changed, 2 a hidden one). OutlinerSelect selects exactly
+    // those actors (focus frames them) and returns how many it found;
+    // OutlinerDelete deletes them, never the level info, the builder brush or
+    // a camera, in one Undo step, and returns how many went.
+    struct OutlinerKey
+    {
+        unsigned generation = 0, content = 0; int actors = 0; uintptr_t data = 0; int undoPosition = 0;
+        bool operator==(const OutlinerKey&) const = default;
+    };
+    void OutlinerRows(std::vector<Outliner::Row>& rows);
+    OutlinerKey OutlinerChangeKey();
+    unsigned OutlinerFlags(std::vector<Outliner::Row>& rows);
+    size_t OutlinerSelect(const std::vector<uintptr_t>& actors, bool focus);
+    size_t OutlinerDelete(const std::vector<uintptr_t>& actors);
     // Lighting Budget fixes, one undoable transaction: fix 0 makes the lights
     // static, 1 turns them off (LightingBudget::Applied). Returns how many of
     // the paths were found and changed.
@@ -404,7 +474,39 @@ namespace Workflow::Editor
     Json OptimiseRelease(const Json& options);
     // Where a map's release copy goes by default: <game>/Releases/<Map>.
     std::filesystem::path ReleaseFolder(const std::string& map);
+    // Mover Workbench (MoverModel.h). SelectedMover: the one selected actor when it
+    // is a mover (an identity), else null; cheap enough for a context menu. State:
+    // {actor, name, class, revision, level, path (Movers::PathJson), location, rotation,
+    // values:{MoveTime, StayOpenTime, ..., sounds}, choices:{enum and InitialState names},
+    // triggeredBy:[{actor, property}], triggers:[{actor, property, resolved}]}.
+    // SetMoverPath writes a key list and puts the mover on its key, SetMoverSettings
+    // the other settings (by name, as text), WireMoverTrigger points a trigger's
+    // Event at the mover's Tag: each one Undo step, returning the new state.
+    // MoverPreviewPose moves the mover for drawing only (no Undo step, nothing
+    // marked changed) until MoverRestorePose puts the bytes back.
+    Json SelectedMover();
+    Json MoverState(const Json& identity);
+    Json SetMoverPath(const Json& identity, const Json& path, const std::string& label);
+    Json SetMoverSettings(const Json& identity, const Json& changes);
+    Json MoverOutline(const Json& identity);
+    void MoverPreviewPose(const Json& identity, const Pose& pose);
+    bool MoverPreviewing();
+    void MoverRestorePose();
+    Json MoverTriggerCandidates(const Json& identity);
+    Json WireMoverTrigger(const Json& identity, const Json& trigger);
     Json StairSmoothState(bool surfaces);
     Json SmoothStairs(bool surfaces);
     size_t RemoveStairSmoothing(bool surfaces);
+    // Scatter Props (ScatterModel.h). ScatterBrowserMesh: the Static Mesh
+    // Browser's current mesh, or empty. ScatterMesh: {path, lo, hi} of a mesh,
+    // loading its package when needed. ScatterArea: the builder brush seen from
+    // above {circle:false, polygons, top, bottom}, or a circle of the radius
+    // round the last viewport click {circle:true, centre, radius, z, top,
+    // bottom}. ScatterPlan: where the props would rest (see ScatterNative.inl);
+    // ScatterPlace pastes them in one Undo step, in the Scatter group, selected.
+    std::string ScatterBrowserMesh();
+    Json ScatterMesh(const std::string& path);
+    Json ScatterArea(bool circle, double radius);
+    Json ScatterPlan(const Json& request);
+    Json ScatterPlace(const Json& props);
 }

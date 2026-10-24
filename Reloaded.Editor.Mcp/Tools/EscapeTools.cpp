@@ -341,8 +341,9 @@ void RegisterEscapeTools(Registry& registry)
             "Runs one RE+ workflow op by name, {op, args}, for what no other tool covers. scct://docs/ops lists every op with its policy and arguments. The "
             "bridge's op policies still apply: blocked ops (UI windows, light.set, blind undo) are refused, console commands go through editor_exec, edits "
             "are one Undo step and honour approval and dryRun, and mcp.plan plans are checked for order first. The editor's refusals apply too: "
-            "authoring.apply texture and save operations only write the map's own packages (not_map_owned, unsaved_map), optimise.release only writes "
-            "inside <Game>\\Releases, the work folder and [Mcp] WriteRoots (outside_write_roots). Results come back unchanged.";
+            "authoring.apply texture and save operations and objimport.import only write the map's own packages (an OBJ import also MyLevel; not_map_owned, "
+            "unsaved_map), optimise.release only writes inside <Game>\\Releases, the work folder and [Mcp] WriteRoots (outside_write_roots). Results come "
+            "back unchanged.";
         t.inputSchema = S::Mutating(S::Input({{"op", S::String("The op, such as security.actors or camera.order.")}, {"args", S::Free("The op's arguments.")}}, {"op"}));
         t.destructive = true;
         t.run = [](const Json& a, ToolContext& c) { return Guarded([&] { return Request(a, c); }); };

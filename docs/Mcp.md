@@ -53,8 +53,9 @@ Open **RE+ Tools > MCP**:
 | **Copy Claude Desktop config** | Copies the `claude_desktop_config.json` entry for this install. |
 | **Open MCP history folder** | Opens `System\ReloadedEditor\Mcp\history`. |
 
-The first two are also in **RE+ Options** under **MCP Server**. The settings are
-kept in `System\Reloaded_Editor.ini`:
+The first two are also in **RE+ Options** (F12) under **MCP Server**, and every
+item can be run from **Help > Command Palette** (Ctrl+Shift+P) like any other
+menu command. The settings are kept in `System\Reloaded_Editor.ini`:
 
 ```ini
 [Mcp]
@@ -155,6 +156,7 @@ error carries) and `another_client`.
 | `menu` | A menu is open. |
 | `drag` | You are dragging in a viewport. |
 | `transaction` | An editor operation is still open. |
+| `mover_preview` | The Mover Workbench is playing a preview, which moves the mover outside Undo and puts it back when it ends; a save or an edit now would keep or lose the passing pose. Reads still run. |
 | `rebuild` | Rebuild All Maps is running. |
 | `slow_task` | A long task is running, or the editor did not pick the call up within 10 s (the call is then dropped, not run late). |
 | `startup_dialog` | An update offer or the crash recovery window is waiting for you. |
@@ -376,7 +378,7 @@ are listed as standing and do not. Each description lists the fields;
 | Tool | Purpose and main arguments |
 | --- | --- |
 | `import_to_spec` | Turns a file into a level spec: `source` (a full path, or `"live"` for the open map), `format` (default `auto`), `options` for the importer, `plan`, `maxEdge`. Returns the spec (also saved in the work folder), a report of warnings and assumptions, the compiler's diagnostics and a plan image. Read-only. See [Importers](#importers). |
-| `assets_import` | Imports textures and static meshes into the map's own packages and saves them: `items` (1-64) of `{kind: texture|staticmesh, file, package, group, name, ...}`, `save`, `overwrite`. OBJ files are converted to ASE first. The map must be saved under its name first. Not undoable. |
+| `assets_import` | Imports textures and static meshes into the map's own packages and saves them: `items` (1-64) of `{kind: texture|staticmesh, file, package, group, name, ...}`, `save`, `overwrite`. OBJ files are converted to ASE first. The map must be saved under its name first. Not undoable. RE+'s own **Import OBJ Mesh** reads an OBJ itself, with hull collision and parts: see [Meshes](#status-and-known-limitations). |
 | `media_extract_frames` | Still frames from a video as PNGs, attached as images: `video`, `mode` (`interval`, `count` or `scene`), `intervalS`, `count`, `start`, `end`, `threshold`, `maxEdge`, `sheet` (a contact sheet), `attach`, `outDir`, `backend`. |
 | `media_read_image` | Opens an image for the agent to look at, with `crop`, `maxEdge`, `enlarge`, a labelled measurement `grid` (`spacingPx`, or `cellUu` with `uuPerPx`, `origin`), its `palette` and occupancy. |
 | `image_convert` | Makes a texture-ready image: power-of-two `size`, or an interface `slot` (Menu, Briefing, LoadingATT0, LoadingDEF0); `fit`, `format` (tga, bmp, png), `alpha`, `background`, `out`, `overwrite`. |
@@ -483,13 +485,13 @@ enforces whatever the client asks:
 
 | Policy | Ops |
 | --- | --- |
-| Read | `editor.state`, `log.tail`, `approval.status`, `blob.read`, `blob.free`, `actors`, `actors.query`, `map`, `map.file`, `settings.inspect`, `authoring.mapid`, `authoring.schema`, `authoring.export`, `authoring.preview`, `assets.search`, `view.screenshot`, `view.capture`, `view.restore`, `mapcheck.run`, `lighting.budget`, `scene.trace`, `ge.list`, `object.inspect`, `mapsettings.get`, `mcp.sidecar.get`, `props.copy`, `design.pieces`, `design.scene`, `design.grid`, `design.view`, `design.bspowners`, `design.builds`, `design.spawns`, `design.clearances`, `placement.selection`, `security.actors`, `light.list`, `objective.actors`, `stage.actors`, `stage.read`, `stage.preview`, `optimise.report`, `magic.classes`, `magic.assets`, `magic.inspect`, `magic.json.export`, `camera.snapshot`, `brush.visibility`, `usages`, `connections`, `surface.brushes`, `mesh.bounds`, `brush.snap.bounds`, `vertex.selection`, `stairs.state`, `tag.preview`, `assembly.capture`, `emitterlib.list`, `emitterlib.packs`, `emitterlib.cache`, `emitterlib.problems`, `emitterlib.categories`, `emitterlib.selected`, `emitterlib.capture`, `skins.settings`, `objectiveplayers.state`, `conveyor.state` |
-| Undoable | `mcp.plan`, `undo.call`, `undo.steps`, `redo.steps`, `authoring.apply`, `select`, `design.block`, `design.blockbatch`, `design.align`, `design.layer`, `design.polyflags`, `design.repairflags`, `design.sendtolast`, `design.flags`, `design.group`, `design.translate`, `design.lift`, `design.tempstart`, `design.register`, `design.unregister`, `mcp.sidecar.set`, `placement.drop`, `placement.move`, `placement.turn`, `placement.copy`, `props.paste`, `start.create`, `alarm.locks`, `security.create`, `security.sensor`, `security.link`, `security.outputs`, `security.unlink`, `security.delete`, `security.move`, `stage.apply`, `objectiveplayers.set`, `objectiveplayers.playlevel`, `objectiveplayers.targets`, `conveyor.add`, `conveyor.sync`, `camera.order`, `camera.add`, `magic.component`, `magic.key`, `magic.json.import`, `magic.edit`, `magic.create`, `magic.link`, `objective.add`, `replace`, `tag.rename`, `assembly.place`, `emitterlib.place`, `brush.visibility.set`, `builder.fit`, `builder.fit.brush`, `vertex.portal`, `vertex.snap`, `brush.snap`, `stairs.smooth`, `stairs.remove`, `settings.edit`, `ge.add`, `surface.texture` |
-| File | `map.new`, `map.open`, `map.save`, `map.recover`, `asset.texture`, `asset.mesh`, `package.save`, `object.set`, `interface.texture`, `minimap.apply`, `uas.build`, `mapsettings.set`, `optimise.release`, `conveyor.prepare`, `emitterlib.save`, `emitterlib.delete`, `emitterlib.update` |
+| Read | `editor.state`, `log.tail`, `approval.status`, `blob.read`, `blob.free`, `actors`, `actors.query`, `map`, `map.file`, `settings.inspect`, `authoring.mapid`, `authoring.schema`, `authoring.export`, `authoring.preview`, `assets.search`, `view.screenshot`, `view.capture`, `view.restore`, `mapcheck.run`, `lighting.budget`, `scene.trace`, `ge.list`, `object.inspect`, `mapsettings.get`, `mcp.sidecar.get`, `props.copy`, `design.pieces`, `design.scene`, `design.grid`, `design.view`, `design.bspowners`, `design.builds`, `design.spawns`, `design.clearances`, `placement.selection`, `security.actors`, `light.list`, `objective.actors`, `stage.actors`, `stage.read`, `stage.preview`, `optimise.report`, `magic.classes`, `magic.assets`, `magic.inspect`, `magic.json.export`, `camera.snapshot`, `brush.visibility`, `usages`, `connections`, `surface.brushes`, `mesh.bounds`, `brush.snap.bounds`, `vertex.selection`, `stairs.state`, `tag.preview`, `assembly.capture`, `emitterlib.list`, `emitterlib.packs`, `emitterlib.cache`, `emitterlib.problems`, `emitterlib.categories`, `emitterlib.selected`, `emitterlib.capture`, `skins.settings`, `objectiveplayers.state`, `conveyor.state`, `prefab.instances`, `prefab.counts`, `objimport.preview`, `mover.selected`, `mover.state`, `mover.outline`, `mover.candidates` |
+| Undoable | `mcp.plan`, `undo.call`, `undo.steps`, `redo.steps`, `authoring.apply`, `select`, `design.block`, `design.blockbatch`, `design.align`, `design.layer`, `design.polyflags`, `design.repairflags`, `design.sendtolast`, `design.flags`, `design.group`, `design.translate`, `design.lift`, `design.tempstart`, `design.register`, `design.unregister`, `mcp.sidecar.set`, `placement.drop`, `placement.move`, `placement.turn`, `placement.copy`, `props.paste`, `start.create`, `alarm.locks`, `security.create`, `security.sensor`, `security.link`, `security.outputs`, `security.unlink`, `security.delete`, `security.move`, `stage.apply`, `objectiveplayers.set`, `objectiveplayers.playlevel`, `objectiveplayers.targets`, `conveyor.add`, `conveyor.sync`, `camera.order`, `camera.add`, `magic.component`, `magic.key`, `magic.json.import`, `magic.edit`, `magic.create`, `magic.link`, `objective.add`, `replace`, `tag.rename`, `assembly.place`, `emitterlib.place`, `brush.visibility.set`, `builder.fit`, `builder.fit.brush`, `vertex.portal`, `vertex.snap`, `brush.snap`, `stairs.smooth`, `stairs.remove`, `settings.edit`, `ge.add`, `surface.texture`, `mover.path`, `mover.settings`, `mover.wire`, `prefab.selectinstance`, `prefab.selectall`, `prefab.place` |
+| File | `map.new`, `map.open`, `map.save`, `map.recover`, `asset.texture`, `asset.mesh`, `package.save`, `object.set`, `interface.texture`, `minimap.apply`, `uas.build`, `mapsettings.set`, `optimise.release`, `conveyor.prepare`, `emitterlib.save`, `emitterlib.delete`, `emitterlib.update`, `objimport.import`, `prefab.save`, `prefab.update`, `prefab.break` |
 | Build | `design.build`, `build.all` |
 | Process | `editor.quit`, `play.level` (needs `AllowPlay=1`) |
 | Raw | `exec` (needs `AllowRawExec=1`; use `editor_exec`) |
-| Blocked | `light.set` (it writes without a stale check: use `actors_edit`), `design.removestart`, `design.play`, `package.preview`, `map.setfile`, `emitterlib.restore`, `skins.apply`, `skins.remove`, every `preview.*` and `characters.*` op: they open windows or undo blindly. |
+| Blocked | `light.set` (it writes without a stale check: use `actors_edit`), `design.removestart`, `design.play`, `package.preview`, `map.setfile`, `emitterlib.restore`, `skins.apply`, `skins.remove`, `mover.preview`, `mover.restore` (the Mover Workbench's preview pose, outside Undo), every `preview.*` and `characters.*` op: they open windows or undo blindly. |
 
 Every op that changes something runs as a one-step plan, so approval, dry runs,
 the history file and the one Undo step apply to it too. The undo ops and `exec`
@@ -908,12 +910,13 @@ What the server and the editor never do, whatever the agent asks:
   `AllowRawExec` and `AllowPlay` are set only in the INI.
 - **Write stock packages.** Package writes are limited to the map's own names:
   `<Map>`, `<Map>-i`, `Amb_<Map>` and `<Map>_<anything>` (`<Map>_TXT`,
-  `<Map>_STM`). Texture and mesh imports, package saves and a Map JSON
-  document's `texture` and `save` operations go only into `<Map>_<anything>`
-  (`not_map_owned`, `package_name`), and the interface textures only into
-  `<Map>-i`. Since those are named after the map's file, none of them, nor a
-  `.uas` or a release copy, is written before the map's first save
-  (`unsaved_map`). A Map JSON texture may also go into `MyLevel`, which is
+  `<Map>_STM`). Texture and mesh imports (`objimport.import`'s OBJ meshes
+  and their textures too), package saves and a Map JSON document's `texture`
+  and `save` operations go only into `<Map>_<anything>` (`not_map_owned`,
+  `package_name`), and the interface textures only into `<Map>-i`. Since
+  those are named after the map's file, none of them, nor a `.uas` or a
+  release copy, is written before the map's first save (`unsaved_map`). A
+  Map JSON texture and an OBJ import may also go into `MyLevel`, which is
   saved with the map. A name that another kind of package already has is
   refused too: packages of one base name are one package to the engine.
 - **Delete without asking for it.** A call deletes actors only when it says
@@ -994,7 +997,16 @@ what follows as the current state, not a promise:
 - **Meshes.** `asset.mesh` imports ASE files with `STATICMESH IMPORT`; the
   ASE that OBJ files are converted to has not been tried in the editor's
   importer yet, and collision can only be checked, not set. Mesh packages are
-  saved as `Packages\StaticMeshes\<Map>_STM.usx`.
+  saved as `Packages\StaticMeshes\<Map>_STM.usx`. RE+'s own **File > Import
+  OBJ Mesh** is the other way for an OBJ, and the one to use for collision:
+  `workflow_request` with `objimport.preview` (what it would make), then
+  `objimport.import` into `MyLevel` or `<Map>_STM`, builds convex hulls and
+  splits a mesh past the game's 5,512 collision triangles into parts. Over
+  MCP it imports, with the `.mtl`'s textures, only into `MyLevel` or the
+  map's own `<Map>_<name>` package (else `refused` / `not_map_owned`,
+  `package_name`, or `unsaved_map` before the map's first save). It does not
+  save: `map_file` saves `MyLevel` with the map, `package.save` a
+  `<Map>_STM`.
 - **Other unsupported ops.** `object.inspect` and `object.set` (non-actor
   objects) refuse with manual steps. Brush movers are not supported; movers
   are static meshes.
@@ -1024,9 +1036,9 @@ what follows as the current state, not a promise:
 | --- | --- |
 | `not_connected`, or "No editor connected" | The editor is not running, or its server is off. Start the editor and tick **RE+ Tools > MCP > Enable MCP server**, or let the agent use `editor_launch` once `Enabled=1`. |
 | `disabled` | The server was turned off. Tick **Enable MCP server** again. |
-| The client cannot start the server | Check the path in the client's configuration points at `System\Reloaded.Editor.Mcp.exe`, and that the file exists (it comes with RE+ 2.7.0 and later). Run it with `--self-test` in a command prompt. |
+| The client cannot start the server | Check the path in the client's configuration points at `System\Reloaded.Editor.Mcp.exe`, and that the file exists (it comes with RE+ 2.9.0 and later). Run it with `--self-test` in a command prompt. |
 | `protocol_mismatch` | The exe and the DLL come from different RE+ versions. Install both from the same release, then restart the MCP client. |
-| `busy` with a reason | See [How calls run](#how-calls-run): close the dialog or menu, finish the drag, answer a startup window, restore a minimised editor. |
+| `busy` with a reason | See [How calls run](#how-calls-run): close the dialog or menu, finish the drag, answer a startup window, restore a minimised editor, let a Mover Workbench preview end. |
 | `busy` / `another_client` | Another client holds the editor. Close it, or use **Disconnect client**. |
 | `busy` / `approval_pending` | A change waits in the review window. Answer it; the agent continues with `approval_wait`. |
 | `refused` / `outside_write_roots` | A release copy's folder, or an `editor_exec` `FILE=`, is outside `<Game>\Releases` (release copies only), the work folder and `WriteRoots`. Leave the folder out, or add it to `[Mcp] WriteRoots`. |

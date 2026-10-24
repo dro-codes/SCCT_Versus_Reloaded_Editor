@@ -344,7 +344,7 @@ void Open(HWND owner, const std::string& object)
     }
     else
     {
-        ShowWindow(openWindow, SW_RESTORE);
+        ShowWindow(openWindow, IsIconic(openWindow) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(openWindow);
     }
     auto s = reinterpret_cast<State*>(GetWindowLongPtr(openWindow, GWLP_USERDATA));

@@ -47,7 +47,7 @@ on that thread too, so the probe's client (`tests/mcp/McpPipeClient.h`) works
 on a worker thread (`McpPipe::Worker`) while the frame thread pumps messages:
 that pumping is what runs each call. The section starts from `map.new`, so it
 needs no fixture. If `[Mcp] Enabled` is 0 it turns the server on through RE+
-Tools > MCP > Enable MCP server (command 41460), as a user would.
+Tools > MCP > Enable MCP server (command 41720), as a user would.
 
 | Case | What the section checks |
 |---|---|

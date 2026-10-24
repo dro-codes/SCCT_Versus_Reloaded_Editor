@@ -90,6 +90,8 @@ void Guards()
     in={};in.depth=1;in.approvalPending=true;Check(Guard::BusyReason(in,read)=="approval_pending","re-entry during review");
     in={};in.minimised=true;Check(Guard::BusyReason(in,read,true)=="minimised" && Guard::BusyReason(in,read).empty(),"minimised only for screenshots");
     in={};in.startupDialog="Update available";Check(Guard::BusyReason(in,read)=="startup_dialog","startup window");
+    in={};in.moverPreview=true;Check(Guard::BusyReason(in,read).empty() && Guard::BusyReason(in,write)=="mover_preview" && Guard::BusyReason(in,*Bridge::FindPolicy("map.save"))=="mover_preview",
+          "a mover preview blocks edits and saves, not reads");
     Check(!Guard::BusyHint("modal").empty(),"hint");
 }
 int main()

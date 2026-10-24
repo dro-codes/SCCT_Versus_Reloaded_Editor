@@ -14,6 +14,7 @@ namespace Mcp::Guard
         bool moveSize = false;         // the frame is being moved or resized
         bool captured = false;         // a viewport drag holds the mouse
         bool transactionOpen = false;  // the undo buffer has an open transaction
+        bool moverPreview = false;     // the Mover Workbench is previewing a mover (its pose moved outside Undo)
         bool rebuilding = false;       // Rebuild All Maps is running
         bool slowTask = false;         // the engine's progress bar is up
         bool minimised = false;
@@ -34,6 +35,7 @@ namespace Mcp::Guard
         if (in.menuMode || in.moveSize) return "menu";
         if (in.captured) return "drag";
         if (in.transactionOpen) return "transaction";
+        if (in.moverPreview) return "mover_preview";
         return {};
     }
     // What to tell the agent while it waits.
@@ -50,6 +52,7 @@ namespace Mcp::Guard
         if (reason == "menu") return "A menu is open in the editor.";
         if (reason == "drag") return "The user is dragging in a viewport.";
         if (reason == "transaction") return "An editor operation is still open.";
+        if (reason == "mover_preview") return "The Mover Workbench is playing a mover preview; it puts the mover back when the preview ends (a few seconds) or Stop Preview is clicked.";
         return "The editor is busy.";
     }
 }

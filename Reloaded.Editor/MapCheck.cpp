@@ -3,8 +3,11 @@
 #undef max
 #include "MapCheck.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "MapCheckModel.h"
 #include "MeasureTool.h"
+#include "Reachability.h"
+#include "ReachabilityModel.h"
 #include "WorkflowEditor.h"
 #include "logger.h"
 #include <commctrl.h>
@@ -47,7 +50,11 @@ Settings LoadSettings()
         {"ShowZonesWithoutZoneInfo", defaults.zonesWithoutZoneInfo ? "1" : "0"},
         {"StockChecks", defaults.stockChecks ? "1" : "0"},
         {"FloatingMinGap", Units(defaults.floatMinGap)},
-        {"FloatingMaxGap", Units(defaults.floatMaxGap)}};
+        {"FloatingMaxGap", Units(defaults.floatMaxGap)},
+        {"CollisionTriangleLimit", std::to_string(defaults.collisionTriangleLimit)},
+        {"CollisionBspNodeLimit", std::to_string(defaults.collisionNodeLimit)},
+        {"PerPolygonTriangleCap", std::to_string(defaults.polyTriangleCap)},
+        {"MalformedHulls", defaults.malformedHulls ? "1" : "0"}};
     for (const auto& key : keys)
     {
         char value[32] = {};
@@ -72,6 +79,11 @@ Settings LoadSettings()
     // FloatingMaxGap 0 turns the floating mesh check off.
     s.floatMinGap = number("FloatingMinGap", defaults.floatMinGap);
     s.floatMaxGap = number("FloatingMaxGap", defaults.floatMaxGap);
+    // Static mesh collision limits; 0 turns a check off.
+    s.collisionTriangleLimit = static_cast<int>(number("CollisionTriangleLimit", defaults.collisionTriangleLimit));
+    s.collisionNodeLimit = static_cast<int>(number("CollisionBspNodeLimit", defaults.collisionNodeLimit));
+    s.polyTriangleCap = static_cast<int>(number("PerPolygonTriangleCap", defaults.polyTriangleCap));
+    s.malformedHulls = GetPrivateProfileIntA(kSection, "MalformedHulls", 1, ini.c_str()) != 0;
     return ClampSettings(s);
 }
 
@@ -120,7 +132,9 @@ void Row(HWND list, int row, LPARAM data, const std::vector<std::string>& cells)
 const char kIntroText[] =
     "Checks the map as last built: actors in the void (solid space, outside every zone), far outside the geometry or with their "
     "collision cut into BSP or a static mesh; zones that leak into each other or to the outside; zone portals that seal nothing; "
-    "static meshes floating a little above the floor; and the editor's own Check Map for Errors. Build geometry first. "
+    "static meshes floating a little above the floor; static meshes whose collision crashes the game or does not work in it; "
+    "objectives and pickups a team cannot walk to (Build > Reachability Map); and the editor's own Check Map for Errors. "
+    "Build geometry first. "
     "Click a row to select what it is about, double-click to frame it; a leak path is drawn in the viewports. "
     "Settings: Reloaded_Editor.ini [MapCheck].";
 
@@ -151,11 +165,15 @@ std::string ReportStatus()
 std::string Selects(const Problem& p)
 {
     std::string text;
-    for (const auto& path : p.actors)
+    // A mesh used hundreds of times would make the cell unreadable.
+    constexpr size_t kNamed = 6;
+    for (size_t i = 0; i < p.actors.size() && i < kNamed; ++i)
     {
+        const auto& path = p.actors[i];
         const auto dot = path.find_last_of('.');
         text += (text.empty() ? "" : ", ") + (dot == std::string::npos ? path : path.substr(dot + 1));
     }
+    if (p.actors.size() > kNamed) text += " and " + std::to_string(p.actors.size() - kNamed) + " more";
     for (int surface : p.surfaces) text += (text.empty() ? "" : ", ") + std::string("surface ") + std::to_string(surface);
     if (!p.path.empty()) text += (text.empty() ? "" : "; ") + std::string("leak path");
     return text.empty() ? "-" : text;
@@ -258,8 +276,10 @@ void Layout(HWND window)
     RECT r{};
     GetClientRect(window, &r);
     const int w = r.right - 24, h = r.bottom;
-    const int top = 66;
-    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, top - 12, TRUE);
+    // The intro keeps all its lines in the larger modern font (up to a third of the window).
+    const int intro = Appearance::FitHeight(GetDlgItem(window, kIntro), w, 62, h / 3);
+    const int top = intro + 12;
+    MoveWindow(GetDlgItem(window, kIntro), 12, 8, w, intro, TRUE);
     MoveWindow(GetDlgItem(window, kList), 12, top, w, h - top - 82, TRUE);
     MoveWindow(GetDlgItem(window, kStatus), 12, h - 76, w, 34, TRUE);
     MoveWindow(GetDlgItem(window, kRefresh), 12, h - 36, 90, 26, TRUE);
@@ -354,7 +374,7 @@ void Show(HWND owner)
 {
     if (IsWindow(check.window))
     {
-        ShowWindow(check.window, SW_RESTORE);
+        ShowWindow(check.window, IsIconic(check.window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(check.window);
         Fill();
         return;
@@ -383,10 +403,22 @@ Report Measure()
     auto scene = Workflow::Editor::MapCheckScene(settings);
     if (settings.floatMaxGap > 0 && scene.bsp.Built()) scene.floors = Workflow::Editor::MapCheckFloorGaps(settings.floatMaxGap);
     auto report = Analyse(scene, settings);
+    // Where each team can walk (Reachability.h), from its last run on the map as it is.
+    for (const auto& row : Reachability::MapCheckRows())
+    {
+        Problem p;
+        p.severity = row.severity == 0 ? Severity::Error : row.severity == 1 ? Severity::Warning : Severity::Note;
+        p.group = "Reachability";
+        p.check = row.check;
+        p.message = row.message;
+        p.actors = row.actors;
+        report.problems.push_back(std::move(p));
+    }
+    std::stable_sort(report.problems.begin(), report.problems.end(), [](const Problem& a, const Problem& b) { return a.severity < b.severity; });
     Logger::log("MapCheck: " + std::to_string(report.problems.size()) + " problem(s) (" + std::to_string(report.Count(Severity::Error)) + " errors, "
                 + std::to_string(report.Count(Severity::Warning)) + " warnings) in " + std::to_string(scene.actors.size()) + " actors, "
                 + std::to_string(scene.bsp.nodes.size()) + " nodes, " + std::to_string(report.zones) + " zones, " + std::to_string(scene.portals.size())
-                + " portal surfaces; stock entries " + std::to_string(scene.stock.size()));
+                + " portal surfaces, " + std::to_string(scene.meshes.size()) + " static meshes; stock entries " + std::to_string(scene.stock.size()));
     for (const auto& p : report.problems)
         Logger::log(std::string("MapCheck: ") + SeverityName(p.severity) + " [" + p.check + "] " + p.message);
     return report;
@@ -396,6 +428,19 @@ void Open(HWND owner)
 {
     Refresh();
     Show(owner);
+}
+
+void ReachabilityChanged()
+{
+    if (!IsWindow(check.window)) return;
+    try
+    {
+        Refresh();
+    }
+    catch (const std::exception& e)
+    {
+        SetStatus(e.what());
+    }
 }
 
 bool HandleCommand(UINT command)

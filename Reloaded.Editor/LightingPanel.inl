@@ -156,6 +156,32 @@ void LightShadowPaint(DesignState& s,Gdiplus::Graphics& g)
         else g.FillRectangle(&brush,at.X-side/2,at.Y-bar,side,bar);
     }
 }
+// Where each team can walk as a layer: each cell on this storey as a square in
+// the top view (green both teams, blue spies only, red mercs only), or as a bar
+// at its height in an elevation.
+void ReachPaint(DesignState& s,Gdiplus::Graphics& g)
+{
+    if(!s.reach)return;
+    using namespace Gdiplus;
+    const auto& patches=Reachability::Patches();
+    const double size=Reachability::CellSize();
+    RECT rc{};
+    GetClientRect(s.canvas,&rc);
+    SolidBrush both(Color(110,60,210,90)),spies(Color(130,60,130,255)),mercs(Color(130,255,60,60));
+    const int h=DesignHorizontal(s),v=DesignVertical(s);
+    const bool top=3-h-v==2;
+    // At least 2 pixels, so a whole map's cells still show zoomed out.
+    const float side=(std::max)(2.f,static_cast<float>(size*0.9*s.zoom)),bar=(std::max)(2.f,static_cast<float>(size*0.12*s.zoom));
+    for(const auto& patch:patches)
+    {
+        if(!DesignOnFloor(s,patch.at[2],patch.at[2]))continue;
+        const auto at=DesignScreen(s,Vector{patch.at[0],patch.at[1],patch.at[2]});
+        if(at.X<-side || at.Y<-side || at.X>rc.right+side || at.Y>rc.bottom+side)continue;
+        auto& brush=patch.teams==3?both:patch.teams==1?spies:mercs;
+        if(top)g.FillRectangle(&brush,at.X-side/2,at.Y-side/2,side,side);
+        else g.FillRectangle(&brush,at.X-side/2,at.Y-bar,side,bar);
+    }
+}
 // Light icons, their rim handles, and the live outline of a light being dragged.
 void LightPaint(DesignState& s,Gdiplus::Graphics& g,const std::function<void(const std::string&,Gdiplus::PointF)>& label)
 {

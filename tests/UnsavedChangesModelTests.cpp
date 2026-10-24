@@ -99,6 +99,20 @@ void Saving()
     Tracker other;
     Saved(other, moon, 8, kCopy, kMoon);
     Check(Unsaved(other, {2, 8}, 9, kCopy), "the next map opened drops what was waiting");
+    // Play Level (or a release copy) saves another file after a Save As, before
+    // anything asked whether the map is unsaved: the Save As still counts.
+    Tracker played;
+    Saved(played, moon, 8, kCopy, kMoon);
+    Check(!Saved(played, moon, 8, "C:\\Game\\Packages\\Maps\\Autoplay.sdc", kCopy), "Play Level after a Save As");
+    Check(!Unsaved(played, moon, 8, kCopy), "the Save As still made the map clean");
+    Tracker playedEdited;
+    Saved(playedEdited, moon, 8, kCopy, kMoon);
+    Saved(playedEdited, moon, 9, "C:\\Game\\Packages\\Maps\\Autoplay.sdc", kCopy);
+    Check(Unsaved(playedEdited, moon, 9, kCopy), "an edit between the Save As and Play Level still counts");
+    Tracker twice;
+    Saved(twice, moon, 8, kCopy, kMoon);
+    Saved(twice, moon, 9, "C:\\Game\\Packages\\MapsEd\\MoonD_v3.sdc", kCopy);
+    Check(!Unsaved(twice, moon, 9, "C:\\Game\\Packages\\MapsEd\\MoonD_v3.sdc"), "a second Save As straight after the first");
     Tracker latest;
     Saved(latest, moon, 8, kCopy, kMoon);
     Saved(latest, moon, 10, "D:\\Release\\MoonD\\Packages\\Maps\\MoonD.sdc", kMoon);

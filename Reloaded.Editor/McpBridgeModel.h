@@ -134,6 +134,9 @@ namespace Mcp::Bridge
             {"emitterlib.cache", P::Read, true}, {"emitterlib.problems", P::Read, true}, {"emitterlib.categories", P::Read, true},
             {"emitterlib.selected", P::Read, true}, {"emitterlib.capture", P::Read, true}, {"skins.settings", P::Read, true},
             {"objectiveplayers.state", P::Read, true}, {"conveyor.state", P::Read, true},
+            {"prefab.instances", P::Read, true}, {"prefab.counts", P::Read, true}, {"objimport.preview", P::Read, true},
+            {"mover.selected", P::Read, true}, {"mover.state", P::Read, true}, {"mover.outline", P::Read, true},
+            {"mover.candidates", P::Read, true},
             // Undoable map edits.
             {"authoring.apply", P::Undoable, true}, {"select", P::Undoable, true},
             {"design.block", P::Undoable, true}, {"design.blockbatch", P::Undoable, true}, {"design.align", P::Undoable, true},
@@ -158,11 +161,18 @@ namespace Mcp::Bridge
             {"vertex.portal", P::Undoable, true}, {"vertex.snap", P::Undoable, true}, {"brush.snap", P::Undoable, true},
             {"stairs.smooth", P::Undoable, true}, {"stairs.remove", P::Undoable, true},
             {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"surface.texture", P::Undoable, false},
+            {"mover.path", P::Undoable, true}, {"mover.settings", P::Undoable, true}, {"mover.wire", P::Undoable, true},
+            {"prefab.selectinstance", P::Undoable, true}, {"prefab.selectall", P::Undoable, true},
+            // Undoes its own step when the library cannot be saved.
+            {"prefab.place", P::Undoable, false},
             // Files and packages.
             {"asset.texture", P::File, false}, {"asset.mesh", P::File, false}, {"package.save", P::File, false}, {"object.set", P::File, false},
             {"interface.texture", P::File, false}, {"minimap.apply", P::File, false}, {"uas.build", P::File, false},
             {"mapsettings.set", P::File, false}, {"optimise.release", P::File, false}, {"conveyor.prepare", P::File, false},
             {"emitterlib.save", P::File, false}, {"emitterlib.delete", P::File, false}, {"emitterlib.update", P::File, false},
+            {"objimport.import", P::File, false},
+            // Linked prefabs: the library keeps what Undo does not put back.
+            {"prefab.save", P::File, false}, {"prefab.update", P::File, false}, {"prefab.break", P::File, false},
             // Never over the pipe: they open windows or undo blindly. light.set
             // writes without the staleness check every other edit has.
             {"light.set", P::Blocked, false}, {"design.removestart", P::Blocked, false}, {"design.play", P::Blocked, false},
@@ -174,6 +184,8 @@ namespace Mcp::Bridge
             {"preview.camera", P::Blocked, false}, {"characters.open", P::Blocked, false}, {"characters.show", P::Blocked, false},
             {"characters.capture", P::Blocked, false}, {"characters.clear", P::Blocked, false}, {"characters.close", P::Blocked, false},
             {"characters.state", P::Blocked, false}, {"characters.camera", P::Blocked, false},
+            // The Mover Workbench's preview pose: a mover moved without an Undo step until restored.
+            {"mover.preview", P::Blocked, false}, {"mover.restore", P::Blocked, false},
         };
         return table;
     }

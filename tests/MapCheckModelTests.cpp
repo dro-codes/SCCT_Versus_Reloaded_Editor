@@ -99,6 +99,181 @@ namespace
         for (const auto& p : report.problems) n += p.check == check;
         return n;
     }
+
+    // A box hull appended to a mesh's hull set the way the editor stores one:
+    // positions shared with earlier hulls reuse their vertex, and its twelve
+    // triangles follow the earlier hulls'. `flip` reverses the winding; `order`
+    // starts with the bottom then the top face, as stock meshes do.
+    void AddBox(MeshCollision& mesh, Vec3 lo, Vec3 hi, bool flip = false, int dropFaces = 0)
+    {
+        auto vertex = [&](double x, double y, double z)
+        {
+            const Vec3 p{x, y, z};
+            for (size_t i = 0; i < mesh.hullVertices.size(); ++i)
+                if (mesh.hullVertices[i] == p) return static_cast<int>(i);
+            mesh.hullVertices.push_back(p);
+            return static_cast<int>(mesh.hullVertices.size() - 1);
+        };
+        int c[8];
+        for (int i = 0; i < 8; ++i) c[i] = vertex(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]);
+        // Quads (outward winding): bottom, top, -y, +y, -x, +x.
+        const int quads[6][4] = {{0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5}};
+        for (int q = 0; q < 6 - dropFaces; ++q)
+        {
+            const auto& f = quads[q];
+            HullTriangle a{c[f[0]], c[f[1]], c[f[2]]}, b{c[f[0]], c[f[2]], c[f[3]]};
+            if (flip) { std::swap(a.b, a.c); std::swap(b.b, b.c); }
+            mesh.hullTriangles.push_back(a);
+            mesh.hullTriangles.push_back(b);
+        }
+    }
+
+    MeshCollision Mesh(const char* name, size_t actors = 1)
+    {
+        MeshCollision mesh;
+        mesh.name = name;
+        mesh.path = std::string("MyLevel.Meshes.") + name;
+        for (size_t i = 0; i < actors; ++i) mesh.actors.push_back("MyLevel.StaticMeshActor" + std::to_string(i));
+        mesh.colliding = true;
+        return mesh;
+    }
+
+    void CollisionTests()
+    {
+        // Hulls found again: separate boxes, boxes sharing a face (and so
+        // corners), either winding, an open hull, and a box with two extra
+        // triangles over one face.
+        {
+            auto mesh = Mesh("Kit");
+            AddBox(mesh, {0, 0, 0}, {10, 10, 10});
+            AddBox(mesh, {10, 0, 0}, {20, 10, 10}, true);         // shares the x = 10 face
+            AddBox(mesh, {0, 0, 10}, {20, 10, 30});                // on top of both: shares four corners, convex with them
+            AddBox(mesh, {100, 0, 0}, {110, 10, 5}, false, 1);     // open: no +x face
+            const auto hulls = HullsOf(mesh.hullVertices, mesh.hullTriangles);
+            assert(hulls.size() == 4);
+            for (size_t i = 0; i < 3; ++i) assert(hulls[i].count == 12 && hulls[i].corners == 8 && hulls[i].closed && !hulls[i].Malformed());
+            assert(hulls[1].first == 12 && hulls[2].first == 24);
+            assert(hulls[2].lo == (Vec3{0, 0, 10}) && hulls[2].hi == (Vec3{20, 10, 30}));
+            assert(hulls[3].count == 10 && !hulls[3].closed && !hulls[3].Malformed());
+
+            // Vertex sharing alone would count the first two boxes as one shape of
+            // 24 triangles over 12 corners, more than 2 x 12 - 4.
+            Scene scene;
+            scene.meshes.push_back(mesh);
+            assert(!FindCheck(Analyse(scene, Settings{}), "Malformed collision hull"));
+
+            // Two extra triangles over the first box's top: 14 triangles, 8 corners.
+            auto bad = mesh;
+            const auto top = bad.hullTriangles[2];
+            bad.hullTriangles.insert(bad.hullTriangles.begin() + 4, {{top.a, top.b, top.c}, {top.a, top.c, top.b}});
+            const auto again = HullsOf(bad.hullVertices, bad.hullTriangles);
+            assert(again.size() == 4 && again[0].count == 14 && again[0].corners == 8 && again[0].Malformed());
+            scene.meshes = {bad};
+            const auto report = Analyse(scene, Settings{});
+            const auto* row = FindCheck(report, "Malformed collision hull");
+            assert(row && row->severity == Severity::Error && row->group == "Collision" && row->actors == bad.actors);
+            assert(row->message.find("Kit has a malformed collision hull: 14 triangles over 8 corners, where a convex hull has at most 12") == 0);
+            assert(row->message.find("players fall or walk through it") != std::string::npos && row->message.find("(0, 0, 0) to (10, 10, 10)") != std::string::npos);
+            Settings off;
+            off.malformedHulls = false;
+            assert(!FindCheck(Analyse(scene, off), "Malformed collision hull"));
+
+            // A face bent by less than the tolerance stays one clean hull.
+            auto bent = Mesh("Bent");
+            AddBox(bent, {0, 0, 0}, {1000, 1000, 1000});
+            bent.hullVertices[7][2] += 1.5;   // one top corner up: the top is two planes now
+            const auto one = HullsOf(bent.hullVertices, bent.hullTriangles);
+            assert(one.size() == 1 && one[0].count == 12 && !one[0].Malformed());
+            // Several malformed hulls in one mesh: one row that counts them.
+            auto two = bad;
+            const auto second = two.hullTriangles[16];   // the second box's top
+            two.hullTriangles.insert(two.hullTriangles.begin() + 18, {second, {second.a, second.c, second.b}});
+            scene.meshes = {two};
+            const auto both = Analyse(scene, Settings{});
+            assert(CountCheck(both, "Malformed collision hull") == 1);
+            assert(FindCheck(both, "Malformed collision hull")->message.find("Kit has 2 malformed collision hulls. The first: 14 triangles") == 0);
+        }
+
+        // The 5512-triangle table: either set over it crashes the game.
+        {
+            Scene scene;
+            auto own = Mesh("Cabin", 3);
+            own.polyTriangles = 5513; own.drawnTriangles = 5513;
+            auto exact = Mesh("Exact");
+            exact.polyTriangles = 5512;
+            auto hulls = Mesh("Hulled");
+            for (int i = 0; i < 460; ++i) AddBox(hulls, {i * 20.0, 0, 0}, {i * 20.0 + 10, 10, 10});   // 5520 hull triangles
+            hulls.polyTriangles = 200;
+            auto quiet = Mesh("Quiet");
+            quiet.polyTriangles = 9000;
+            quiet.colliding = false;
+            scene.meshes = {own, exact, hulls, quiet};
+            const auto report = Analyse(scene, Settings{});
+            assert(CountCheck(report, "Crashes the game") == 3);
+            const auto* cabin = FindCheck(report, "Crashes the game");
+            assert(cabin->severity == Severity::Error && cabin->actors.size() == 3);
+            assert(cabin->message.find("Cabin has 5,513 per-polygon collision triangles, over the game's limit of 5,512 per set: it crashes the game.") == 0);
+            assert(cabin->message.find("fixed table of 5,512 slots") != std::string::npos && cabin->message.find("Used by 3 actors.") != std::string::npos);
+            assert(FindCheck(report, "Crashes the game", 1)->message.find("Hulled has 5,520 hull triangles, over") == 0);
+            const auto* note = FindCheck(report, "Crashes the game", 2);
+            assert(note->severity == Severity::Note && note->message.find("Quiet has 9,000") == 0 && note->message.find("None of them collide now") != std::string::npos);
+            assert(!FindCheck(report, "Malformed collision hull") && !FindCheck(report, "Hull BSP full"));
+            Settings off;
+            off.collisionTriangleLimit = 0;
+            assert(!FindCheck(Analyse(scene, off), "Crashes the game"));
+            Settings lower;
+            lower.collisionTriangleLimit = 5000;
+            assert(CountCheck(Analyse(scene, lower), "Crashes the game") == 4);
+        }
+
+        // Full BSPs and the importer's 15000 cap.
+        {
+            Scene scene;
+            auto jumbo = Mesh("Jumbo", 2);
+            jumbo.polyTriangles = 15000; jumbo.drawnTriangles = 24000; jumbo.polyNodes = 32767; jumbo.polyInTree = 11697;
+            AddBox(jumbo, {0, 0, 0}, {10, 10, 10});
+            jumbo.hullNodes = 32767; jumbo.hullInTree = 9;
+            auto fronts = Mesh("Fronts");
+            fronts.polyTriangles = 5000; fronts.polyNodes = 32767; fronts.polyInTree = 3086;
+            auto fits = Mesh("Fits");
+            fits.polyTriangles = 14999; fits.polyNodes = 32766; fits.polyInTree = 14999;
+            scene.meshes = {jumbo, fronts, fits};
+            const auto report = Analyse(scene, Settings{});
+            const auto* cut = FindCheck(report, "Per-polygon collision cut short");
+            assert(CountCheck(report, "Per-polygon collision cut short") == 1 && cut->severity == Severity::Warning);
+            assert(cut->message.find("Jumbo's per-polygon collision stopped at the importer's cap of 15,000 triangles (it draws 24,000)") == 0);
+            assert(cut->message.find("players collide with its hulls") != std::string::npos);
+            assert(CountCheck(report, "Collision BSP full") == 2);
+            // Errors sort first: the mesh without hulls loses player collision.
+            const auto* noHulls = FindCheck(report, "Collision BSP full");
+            const auto* withHulls = FindCheck(report, "Collision BSP full", 1);
+            assert(withHulls->severity == Severity::Warning && noHulls->severity == Severity::Error);
+            assert(noHulls->message.find("Fronts's per-polygon collision BSP is full (32,767 nodes, the most its 16-bit indices hold): 1,914 of its 5,000 collision triangles are in no node") == 0);
+            assert(noHulls->message.find("players and shots pass through") != std::string::npos);
+            assert(withHulls->message.find("Jumbo's") == 0 && withHulls->message.find("lets shots through") != std::string::npos);
+            const auto* hull = FindCheck(report, "Hull BSP full");
+            assert(hull && hull->severity == Severity::Error && hull->message.find("Jumbo's hull collision BSP is full (32,767 nodes, the most its 16-bit indices hold): 3 of its 12 hull triangles are in no node") == 0);
+            assert(CountCheck(report, "Crashes the game") == 2 && !FindCheck(report, "Malformed collision hull"));   // Jumbo and Fits
+            Settings off;
+            off.collisionNodeLimit = 0; off.polyTriangleCap = 0;
+            const auto quiet = Analyse(scene, off);
+            assert(!FindCheck(quiet, "Collision BSP full") && !FindCheck(quiet, "Hull BSP full") && !FindCheck(quiet, "Per-polygon collision cut short"));
+        }
+
+        // Settings bounds; and the check runs without a built BSP.
+        {
+            Settings s;
+            s.collisionTriangleLimit = -4; s.collisionNodeLimit = 5000000; s.polyTriangleCap = 15000;
+            s = ClampSettings(s);
+            assert(s.collisionTriangleLimit == 0 && s.collisionNodeLimit == 1000000 && s.polyTriangleCap == 15000);
+            Scene unbuilt;
+            auto mesh = Mesh("Big");
+            mesh.polyTriangles = 6000;
+            unbuilt.meshes = {mesh};
+            const auto report = Analyse(unbuilt, Settings{});
+            assert(FindCheck(report, "BSP not built") && FindCheck(report, "Crashes the game"));
+        }
+    }
 }
 
 int main()
@@ -523,8 +698,10 @@ int main()
     }
 
     // Check groups are listed for the window and future checks.
-    assert(CheckGroups().size() == 4 && std::string(CheckGroups()[0].id) == "actors");
-    assert(std::string(CheckGroups()[2].id) == "props" && std::string(CheckGroups()[3].id) == "stock");
+    assert(CheckGroups().size() == 5 && std::string(CheckGroups()[0].id) == "actors");
+    assert(std::string(CheckGroups()[2].id) == "props" && std::string(CheckGroups()[3].id) == "collision" && std::string(CheckGroups()[4].id) == "stock");
+
+    CollisionTests();
 
     std::puts("MapCheckModelTests passed");
     return 0;

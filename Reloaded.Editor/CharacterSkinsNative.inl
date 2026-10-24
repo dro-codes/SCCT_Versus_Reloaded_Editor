@@ -99,6 +99,8 @@ namespace
     {
         auto c=Find(LevelPath()+"."+name);
         if(c && !force && compiled(c))return;
+        // Made again over a class compiled before (an older version's), whose placed actors use it.
+        const bool replacing=c && (Read<unsigned>(c+0x8c)&2);
         // A class left uncompiled by a failed attempt is imported again over itself.
         {
             char folder[MAX_PATH]{};GetTempPathA(MAX_PATH,folder);
@@ -155,9 +157,13 @@ namespace
         Exec("SCRIPT MAKE");
         if(!compiled(c))
         {
+            const auto errors=SkinCompile::errors.empty()?std::string(" See the editor log."):"\n"+SkinCompile::errors;
+            // Left out of the save, the actors of a class compiled before would be
+            // written without their class.
+            if(replacing)throw std::runtime_error("The "+std::string(name)+" script did not compile. The map's actors of that class still need it: do not save the map."+errors);
             // Never save an uncompiled class with the map: RF_Transient on, RF_Standalone off.
             Write(c+0x1c,(Read<unsigned>(c+0x1c)&~0x80000u)|0x4000u);
-            throw std::runtime_error("The "+std::string(name)+" script did not compile."+(SkinCompile::errors.empty()?std::string(" See the editor log."):"\n"+SkinCompile::errors));
+            throw std::runtime_error("The "+std::string(name)+" script did not compile."+errors);
         }
         // A compiled class is saved with the map even if an earlier attempt marked it transient.
         Write(c+0x1c,(Read<unsigned>(c+0x1c)&~0x4000u)|0x80000u);

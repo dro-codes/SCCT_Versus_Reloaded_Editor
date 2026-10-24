@@ -686,7 +686,7 @@ void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=f
         auto mcpBridge=[&]()
         {
             namespace B=Mcp::Bridge;
-            constexpr UINT enableServer=41460,requireApproval=41461,disconnectClient=41463; // McpBridge::kEnable, kRequireApproval, kDisconnect
+            constexpr UINT enableServer=41720,requireApproval=41721,disconnectClient=41723; // McpBridge::kEnable, kRequireApproval, kDisconnect
             const auto ini=(directory/"Reloaded_Editor.ini").string();
             auto setting=[&](const char* key){return GetPrivateProfileIntA("Mcp",key,0,ini.c_str())!=0;};
             auto lower=[](std::string text){for(auto& c:text)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));return text;};
@@ -1112,7 +1112,7 @@ void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=f
         // leaves nothing behind, then a real recovery and its report.
         auto mcpRecover=[&](const std::filesystem::path& source)
         {
-            constexpr UINT enableServer=41460,requireApproval=41461; // McpBridge::kEnable, kRequireApproval
+            constexpr UINT enableServer=41720,requireApproval=41721; // McpBridge::kEnable, kRequireApproval
             const auto ini=(directory/"Reloaded_Editor.ini").string();
             auto setting=[&](const char* key){return GetPrivateProfileIntA("Mcp",key,0,ini.c_str())!=0;};
             auto pick=[](const J& value,const char* pointer){const J::json_pointer at(pointer);return value.contains(at)?value.at(at):J();};

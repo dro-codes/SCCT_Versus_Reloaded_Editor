@@ -1122,6 +1122,9 @@ namespace
         in.captured = GetCapture() != nullptr;
         try { in.transactionOpen = Editor::UndoRecords().open; }
         catch (const std::exception&) { /* No engine yet: no transaction either. */ }
+        // A preview moves the mover's bytes outside Undo and puts them back
+        // when it ends: a save would keep the passing pose, an edit be undone.
+        in.moverPreview = Editor::MoverPreviewing();
         in.rebuilding = RebuildAllMaps::Running();
         in.slowTask = SlowTask();
         in.startupDialog = StartupDialog();
@@ -1317,7 +1320,7 @@ namespace
         const Json document{{"map", map}, {"description", "Requested over MCP: " + label + (label == call.op ? std::string() : " (" + call.op + ")")}};
         bool accepted = false;
         reviewing = true;
-        try { accepted = MapAuthoringDialog::Review(Frame(), preview, document); }
+        try { accepted = MapAuthoringDialog::Approve(Frame(), preview, document); }
         catch (...)
         {
             reviewing = false;

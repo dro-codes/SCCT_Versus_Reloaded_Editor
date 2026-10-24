@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -18,6 +19,11 @@
 #include <dlgs.h>
 #include <share.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <objidl.h>
+namespace Gdiplus { using std::min; using std::max; }
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 HHOOK hook;
@@ -28,6 +34,7 @@ constexpr UINT kRun = WM_APP + 0x319;
 constexpr uintptr_t kEditor = 0x1165DFA0;
 constexpr uintptr_t kWarn = 0x115BEFB0;
 int failures = 0;
+DWORD finishAfter = 0; // ms the editor keeps running after the report is written (0: ends at once)
 
 void Line(const char* kind, const std::string& name, const std::string& detail = "")
 {
@@ -267,6 +274,20 @@ std::string Fixed(double v, int decimals = 1)
     return o.str();
 }
 
+// A suite that needs the editor's own loop to run (the viewports only repaint there) sets this: the
+// run then ends a few seconds after the suites return, with this called first.
+std::function<void()> afterRun;
+void CALLBACK FinishAfterRun(HWND, UINT, UINT_PTR timer, DWORD)
+{
+    KillTimer(nullptr, timer);
+    try { if (afterRun) afterRun(); }
+    catch (const std::exception& e) { Fail("after-run", e.what()); }
+    Line("DONE", "failures", std::to_string(failures));
+    if (report) fclose(report);
+    report = nullptr;
+    TerminateProcess(GetCurrentProcess(), failures ? 3 : 0);
+}
+
 // ---- steps --------------------------------------------------------------------------------------
 #include "SmokeSteps.inl"
 #include "SmokeSuites.inl"
@@ -286,9 +307,29 @@ void RunAll()
     try { const auto suite = Ini("suite"); if (suite.empty()) RunSteps(); else RunSuites(suite); }
     catch (const std::exception& e) { Fail("exception", e.what()); }
     catch (...) { Fail("exception", "unknown"); }
+    if (afterRun) { SetTimer(nullptr, 0, 4000, FinishAfterRun); return; }
     Line("DONE", "failures", std::to_string(failures));
     if (report) fclose(report);
     report = nullptr;
+    // A suite that asked for it leaves the editor running that long first: its viewports only draw from the
+    // editor's own loop, which this one keeps waiting, so a picture of them is taken then.
+    if (finishAfter)
+    {
+        SetTimer(nullptr, 0, finishAfter, [](HWND, UINT, UINT_PTR, DWORD) { TerminateProcess(GetCurrentProcess(), failures ? 3 : 0); });
+        return;
+    }
+    // hold=<seconds> in -Extra: give the editor back its own loop for a while, so the viewports
+    // repaint, then save pictures of the frame and the tool windows (shot=<folder>) and end.
+    if (const int hold = atoi(Ini("hold").c_str()); hold > 0)
+    {
+        SetTimer(nullptr, 0, static_cast<UINT>(hold) * 1000, [](HWND, UINT, UINT_PTR, DWORD) {
+            SaveShot(frameWindow, "hold-frame");
+            if (HWND w = OpenedWindow("Map Check")) SaveShot(w, "hold-mapcheck");
+            if (HWND w = OpenedWindow("Map Design")) SaveShot(w, "hold-design");
+            TerminateProcess(GetCurrentProcess(), failures ? 3 : 0);
+        });
+        return;
+    }
     TerminateProcess(GetCurrentProcess(), failures ? 3 : 0);
 }
 
@@ -336,8 +377,16 @@ DWORD WINAPI WaitUntilReady(void*)
             Sleep(5000);
             hook = SetWindowsHookExA(WH_CALLWNDPROC, OnMessage, nullptr, uiThread);
             DWORD_PTR result = 0;
-            if (hook && SendMessageTimeoutA(frameWindow, kRun, 0, 0, SMTO_ABORTIFHUNG, 1800000, &result)) return 0;
-            Fail("startup", "could not run on the UI thread");
+            // A UI thread still busy starting up counts as hung and the message is not sent;
+            // with several editors starting at once that can last a while, so try again.
+            for (int tries = 0; hook && tries < 60; ++tries)
+            {
+                if (SendMessageTimeoutA(frameWindow, kRun, 0, 0, SMTO_ABORTIFHUNG, 1800000, &result)) return 0;
+                if (!hook) return 0; // the run started, and unhooked itself
+                Info("startup-retry", "error " + std::to_string(GetLastError()));
+                Sleep(3000);
+            }
+            Fail("startup", "could not run on the UI thread (error " + std::to_string(GetLastError()) + ")");
             return 1;
         }
         Sleep(250);

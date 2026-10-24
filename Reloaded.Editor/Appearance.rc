@@ -1,0 +1,4 @@
+// RE+ Options > Appearance: the Common Controls 6 manifest the modern themes activate around the
+// editor's window calls. Id 3: the loader never applies it to this DLL's own imports, so Classic
+// stays exactly the stock look.
+3 24 "Appearance.manifest"

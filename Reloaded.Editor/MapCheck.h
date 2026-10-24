@@ -15,8 +15,12 @@ namespace MapCheck
 
     bool HandleCommand(UINT command);
     void Open(HWND owner);
+    // A reachability run ended (Reachability.h): an open Map Check refreshes
+    // so its Reachability rows follow.
+    void ReachabilityChanged();
     // The checks the window runs, on the map as last built, with the
-    // [MapCheck] settings; logged like a Refresh. UI thread only. ToJson
-    // (MapCheckModel.h) is the bridge's mapcheck.run reply.
+    // [MapCheck] settings, and the Reachability rows from the last run; logged
+    // like a Refresh. UI thread only. ToJson (MapCheckModel.h) is the bridge's
+    // mapcheck.run reply.
     Report Measure();
 }

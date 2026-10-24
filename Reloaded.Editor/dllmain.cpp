@@ -55,6 +55,7 @@
 #include "SelfUpdater.h"
 #include "AssetNameGloss.h"
 #include "FavoritesWindow.h"
+#include "Appearance.h"
 
 INIT_ONCE g_InitOnce = INIT_ONCE_STATIC_INIT;
 HINSTANCE g_hReloadedDll = nullptr;
@@ -169,6 +170,8 @@ BOOL CALLBACK InitFunction(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* Context)
     Logger::log("");
     Logger::log(RE_PLUS_DISPLAY_VERSION);
     CrashDiagnostics::Initialize(dllPath);
+    // Before anything makes a window: the modern themes patch the window calls.
+    Appearance::Initialize();
     WarnIfInstallPathBracketed(directoryPath);
 
     Rendering::Initialize();

@@ -112,6 +112,23 @@ namespace Mcp::Safety
         }
         return {};
     }
+    // objimport.import (File > Import OBJ Mesh): its meshes and the .mtl's
+    // textures go into one package, MyLevel (the map itself, the default) or
+    // one of the map's own, as asset.mesh's do.
+    inline Refusal ObjImportRefusal(const Json& args, const std::string& stem, const Existing& existing)
+    {
+        const bool given = args.is_object() && args.contains("package");
+        if (given && !args.at("package").is_string()) return Invalid("objimport.import: package is text (MyLevel, or the map's own <Map>_STM).");
+        const auto package = given ? args.at("package").get<std::string>() : std::string("MyLevel");
+        // Saved with the map, so allowed before its first save too.
+        if (Fold(package) == "mylevel") return {};
+        if (stem.empty())
+            return Refuse("Save the map first (map.save with a name such as \"NEWD.sdc\"): an OBJ import into " + package +
+                              " writes the map's own package, which is named after the map's file. MyLevel takes it now.", "unsaved_map");
+        auto refusal = PackageRefusal(package, stem, kMeshes, existing);
+        if (refusal) refusal.message = "The OBJ import into " + package + " is refused: " + refusal.message;
+        return refusal;
+    }
 
     // ------------------------------------------------------------- folders --
 

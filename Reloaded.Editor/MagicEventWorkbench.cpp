@@ -516,7 +516,9 @@ LRESULT CALLBACK NavigationProc(HWND w,UINT message,WPARAM wp,LPARAM lp,UINT_PTR
 LRESULT CALLBACK SearchProc(HWND w,UINT message,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data)
 {
     auto result=DefSubclassProc(w,message,wp,lp);
-    if(message==WM_PAINT && GetWindowTextLengthA(w)==0 && GetFocus()!=w)
+    // A version 6 edit (Modern appearance) draws its own cue banner: drawing ours too doubled it.
+    wchar_t cue[8]{};
+    if(message==WM_PAINT && GetWindowTextLengthA(w)==0 && GetFocus()!=w && !SendMessageW(w,EM_GETCUEBANNER,reinterpret_cast<WPARAM>(cue),std::size(cue)))
     {
         auto dc=GetDC(w);RECT r{};GetClientRect(w,&r);r.left+=6;r.top+=2;SetBkMode(dc,TRANSPARENT);SetTextColor(dc,Muted);auto font=SelectObject(dc,reinterpret_cast<HFONT>(SendMessage(w,WM_GETFONT,0,0)));DrawTextA(dc,reinterpret_cast<const char*>(data),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);SelectObject(dc,font);ReleaseDC(w,dc);
     }
@@ -585,7 +587,7 @@ LRESULT CALLBACK WindowProc(HWND w,UINT message,WPARAM wp,LPARAM lp)
 }
 void Open(HWND owner,const std::string& actorPath)
 {
-    if(workbench){auto s=reinterpret_cast<State*>(GetWindowLongPtr(workbench,GWLP_USERDATA));if(!actorPath.empty())LoadEvent(*s,actorPath);ShowWindow(workbench,SW_RESTORE);SetForegroundWindow(workbench);return;}
+    if(workbench){auto s=reinterpret_cast<State*>(GetWindowLongPtr(workbench,GWLP_USERDATA));if(!actorPath.empty())LoadEvent(*s,actorPath);ShowWindow(workbench,IsIconic(workbench)?SW_RESTORE:SW_SHOW);SetForegroundWindow(workbench);return;}
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TREEVIEW_CLASSES|ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSA wc{};wc.lpfnWndProc=WindowProc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ReloadedMagicWorkbench";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&wc);
     auto s=new State;s->eventPath=actorPath;s->inspectedPath=actorPath;

@@ -175,10 +175,11 @@ namespace
 
     fs::path Root() { return Editor::Directory().parent_path().parent_path(); }
     fs::path MapsEd() { return Root() / "Packages" / "MapsEd"; }
+    // Editor::MapFile is UTF-8 (RE+ 2.7.1), so it is read as such.
     std::string MapStem()
     {
         const auto file = Editor::MapFile();
-        return file.empty() ? std::string() : fs::path(file).stem().string();
+        return file.empty() ? std::string() : Workflow::Authoring::Utf8Text(Workflow::Authoring::Utf8Path(file).stem());
     }
     // The open map's file name, which its packages are named after.
     std::string NamedMap(const char* what)
@@ -424,12 +425,12 @@ namespace
         fs::path target;
         if (q.contains("path") && !q.at("path").is_null()) target = MapPath(q.at("path").get<std::string>());
         else if (current.empty()) Invalid("The map has no file yet: give map.save a path, such as \"NEWD.sdc\" (saved in Packages\\MapsEd).");
-        else target = fs::path(current);
+        else target = Workflow::Authoring::Utf8Path(current);
         std::error_code error;
         target = fs::weakly_canonical(target, error);
         if (error) target = target.lexically_normal();
         CheckSaveTarget(target);
-        const bool sameFile = !current.empty() && UnsavedChanges::SameFile(target.string(), current);
+        const bool sameFile = !current.empty() && UnsavedChanges::SameFile(Workflow::Authoring::Utf8Text(target), current);
         if (!sameFile && fs::exists(target, error) && !q.value("overwrite", false))
             Refuse(Text(target) + " is another map's file. Pass \"overwrite\": true to save over it (the file it replaces is kept in System\\ReloadedEditor\\Backups).", "exists");
         // The playable copy every save writes must not replace a compiled
@@ -980,6 +981,16 @@ namespace
         return apply ? Editor::ApplyMapAuthoring(document) : Editor::PreviewMapAuthoring(document);
     }
 
+    // objimport.import over the pipe: the mesh and its .mtl's textures go
+    // only into MyLevel or the map's own <Map>_<name> package, as asset.mesh's
+    // do (Safety::ObjImportRefusal). File > Import OBJ Mesh still takes any.
+    Json ImportObj(const Json& q)
+    {
+        if (Current().call)
+            if (const auto refusal = Safety::ObjImportRefusal(q, MapStem(), ExistingPackageFile)) throw Bridge::Error(refusal.code, refusal.message, refusal.reason);
+        return Editor::ImportObjMesh(q);
+    }
+
     // optimise.release over the pipe: the release copy goes only into
     // <Game>\Releases, the work folder or [Mcp] WriteRoots (with overwrite it
     // deletes and rewrites the map's files there), and its asset package is
@@ -1067,6 +1078,7 @@ void RegisterLifecycle()
     // Packages and assets: the map's own only.
     Write("asset.texture", ImportTexture);
     Write("asset.mesh", ImportMesh);
+    Write("objimport.import", ImportObj);
     Write("package.save", SavePackage);
     Write("interface.texture", InterfaceTexture);
     Write("minimap.apply", [](const Json& q) -> Json { return MinimapWindow::Apply(q); });

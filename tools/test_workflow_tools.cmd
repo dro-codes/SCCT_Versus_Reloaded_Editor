@@ -14,6 +14,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\PlacementModelTests.cpp /Fo"%T
 if errorlevel 1 goto failed
 "%TEMP%\PlacementModelTests.exe"
 if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ScatterModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ScatterModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\ScatterModelTests.exe"
+if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\LevelSnapshotModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\LevelSnapshotModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\LevelSnapshotModelTests.exe"
@@ -29,6 +33,10 @@ if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ViewBookmarkModelTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ViewBookmarkModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\ViewBookmarkModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\PrefabModelTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\PrefabModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\PrefabModelTests.exe"
 if errorlevel 1 goto failed
 rem Not named *Update*: Windows would demand elevation for it as an installer.
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\MapUsagesModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\MapUsagesModelTests.exe"
@@ -115,6 +123,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\MapAuthoringModelTests.cpp Rel
 if errorlevel 1 goto failed
 "%TEMP%\MapAuthoringModelTests.exe"
 if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\CompareBackupModelTests.cpp Reloaded.Editor\WorkflowModel.cpp Reloaded.Editor\RecoveredPolygonImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\CompareBackupModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\CompareBackupModelTests.exe"
+if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\SecurityModelTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\SecurityModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\SecurityModelTests.exe"
@@ -171,6 +183,10 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\LightShadowModelTests.cpp /Fo"
 if errorlevel 1 goto failed
 "%TEMP%\LightShadowModelTests.exe"
 if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ReachabilityModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ReachabilityModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\ReachabilityModelTests.exe"
+if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\RenderBudgetModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\RenderBudgetModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\RenderBudgetModelTests.exe"
@@ -184,6 +200,10 @@ if errorlevel 1 goto failed
 "%TEMP%\ObjectivePlayersModelTests.exe"
 if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ConveyorModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ConveyorModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\MoverModelTests.cpp Reloaded.Editor\WorkflowModel.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\MoverModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\MoverModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\ConveyorModelTests.exe"
 if errorlevel 1 goto failed
@@ -214,6 +234,26 @@ if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\SoftBodyStepModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\SoftBodyStepModelTests.exe"
 if errorlevel 1 goto failed
 "%TEMP%\SoftBodyStepModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\MapOutlinerModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\MapOutlinerModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\MapOutlinerModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\AppearanceModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\AppearanceModelTests.exe" /link user32.lib gdi32.lib
+if errorlevel 1 goto failed
+"%TEMP%\AppearanceModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\CommandPaletteModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\CommandPaletteModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\CommandPaletteModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ObjExportModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ObjExportModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\ObjExportModelTests.exe"
+if errorlevel 1 goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\ObjImportModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\ObjImportModelTests.exe"
+if errorlevel 1 goto failed
+"%TEMP%\ObjImportModelTests.exe"
 if errorlevel 1 goto failed
 cl /nologo /std:c++20 /W4 /WX /EHsc /MT /O2 tests\McpRecoverModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\McpRecoverModelTests.exe"
 if errorlevel 1 goto failed

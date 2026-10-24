@@ -79,6 +79,13 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `skins.settings`
 - `objectiveplayers.state`
 - `conveyor.state`
+- `prefab.instances` {} → the map's linked prefab instances, each with its live members
+- `prefab.counts` {} → {assembly id: linked instances in the map}
+- `objimport.preview` {file, package, group, name, scale, up (y|z), collision (none|box|polygons|groups|parts|file), split, partTriangles}: what Import OBJ would make, changing nothing
+- `mover.selected` {} → the one selected mover's identity, or null
+- `mover.state` {actor} → {actor, name, class, revision, path, location, rotation, values, choices, triggeredBy, triggers}
+- `mover.outline` {actor}
+- `mover.candidates` {actor}: the triggers mover.wire can point at it
 
 ## Undoable
 
@@ -146,6 +153,12 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `stairs.remove` {surfaces}
 - `settings.edit` {snapshot (from settings.inspect), changes {property: value}}
 - `ge.add` {command: ZL|HOH|PIPE|LADDER|FENCE|POLE|LG, points}
+- `mover.path` {actor, path, label}: the Mover Workbench's key list
+- `mover.settings` {actor, changes {setting: value as text}}
+- `mover.wire` {actor, trigger}: the trigger's Event to the mover's Tag
+- `prefab.selectinstance` {}: the selection's linked prefab instance
+- `prefab.selectall` {assembly}: every linked instance of the assembly (the selection's when empty)
+- `prefab.place` (not joinable) {assembly (id or name), position, rotation, bindings}: a linked copy, filed in its own Group
 - `surface.texture` (not joinable) {texture, surfaces | brushes, faces}: faces by where their normal points (floor, ceiling, +X, -X, +Y, -Y)
 
 ## File
@@ -167,6 +180,10 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `emitterlib.save` {entry, members, map}
 - `emitterlib.delete` {id}
 - `emitterlib.update` {id}
+- `objimport.import` {file, package (MyLevel is the map), group, name, scale, up, collision, split, partTriangles, place}: File > Import OBJ Mesh; with place, the meshes go where the viewport was last clicked in one Undo step. The meshes and the .mtl's textures go only into MyLevel or the map's own <Map>_<name> package, such as <Map>_STM, else refused before anything runs: not_map_owned, package_name (<Map>, Amb_<Map>, or a base name another kind of package has), unsaved_map (a <Map>_ package before the map's first save)
+- `prefab.save` {name, members}: the selection (or members) as a new assembly in the library
+- `prefab.update` {}: the selection's instance becomes its prefab's content and the map's other linked copies are rebuilt in one Undo step; the library keeps the new content
+- `prefab.break` {}: the selection's instance leaves its Group and the library's record of it goes
 
 ## Build
 
@@ -209,3 +226,5 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `characters.close`
 - `characters.state`
 - `characters.camera` {camera}
+- `mover.preview` {actor, position, rotation}
+- `mover.restore`
