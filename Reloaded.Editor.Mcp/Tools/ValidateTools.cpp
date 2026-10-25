@@ -81,6 +81,27 @@ namespace
                 segments.push_back({{"from", p}, {"to", Vector{p[0] + d[0], p[1] + d[1], p[2] + d[2]}}});
                 probes.push_back({i, 1, p});
             }
+            // Modem reach (kind 3): fan rays from the terminal out to its InteractionDistanceToCenter.
+            // A ray that hits a surface within reach (not the terminal itself) is a candidate modem
+            // spot with line of sight; none in any direction means a spy may be unable to plant one.
+            if (cls == "scomputerobjectivetrigger")
+            {
+                double reach = 0;
+                if (actors[i].contains("values") && actors[i].at("values").is_object())
+                {
+                    const auto& v = actors[i].at("values");
+                    if (v.contains("InteractionDistanceToCenter") && v.at("InteractionDistanceToCenter").is_number())
+                        reach = v.at("InteractionDistanceToCenter").get<double>();
+                }
+                if (reach <= 0) reach = 600;
+                const double k = 0.7071067811865476; // 45 degrees
+                for (const auto& d : {Vector{1, 0, 0}, Vector{-1, 0, 0}, Vector{0, 1, 0}, Vector{0, -1, 0},
+                                      Vector{k, k, 0}, Vector{k, -k, 0}, Vector{-k, k, 0}, Vector{-k, -k, 0}, Vector{0, 0, -1}})
+                {
+                    segments.push_back({{"from", p}, {"to", Vector{p[0] + d[0] * reach, p[1] + d[1] * reach, p[2] + d[2] * reach}}});
+                    probes.push_back({i, 3, p});
+                }
+            }
         }
         Json* elements = ges.is_object() && ges.contains("elements") ? &ges["elements"] : &ges;
         if (elements->is_array())
@@ -145,6 +166,12 @@ namespace
             {
                 if (!values.contains("$blocked")) values["$blocked"] = false;
                 if (found && !self(hit, probe.index)) values["$blocked"] = true;
+                continue;
+            }
+            if (probe.kind == 3)
+            {
+                if (!values.contains("$modemSpots")) values["$modemSpots"] = 0;
+                if (found && !self(hit, probe.index)) values["$modemSpots"] = values.at("$modemSpots").get<int>() + 1;
                 continue;
             }
             if (!found) continue;
