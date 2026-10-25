@@ -276,7 +276,7 @@ namespace Mcp::Spec
                                      {"props", Ref("props")}},
                                     {"id", "mesh", "at"});
             const auto vision = Obj({{"target", Ref("id")}, {"heatIntensity", Num()}, {"heatOpacity", Num()}, {"heatRadius", Num()}, {"emfIntensity", Num()},
-                                     {"emfOpacity", Num()}, {"properties", Ref("props")}},
+                                     {"emfOpacity", Num()}, {"hideInNormalVision", Bool()}, {"properties", Ref("props")}},
                                     {"target"});
             const auto environment = Obj({{"lights", Arr(light)}, {"sounds", Arr(sound)}, {"volumes", Arr(volume)}, {"ingredients", Arr(ingredient)},
                                           {"objects", Arr(object)}, {"vision", Arr(vision)}, {"props", Arr(Ref("generic"))}, {"fish", Arr(Ref("generic"))},

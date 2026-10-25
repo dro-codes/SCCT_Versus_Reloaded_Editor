@@ -412,7 +412,7 @@ namespace
                 "at, enabledBy}]}\n"
                 "- modes [story|diskhunt|deathmatch] are added; removeModes drops modes with their sections\n"
                 "- story {mission {id, name, description (Spy), descriptionDef (Merc), minimumObjectives, chained, atResetEvent}, objectives [{id, name, description, "
-                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime, dropZones (1-5) [{id, at} | {ref: id}] "
+                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb (bomb = the ND133 modem-sabotage objective, a Spy plants a modem from line of sight; terminal = ND133 neutralized in place), at, dominationCaptureTime, dropZones (1-5) [{id, at} | {ref: id}] "
                 "(flags share a zone: one makes it with an id, the others name it by ref), resetTime, captureTime, triggerName}]}], sectors [{id, name, brief, briefDefend, objectives, required, actions [{kind: open|light|sound|announce|trigger, target, "
                 "hold, ...}]}]}\n"
                 "- diskhunt {disks: {in: [roomIds], count} | [{id, at, group}], resetTime, mission}; deathmatch {disableSecurity, mission}\n"
@@ -508,7 +508,7 @@ namespace
                 "- volumes [{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box: {min, max} | {in, height}, locationName, priority}]\n"
                 "- ingredients [{id, kind: ammo|infirmary|glass|extinguisher|projector|sprinkler|puddle|balltrap, in | at, yaw}]; objects [{id, mesh, at, yaw, "
                 "damageable, hitPoints}]; meshes [{id, mesh, at, yaw, scale, fit}]\n"
-                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, properties}] (by target)\n"
+                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, hideInNormalVision (shows only in Thermal/EMF; pair with bHidden + an event to reveal on a hack), properties}] (by target)\n"
                 "- props, fish, animated, tutorials: [{id, class, mesh, at, yaw, scale, properties}]; softbody the same, class ESBPatchActor, ESBStripDoorActor "
                 "(the wiki's ESBStripeDoorActor), ESBRopeActor or ESBChainActor, mesh only for ESBChainActor (its links); never copied";
             t.fields = {{"lights", {"environment", "lights"}, ""},

@@ -1487,6 +1487,7 @@ namespace Mcp::Spec
                     Json links = Json::array();
                     Vector sum{};
                     int placed = 0, room = -1;
+                    std::string objKind;
                     for (size_t k = 0; k < triggers.size(); ++k)
                     {
                         const auto& trigger = triggers[k];
@@ -1546,6 +1547,10 @@ namespace Mcp::Spec
                         links.push_back(Ref(triggerId));
                         triggersOf[Fold(id)].push_back({triggerId, kind});
                         triggerKind[Fold(triggerId)] = kind;
+                        // Representative kind for the objective's default coaching text (bomb/modem wins, then flag).
+                        if (objKind.empty()) objKind = kind;
+                        else if (kind == "bomb") objKind = "bomb";
+                        else if (kind == "flag" && objKind == "terminal") objKind = "flag";
                         for (int a = 0; a < 3; ++a) sum[a] += spot.at[a];
                         if (room < 0) room = spot.room;
                         ++placed;
@@ -1563,8 +1568,16 @@ namespace Mcp::Spec
                     auto& actor = Add(id, "SBase.SObjective", "objective", pointer, at, 0, false);
                     actor.label = "objective " + name;
                     actor.properties["ObjectiveName"] = Quoted(name);
-                    actor.properties["Description"] = Quoted(objective.value("description", "Neutralize " + name));
-                    actor.properties["DescriptionDEF"] = Quoted(objective.value("descriptionDef", "Protect " + name));
+                    // Default objective text teaches the mechanic in the briefing/HUD when the author gives none.
+                    // bomb = the ND133 modem-sabotage objective; flag = hard-disk steal; terminal = neutralize in place.
+                    const std::string spyGoal = objKind == "bomb" ? "Plant a modem on " + name + " and fall back while it hacks the ND133."
+                                               : objKind == "flag" ? "Steal " + name + " and carry it to a drop zone."
+                                               : "Neutralize " + name;
+                    const std::string mercGoal = objKind == "bomb" ? "Defend " + name + "; find and remove any modem the spies plant."
+                                                : objKind == "flag" ? "Stop the spies stealing " + name + "."
+                                                : "Protect " + name;
+                    actor.properties["Description"] = Quoted(objective.value("description", spyGoal));
+                    actor.properties["DescriptionDEF"] = Quoted(objective.value("descriptionDef", mercGoal));
                     actor.properties["Triggers"] = links;
                     if (objective.contains("visibilityZone"))
                     {
@@ -3024,6 +3037,8 @@ namespace Mcp::Spec
                     Json properties = Json::object();
                     for (const auto& [key, property] : std::vector<std::pair<const char*, const char*>>{{"heatIntensity", "HeatIntensity"}, {"heatOpacity", "HeatOpacity"}, {"heatRadius", "HeatRadius"}, {"emfIntensity", "EMFIntensity"}, {"emfOpacity", "EMFOpacity"}})
                         if (item.contains(key)) properties[property] = Num(item.at(key).get<double>());
+                    // Visible only in Thermal/EMF Vision: the base of the "event-gated reveal" pattern (pair with bHidden + an event un-hide).
+                    if (item.contains("hideInNormalVision")) properties["bHideInNormalVision"] = item.at("hideInNormalVision").get<bool>() ? "True" : "False";
                     if (item.contains("properties")) for (auto it = item.at("properties").begin(); it != item.at("properties").end(); ++it) properties[it.key()] = Encode(it.value());
                     const auto target = item.at("target").get<std::string>();
                     if (auto* actor = FindActor(target)) { for (auto it = properties.begin(); it != properties.end(); ++it) actor->properties[it.key()] = it.value(); }

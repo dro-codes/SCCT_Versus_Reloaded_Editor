@@ -39,10 +39,24 @@ Motion Tracking Vision is tuned for the whole level in Level Properties, by the 
 
 Material-side vision settings (`bHideInEMFVision`, `bHideInThermalVision`, `HeatTextureModifier`, `EMFTextureModifier`, `SpecialVisionTextureModifier`) are in `scct://wiki/material-classes`.
 
+## Event-gated reveal (and a limit)
+
+Spies' vision **modes** (Thermal, EMF, Night) are the Spy's own goggles — there is **no per-map property or event that turns a vision mode on or off**, and Motion Tracking is only tuned level-wide (`MTVOffset`/`MTVSlope`). So a literal "the Spy's thermal is degraded until a panel is hacked, then restored" is **not** something a map can author; it would need a game-code change.
+
+What a map *can* do, with no engine change, is make **what a vision mode reveals** change on an event — the **event-gated reveal**:
+1. Place a marker/clue actor and set `bHideInNormalVision = True`, so it exists only in Thermal/EMF Vision.
+2. Also set it `bHidden = True`, so it is not shown at all yet.
+3. Wire a hack (an `SInterrupteur` → `SMagicEvent`, see `scct://wiki/events`) to **un-hide** it.
+
+Hacking the panel then reveals a thermal-only trail or marker that was invisible before — you are changing *what Thermal Vision shows*, keyed to match state, which is the achievable form of the idea.
+
+Related levers for perception-on-an-event: an event-triggered `SSprinkler` haze or a damaged `SExtincteur` degrade the **Mercenaries'** view for a time (`scct://wiki/level-ingredients`), and switching Echelon / `STriggerLight` lights on a hack changes what Night Vision and Thermal pay off (`scct://wiki/lighting`).
+
 ## How the MCP tools apply this
 
 - `environment` with `vision[{target, ...props}]` (spec `environment.vision`) sets these properties on existing or spec actors.
   - Values are Map JSON strings. For example, `bHideInNormalVision: "True"` and `HeatIntensity: "0.8"`.
+  - `hideInNormalVision: true` is a convenience field that writes `bHideInNormalVision=True` (the base of the event-gated reveal above); any other vision property still goes through `properties`.
   - The 0.0-1.0 ranges are checked.
 - `actors_edit` `set` is the direct alternative for single actors.
 - `map_query what:"schema"` with `classes` (full names, such as `SBase.SVitre`) lists which of these properties a class exposes.

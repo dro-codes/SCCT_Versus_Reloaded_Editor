@@ -51,12 +51,26 @@ The hard disk must be extracted into a drop zone (`SFlagDropZone`).
 
 The drop zone for `SFlag` objectives. Place one in the level and link it through the `DropZone` field of an `SFlag`. **No properties need to be configured** on `SFlagDropZone`.
 
-### SBombTargetObjectiveTrigger (bomb objective)
+### SBombTargetObjectiveTrigger (bomb / ND133 remote-sabotage objective)
 
-- `CaptureTime`: time in seconds before the bomb explodes.
+In Versus this is the **ND133 remote-sabotage** objective. The Spy carries the **Modem** gadget
+(`SGadBomb`, in-game name "Modem" — *"Disables an ND133 by hacking its control device"*) and sticks it
+on a surface that has a **clear line of sight to the ND133 and is within range**, then falls back while
+it hacks. The game enforces the placement rules (player messages *"No surface to stick the modem"*,
+*"You are too far from a ND133"*, *"Modem can't see ND133"*, *"Can't place a modem from this
+position"*). Mercenaries counter it by finding and **removing** the planted modem (*"Modem removed"*).
+This is a fully-shipped mechanic that most maps leave unused in favour of direct computer
+neutralization.
+
+- `CaptureTime`: time in seconds for the sabotage to complete once the modem is planted.
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Under attack`.
 - Link it to an `SObjective`.
 - (From the Alarms page: `SBombTargetObjectiveTrigger` **cannot be locked** by an alarm.)
+
+> **Design note:** the `bomb` objective kind is the editor's hook for this mechanic. Place the
+> `SBombTargetObjectiveTrigger` where a Spy can reach a plant spot with line of sight to the ND133,
+> and leave the Spy a covered approach (a vent, ledge or zipline) so the remote plant is worth the
+> risk — then the Mercenaries' job becomes sweeping likely plant spots, not just camping the ND133.
 
 ### SObjective
 
@@ -148,7 +162,12 @@ Objective triggers:
 - An `SFlag` needs 1-5 `SFlagDropZone`s.
   - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
   - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
-- An `SBombTargetObjectiveTrigger` uses `CaptureTime`.
+- A `bomb` trigger is an `SBombTargetObjectiveTrigger` (the ND133 modem-sabotage objective) and uses
+  `CaptureTime`. When the author gives no objective `description`/`descriptionDef`, the `SObjective`
+  is given default coaching that teaches the mechanic — Spy: "Plant a modem on <name> and fall back
+  while it hacks the ND133."; Merc: "Defend <name>; find and remove any modem the spies plant."
+  (Flag and terminal objectives get their own default coaching too: steal/carry for flags,
+  neutralize/protect for terminals.)
 
 Sectors (`gameplay.story.sectors`):
 - The top mission is `GM_Multi` with `bChained True`.
