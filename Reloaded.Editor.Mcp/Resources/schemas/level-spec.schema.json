@@ -548,6 +548,9 @@
               "heatRadius": {
                 "type": "number"
               },
+              "hideInNormalVision": {
+                "type": "boolean"
+              },
               "properties": {
                 "$ref": "#/$defs/props"
               },
