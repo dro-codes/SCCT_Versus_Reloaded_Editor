@@ -157,7 +157,7 @@ namespace Mcp::Bridge
             {"brush.visibility.set", P::Undoable, true}, {"builder.fit", P::Undoable, true}, {"builder.fit.brush", P::Undoable, true},
             {"vertex.portal", P::Undoable, true}, {"vertex.snap", P::Undoable, true}, {"brush.snap", P::Undoable, true},
             {"stairs.smooth", P::Undoable, true}, {"stairs.remove", P::Undoable, true},
-            {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"surface.texture", P::Undoable, false},
+            {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"ge.delete", P::Undoable, true}, {"surface.texture", P::Undoable, false},
             // Files and packages.
             {"asset.texture", P::File, false}, {"asset.mesh", P::File, false}, {"package.save", P::File, false}, {"object.set", P::File, false},
             {"interface.texture", P::File, false}, {"minimap.apply", P::File, false}, {"uas.build", P::File, false},
