@@ -110,6 +110,14 @@ The signature shadow-casting lights of SCCT Versus.
 | `LightBeamInitialAlpha` | Starting transparency of the beam: `0` invisible, `255` fully opaque. |
 | `LightBeamFalloffScale` | How fast the beam fades with distance. `0.5` means it has faded out at 50% of `EchelonRange`. |
 
+### Creative uses (Echelon shadows)
+
+Echelon lights are the SCCT stealth texture, so author them as gameplay, not just mood:
+- **Dynamic light-and-dark cover** — a moving Echelon light (on an `SProjoFixe` or a mover) throws real-time shadows a Spy hides in; destroying or switching a light (`STriggerLight`, or an event) drops a route into exploitable darkness.
+- **Projected gobos** — an `EchelonLightingMaterial` with a `ProjectedLightingTexture` (and an animated `ProjectedEffectTexture` when `UsesLightBeam`) casts window grilles, fan shadows or flickering patterns that are both atmosphere and shifting cover.
+- **Beam hazards** — a visible `LightBeam` marks a sightline a Spy must duck under or around.
+- **Budget** — `EchelonRange` is the big cost; keep ranges tight and prefer several small lights over one huge one. Echelon lights do not affect alpha-channel textures.
+
 ## Unlit
 
 Unlit is not a light type. It is a property of a surface or actor. An Unlit surface or actor appears **fully bright** and ignores all lighting.

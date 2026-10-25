@@ -77,6 +77,16 @@ Engine names (from RE+ `tests/SMagicEventJson.md` and `SMagicEventSemantics.md`,
 - Delays are 0-86400 s.
 - Every action scheduled by one activation shares one time origin. Queued events with equal delays may run in any order, so use distinct delays where order matters.
 
+### Creative patterns
+
+`SMagicEvent` is the closest thing SCCT has to scripting, so a few patterns do most of the work:
+- **Cascade** — one `Event` in, several out at staggered `Delay`s: a hacked panel drops the lights, then starts the sprinklers, then resets an alarm, then unlocks a door, so one Spy action ripples across a room.
+- **Sequence** — `Sequence=True` sends one event per activation, in order, looping: a single repeatable trigger becomes a step-by-step script (open gate 1, then gate 2, …).
+- **Hold-cadence** — a zone `SPresenceTrigger` feeds an `SMagicEvent` that re-fires a delayed `SMessageTrigger`, giving a "still holding" heartbeat (a King-of-the-Hill feel); a contest event routed to `StopActor` cancels it.
+- **One-shot / toggle** — `Repeat=1` fires a trap once (e.g. an `SBallTrap` volley); `UntriggerTrigger` alternates a hazard on and off on each pass.
+
+These compose existing actors only — no base-engine change — and let a map carry emergent, scripted moments.
+
 ## SMessageTrigger
 
 Shows a **large HUD message to both the Spy and the Mercenary**. It is mainly used in sector maps, for example to announce "Go to Sector 2" when a new sector activates.
