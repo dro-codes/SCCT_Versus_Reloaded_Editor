@@ -374,6 +374,11 @@ int main()
             Passes("objectives.terminal-capture-time",good);
         }
         {
+            auto s=good;Actor(s,"Term1")["values"]["$modemSpots"]=0;
+            Fails("objectives.modem-reach",s,"release","info");
+            Passes("objectives.modem-reach",good);
+        }
+        {
             auto s=good;s["mapSettings"]["values"]["Modes"][1]["ScoreLimit"]="10";
             Fails("diskhunt.disk-count",s,"draft","error");
             auto t=good;Actor(t,"DiskMission")["values"]["Triggers"]=Json::array();
