@@ -355,6 +355,9 @@
                 ],
                 "type": "string"
               },
+              "persistentLight": {
+                "type": "boolean"
+              },
               "props": {
                 "$ref": "#/$defs/props"
               },

@@ -2795,6 +2795,8 @@ namespace Mcp::Spec
                         actor.properties["bInteractInFront"] = "True";
                     }
                     else if (kind == "sprinkler") actor.properties["bHidden"] = "True";
+                    // Persistent Light Mode (RE+): keep the spotlight's Echelon light on even when no Mercenary is steering it.
+                    if (kind == "projector" && item.value("persistentLight", false)) actor.properties["HitPoints"] = "1";
                     Props(actor, item);
                 }
             }
