@@ -22,7 +22,9 @@ Story supports three objective types. A map can use any one of them, or combine 
 - Hard disks: `SFlag` / `SFlagDropZone`
 - Bombs: `SBombTargetObjectiveTrigger`
 
-### SComputerObjectiveTrigger (computer objective)
+### SComputerObjectiveTrigger (computer / ND133 "modem" neutralization objective)
+
+This is the **ND133 neutralization** objective — the one the Spy's **Modem** gadget services (`SGadBomb`, in-game name "Modem": *"Disables an ND133 by hacking its control device"*). The Spy sticks a modem on a surface with a **clear line of sight to the ND133, within range**, and it neutralizes the ND133 remotely; the Spy can leave and come back to finish it. The game enforces placement with player messages *"No surface to stick the modem"*, *"You are too far from a ND133"*, *"Modem can't see ND133"*, *"Can't place a modem from this position"*; HUD states are `<TriggerName> : Neutralization in progress` then `ND133 neutralized`.
 
 Adding one in the editor:
 1. Select the actor in the **Actor Class Browser**.
@@ -31,10 +33,12 @@ Adding one in the editor:
 
 > **IMPORTANT:** place the computer so it does **not intersect any collision geometry**. If it does, players cannot capture it. The correct height is **approximately 78 units from the ground**.
 
-- `DominationCaptureTime`: time the Spies need to capture the objective trigger.
+- `DominationCaptureTime`: time the Spies need to neutralize the ND133 (the modem's hack duration).
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Neutralization in progress`.
 - **Gotcha:** `CaptureTime` does **not** affect `SComputerObjectiveTrigger` actors. Only `DominationCaptureTime` needs to be set.
 - To finish the objective, link it to an `SObjective` (see below).
+
+> **Design note:** to make the modem mechanic matter, place the ND133 where a Spy must find a plant spot with line of sight to it (behind glass, down a Merc-watched sightline), with a covered approach (a vent, ledge or zipline) — so the Mercenaries sweep likely modem spots rather than just camp the ND133.
 
 ### SFlag (hard disk objective)
 
@@ -51,26 +55,14 @@ The hard disk must be extracted into a drop zone (`SFlagDropZone`).
 
 The drop zone for `SFlag` objectives. Place one in the level and link it through the `DropZone` field of an `SFlag`. **No properties need to be configured** on `SFlagDropZone`.
 
-### SBombTargetObjectiveTrigger (bomb / ND133 remote-sabotage objective)
+### SBombTargetObjectiveTrigger (bomb / sabotage objective)
 
-In Versus this is the **ND133 remote-sabotage** objective. The Spy carries the **Modem** gadget
-(`SGadBomb`, in-game name "Modem" — *"Disables an ND133 by hacking its control device"*) and sticks it
-on a surface that has a **clear line of sight to the ND133 and is within range**, then falls back while
-it hacks. The game enforces the placement rules (player messages *"No surface to stick the modem"*,
-*"You are too far from a ND133"*, *"Modem can't see ND133"*, *"Can't place a modem from this
-position"*). Mercenaries counter it by finding and **removing** the planted modem (*"Modem removed"*).
-This is a fully-shipped mechanic that most maps leave unused in favour of direct computer
-neutralization.
+A **bomb the Spy plants and then protects** until it detonates — distinct from the ND133/modem neutralization above. The plant action reads `Place Bomb`; once planted a countdown runs and the Mercenaries race to find and defuse it. HUD states: `<TriggerName> : Under attack`, then `: Bombed` if it blows or `: Secured` if the Mercs save it. Spy tip: *"After placing your bomb, try to protect it. Use teamplay to cover a zone."* Merc tip: *"Once the bomb countdown appears, you have a few seconds to find the bomb."*
 
-- `CaptureTime`: time in seconds for the sabotage to complete once the modem is planted.
+- `CaptureTime`: the bomb's **fuse**, in seconds, once it is planted.
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Under attack`.
 - Link it to an `SObjective`.
 - (From the Alarms page: `SBombTargetObjectiveTrigger` **cannot be locked** by an alarm.)
-
-> **Design note:** the `bomb` objective kind is the editor's hook for this mechanic. Place the
-> `SBombTargetObjectiveTrigger` where a Spy can reach a plant spot with line of sight to the ND133,
-> and leave the Spy a covered approach (a vent, ledge or zipline) so the remote plant is worth the
-> risk — then the Mercenaries' job becomes sweeping likely plant spots, not just camping the ND133.
 
 ### SObjective
 
@@ -162,12 +154,14 @@ Objective triggers:
 - An `SFlag` needs 1-5 `SFlagDropZone`s.
   - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
   - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
-- A `bomb` trigger is an `SBombTargetObjectiveTrigger` (the ND133 modem-sabotage objective) and uses
-  `CaptureTime`. When the author gives no objective `description`/`descriptionDef`, the `SObjective`
-  is given default coaching that teaches the mechanic — Spy: "Plant a modem on <name> and fall back
-  while it hacks the ND133."; Merc: "Defend <name>; find and remove any modem the spies plant."
-  (Flag and terminal objectives get their own default coaching too: steal/carry for flags,
-  neutralize/protect for terminals.)
+- A `terminal` trigger is an `SComputerObjectiveTrigger` (the ND133 the Spy neutralizes with a modem)
+  and uses `DominationCaptureTime`; a `bomb` trigger is an `SBombTargetObjectiveTrigger` (a planted
+  bomb with a fuse) and uses `CaptureTime`. When the author gives no objective `description`/
+  `descriptionDef`, the `SObjective` gets default coaching per kind — terminal → Spy "Neutralize
+  <name>: place your modem where it can see the ND133, then fall back while it hacks." / Merc "Defend
+  <name>; stop the spies neutralizing the ND133."; bomb → Spy "Plant a bomb at <name> and protect it
+  until it detonates." / Merc "Defend <name>; find and defuse the bomb before it blows."; flag →
+  steal/carry.
 
 Sectors (`gameplay.story.sectors`):
 - The top mission is `GM_Multi` with `bChained True`.

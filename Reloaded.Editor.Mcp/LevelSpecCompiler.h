@@ -1569,13 +1569,13 @@ namespace Mcp::Spec
                     actor.label = "objective " + name;
                     actor.properties["ObjectiveName"] = Quoted(name);
                     // Default objective text teaches the mechanic in the briefing/HUD when the author gives none.
-                    // bomb = the ND133 modem-sabotage objective; flag = hard-disk steal; terminal = neutralize in place.
-                    const std::string spyGoal = objKind == "bomb" ? "Plant a modem on " + name + " and fall back while it hacks the ND133."
+                    // terminal = the ND133 the spy neutralizes with a placed modem; bomb = a planted bomb with a fuse; flag = hard-disk steal.
+                    const std::string spyGoal = objKind == "bomb" ? "Plant a bomb at " + name + " and protect it until it detonates."
                                                : objKind == "flag" ? "Steal " + name + " and carry it to a drop zone."
-                                               : "Neutralize " + name;
-                    const std::string mercGoal = objKind == "bomb" ? "Defend " + name + "; find and remove any modem the spies plant."
+                                               : "Neutralize " + name + ": place your modem where it can see the ND133, then fall back while it hacks.";
+                    const std::string mercGoal = objKind == "bomb" ? "Defend " + name + "; find and defuse the bomb before it blows."
                                                 : objKind == "flag" ? "Stop the spies stealing " + name + "."
-                                                : "Protect " + name;
+                                                : "Defend " + name + "; stop the spies neutralizing the ND133.";
                     actor.properties["Description"] = Quoted(objective.value("description", spyGoal));
                     actor.properties["DescriptionDEF"] = Quoted(objective.value("descriptionDef", mercGoal));
                     actor.properties["Triggers"] = links;
