@@ -1062,6 +1062,10 @@
                         "props": {
                           "$ref": "#/$defs/props"
                         },
+                        "reach": {
+                          "description": "Terminal: the modem's reach to the ND133 (InteractionDistanceToCenter).",
+                          "type": "number"
+                        },
                         "resetTime": {
                           "description": "Flag reset.",
                           "type": "number"

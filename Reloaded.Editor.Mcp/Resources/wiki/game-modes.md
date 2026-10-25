@@ -34,6 +34,7 @@ Adding one in the editor:
 > **IMPORTANT:** place the computer so it does **not intersect any collision geometry**. If it does, players cannot capture it. The correct height is **approximately 78 units from the ground**.
 
 - `DominationCaptureTime`: time the Spies need to neutralize the ND133 (the modem's hack duration).
+- `InteractionDistanceToCenter`: the modem's **reach** — how close to the ND133 the Spy must plant it (line of sight is enforced separately). The `gameplay` tool exposes this as the trigger's `reach`.
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Neutralization in progress`.
 - **Gotcha:** `CaptureTime` does **not** affect `SComputerObjectiveTrigger` actors. Only `DominationCaptureTime` needs to be set.
 - To finish the objective, link it to an `SObjective` (see below).
@@ -155,7 +156,8 @@ Objective triggers:
   - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
   - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
 - A `terminal` trigger is an `SComputerObjectiveTrigger` (the ND133 the Spy neutralizes with a modem)
-  and uses `DominationCaptureTime`; a `bomb` trigger is an `SBombTargetObjectiveTrigger` (a planted
+  and uses `DominationCaptureTime` (plus `reach` → `InteractionDistanceToCenter`, the modem's reach);
+  a `bomb` trigger is an `SBombTargetObjectiveTrigger` (a planted
   bomb with a fuse) and uses `CaptureTime`. When the author gives no objective `description`/
   `descriptionDef`, the `SObjective` gets default coaching per kind — terminal → Spy "Neutralize
   <name>: place your modem where it can see the ND133, then fall back while it hacks." / Merc "Defend

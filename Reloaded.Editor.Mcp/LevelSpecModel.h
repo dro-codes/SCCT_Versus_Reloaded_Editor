@@ -182,7 +182,7 @@ namespace Mcp::Spec
                                        Obj({{"ref", Ref("id")}}, {"ref"}, "{ref: id}: the drop zone another flag's entry made, shared.")},
                                       "{id, at} for a new SFlagDropZone, or {ref: id} to share one another flag made (flags may share drop zones).");
             const auto trigger = Obj({{"id", Ref("id")}, {"kind", Enum({"terminal", "flag", "bomb"})}, {"at", Ref("position")}, {"yaw", Num()}, {"facing", Ref("facing")},
-                                      {"dominationCaptureTime", Num("Terminal capture time.")}, {"captureTime", Num("Bomb fuse.")}, {"resetTime", Num("Flag reset.")},
+                                      {"dominationCaptureTime", Num("Terminal capture time.")}, {"reach", Num("Terminal: the modem's reach to the ND133 (InteractionDistanceToCenter).")}, {"captureTime", Num("Bomb fuse.")}, {"resetTime", Num("Flag reset.")},
                                       {"dropZones", Arr(dropZone, 1, 5)}, {"triggerName", Str()}, {"props", Ref("props")}},
                                      {"id", "kind"});
             const auto objective = Obj({{"id", Ref("id")}, {"name", Str()}, {"description", Str()}, {"descriptionDef", Str()}, {"visibilityZone", Ref("id")},

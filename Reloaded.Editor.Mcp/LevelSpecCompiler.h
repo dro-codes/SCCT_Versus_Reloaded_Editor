@@ -1503,6 +1503,7 @@ namespace Mcp::Spec
                         if (kind == "terminal")
                         {
                             actor.properties["DominationCaptureTime"] = Num(trigger.value("dominationCaptureTime", 10.0));
+                            if (trigger.contains("reach")) actor.properties["InteractionDistanceToCenter"] = Num(trigger.at("reach").get<double>());
                             if (trigger.contains("captureTime")) Diag("warning", "story.capture-time", Child(where, "captureTime"), "CaptureTime does not affect a computer terminal; only dominationCaptureTime is written.", "game-modes");
                             const bool explicitZ = trigger.at("at").is_array() && trigger.at("at").size() == 3 && trigger.at("at")[2].is_number();
                             if (explicitZ && spot.room >= 0)
