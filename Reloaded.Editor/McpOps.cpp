@@ -568,6 +568,7 @@ void RegisterCore()
         return Editor::PasteActorProperties(targets,properties);
     });
     Add("ge.add",[](const Json& q)->Json{return Editor::AddGeometricEvent(q.at("command").get<std::string>(),q.at("points"));});
+    Add("ge.delete",[](const Json&)->Json{return Editor::DeleteGeometricEvent();});
     Add("surface.texture",[](const Json& q)->Json
     {
         return Editor::TextureSurfaces(q.at("texture").get<std::string>(),q.value("surfaces",Json()),List(q,"brushes","brush"),List(q,"faces","face"));

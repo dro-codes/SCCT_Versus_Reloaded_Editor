@@ -146,6 +146,7 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `stairs.remove` {surfaces}
 - `settings.edit` {snapshot (from settings.inspect), changes {property: value}}
 - `ge.add` {command: ZL|HOH|PIPE|LADDER|FENCE|POLE|LG, points}
+- `ge.delete` {} → removes the geometric event selected in GE mode (no target args; select it there first)
 - `surface.texture` (not joinable) {texture, surfaces | brushes, faces}: faces by where their normal points (floor, ceiling, +X, -X, +Y, -Y)
 
 ## File

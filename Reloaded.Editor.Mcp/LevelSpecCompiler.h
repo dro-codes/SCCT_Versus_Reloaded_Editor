@@ -2782,6 +2782,8 @@ namespace Mcp::Spec
                         actor.properties["bInteractInFront"] = "True";
                     }
                     else if (kind == "sprinkler") actor.properties["bHidden"] = "True";
+                    // Persistent Light Mode (RE+): keep the spotlight's Echelon light on even when no Mercenary is steering it.
+                    if (kind == "projector" && item.value("persistentLight", false)) actor.properties["HitPoints"] = "1";
                     Props(actor, item);
                 }
             }
@@ -3024,6 +3026,8 @@ namespace Mcp::Spec
                     Json properties = Json::object();
                     for (const auto& [key, property] : std::vector<std::pair<const char*, const char*>>{{"heatIntensity", "HeatIntensity"}, {"heatOpacity", "HeatOpacity"}, {"heatRadius", "HeatRadius"}, {"emfIntensity", "EMFIntensity"}, {"emfOpacity", "EMFOpacity"}})
                         if (item.contains(key)) properties[property] = Num(item.at(key).get<double>());
+                    // Visible only in Thermal/EMF Vision: the base of the "event-gated reveal" pattern (pair with bHidden + an event un-hide).
+                    if (item.contains("hideInNormalVision")) properties["bHideInNormalVision"] = item.at("hideInNormalVision").get<bool>() ? "True" : "False";
                     if (item.contains("properties")) for (auto it = item.at("properties").begin(); it != item.at("properties").end(); ++it) properties[it.key()] = Encode(it.value());
                     const auto target = item.at("target").get<std::string>();
                     if (auto* actor = FindActor(target)) { for (auto it = properties.begin(); it != properties.end(); ++it) actor->properties[it.key()] = it.value(); }

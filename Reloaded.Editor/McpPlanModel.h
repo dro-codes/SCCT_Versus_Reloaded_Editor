@@ -114,7 +114,7 @@ namespace Mcp::Plan
     inline bool Deletes(const Step& step)
     {
         if (step.op == "authoring.apply") return DocumentHas(step.args, "delete");
-        if (step.op == "security.delete" || step.op == "stairs.remove" || step.op == "stairs.smooth") return true;
+        if (step.op == "security.delete" || step.op == "stairs.remove" || step.op == "stairs.smooth" || step.op == "ge.delete") return true;
         if (step.op == "design.block" || step.op == "design.blockbatch") return Replaces(step.args);
         return false;
     }

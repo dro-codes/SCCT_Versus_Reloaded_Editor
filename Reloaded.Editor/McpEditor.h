@@ -51,4 +51,5 @@ namespace Workflow::Editor
     // GE ADD for an element ("ZL", "HOH", "PIPE", "LADDER", "FENCE", "POLE",
     // "LG"), points as the Map Design element tool orders them.
     Json AddGeometricEvent(const std::string& command, const Json& points);
+    Json DeleteGeometricEvent();
 }

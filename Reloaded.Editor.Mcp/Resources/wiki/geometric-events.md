@@ -159,7 +159,8 @@ Point ordering:
 Masks:
 - `geTriggers[{id, toggle, geMask}]` creates `SGETrigger`s.
 - The starting mask is the Level Properties `GEActivationMask`, written by `map_settings`.
-- Assigning GE IDs and listing or deleting GEs are not backed by bridge code yet. Use the editor's `Set GE ID` by hand.
+- **Deleting is backed:** `ge.delete` removes the geometric event currently **selected in GE mode** (select it there first) in one Undo step — call it via `workflow_request` (op `ge.delete`). The stock editor exposes no console command to select a specific GE or to list all of them, so which GE gets deleted stays a GE-mode choice.
+- Assigning GE IDs is not backed: it is the GE-mode / right-click `Set GE ID` action only; do it by hand.
 
 Fences:
 - A fence also needs `bClimbable` on its texture. Set it with an `object.set` on the texture through `workflow_request`, or by hand, then save that (map-owned) package.
