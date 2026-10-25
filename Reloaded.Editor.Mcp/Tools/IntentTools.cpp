@@ -412,7 +412,7 @@ namespace
                 "at, enabledBy}]}\n"
                 "- modes [story|diskhunt|deathmatch] are added; removeModes drops modes with their sections\n"
                 "- story {mission {id, name, description (Spy), descriptionDef (Merc), minimumObjectives, chained, atResetEvent}, objectives [{id, name, description, "
-                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb (terminal = the ND133 neutralized with the Spy's placed modem, uses dominationCaptureTime; bomb = a planted bomb with a fuse the Mercs defuse, uses captureTime), at, dominationCaptureTime, reach (terminal: the modem's reach to the ND133), dropZones (1-5) [{id, at} | {ref: id}] "
+                "descriptionDef, visibilityZone, at, triggers [{id, kind: terminal|flag|bomb, at, dominationCaptureTime, dropZones (1-5) [{id, at} | {ref: id}] "
                 "(flags share a zone: one makes it with an id, the others name it by ref), resetTime, captureTime, triggerName}]}], sectors [{id, name, brief, briefDefend, objectives, required, actions [{kind: open|light|sound|announce|trigger, target, "
                 "hold, ...}]}]}\n"
                 "- diskhunt {disks: {in: [roomIds], count} | [{id, at, group}], resetTime, mission}; deathmatch {disableSecurity, mission}\n"

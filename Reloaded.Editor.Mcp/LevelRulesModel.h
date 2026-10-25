@@ -133,7 +133,6 @@ namespace Mcp::Rules
             {"objectives.dropzone-unused", "game-modes", "warning", "warning", "An SFlagDropZone no SFlag lists."},
             {"objectives.terminal-placement", "game-modes", "warning", "warning", "An SComputerObjectiveTrigger sits about 78 units above the floor and clear of collision, or players cannot capture it."},
             {"objectives.terminal-capture-time", "game-modes", "warning", "warning", "CaptureTime does nothing on an SComputerObjectiveTrigger; set DominationCaptureTime."},
-            {"objectives.modem-reach", "game-modes", "info", "info", "No surface within a terminal's modem reach (InteractionDistanceToCenter) has line of sight to it, so a spy may be unable to plant a modem (heuristic; verify by playtest)."},
             {"diskhunt.disk-count", "game-modes", "error", "error", "Disk Hunt needs SDisks listed in its SMission's Triggers, at least ScoreLimit of them, and Handicap and NumDisksMax within what is placed."},
             {"diskhunt.disk-group", "game-modes", "error", "error", "SDisk Group is 1, 2 or 3."},
             {"diskhunt.disk-clearance", "game-modes", "warning", "warning", "An SDisk touching the floor or other geometry cannot be picked up."},
@@ -1191,8 +1190,6 @@ namespace Mcp::Rules
                     if (capture && *capture > 0 && (!scene.live || !domination || *domination <= 0))
                         Add("objectives.terminal-capture-time", Name(*t) + " sets CaptureTime, which terminals ignore; set DominationCaptureTime (the time the spies need to capture it).", {t->path},
                             SetFix(*t, {{"DominationCaptureTime", Round(*capture, 1)}}));
-                    if (const auto spots = NumberOf(*t, "$modemSpots"); spots && *spots == 0)
-                        Add("objectives.modem-reach", Name(*t) + " has no surface within the modem's reach that can see it, so a spy may be unable to plant a modem; widen its reach (InteractionDistanceToCenter) or open a sightline, then verify by playtest.", {t->path});
                 }
             }
             void DiskHunt()

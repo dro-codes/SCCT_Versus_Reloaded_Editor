@@ -1487,7 +1487,6 @@ namespace Mcp::Spec
                     Json links = Json::array();
                     Vector sum{};
                     int placed = 0, room = -1;
-                    std::string objKind;
                     for (size_t k = 0; k < triggers.size(); ++k)
                     {
                         const auto& trigger = triggers[k];
@@ -1503,7 +1502,6 @@ namespace Mcp::Spec
                         if (kind == "terminal")
                         {
                             actor.properties["DominationCaptureTime"] = Num(trigger.value("dominationCaptureTime", 10.0));
-                            if (trigger.contains("reach")) actor.properties["InteractionDistanceToCenter"] = Num(trigger.at("reach").get<double>());
                             if (trigger.contains("captureTime")) Diag("warning", "story.capture-time", Child(where, "captureTime"), "CaptureTime does not affect a computer terminal; only dominationCaptureTime is written.", "game-modes");
                             const bool explicitZ = trigger.at("at").is_array() && trigger.at("at").size() == 3 && trigger.at("at")[2].is_number();
                             if (explicitZ && spot.room >= 0)
@@ -1548,10 +1546,6 @@ namespace Mcp::Spec
                         links.push_back(Ref(triggerId));
                         triggersOf[Fold(id)].push_back({triggerId, kind});
                         triggerKind[Fold(triggerId)] = kind;
-                        // Representative kind for the objective's default coaching text (bomb/modem wins, then flag).
-                        if (objKind.empty()) objKind = kind;
-                        else if (kind == "bomb") objKind = "bomb";
-                        else if (kind == "flag" && objKind == "terminal") objKind = "flag";
                         for (int a = 0; a < 3; ++a) sum[a] += spot.at[a];
                         if (room < 0) room = spot.room;
                         ++placed;
@@ -1569,16 +1563,8 @@ namespace Mcp::Spec
                     auto& actor = Add(id, "SBase.SObjective", "objective", pointer, at, 0, false);
                     actor.label = "objective " + name;
                     actor.properties["ObjectiveName"] = Quoted(name);
-                    // Default objective text teaches the mechanic in the briefing/HUD when the author gives none.
-                    // terminal = the ND133 the spy neutralizes with a placed modem; bomb = a planted bomb with a fuse; flag = hard-disk steal.
-                    const std::string spyGoal = objKind == "bomb" ? "Plant a bomb at " + name + " and protect it until it detonates."
-                                               : objKind == "flag" ? "Steal " + name + " and carry it to a drop zone."
-                                               : "Neutralize " + name + ": place your modem where it can see the ND133, then fall back while it hacks.";
-                    const std::string mercGoal = objKind == "bomb" ? "Defend " + name + "; find and defuse the bomb before it blows."
-                                                : objKind == "flag" ? "Stop the spies stealing " + name + "."
-                                                : "Defend " + name + "; stop the spies neutralizing the ND133.";
-                    actor.properties["Description"] = Quoted(objective.value("description", spyGoal));
-                    actor.properties["DescriptionDEF"] = Quoted(objective.value("descriptionDef", mercGoal));
+                    actor.properties["Description"] = Quoted(objective.value("description", "Neutralize " + name));
+                    actor.properties["DescriptionDEF"] = Quoted(objective.value("descriptionDef", "Protect " + name));
                     actor.properties["Triggers"] = links;
                     if (objective.contains("visibilityZone"))
                     {

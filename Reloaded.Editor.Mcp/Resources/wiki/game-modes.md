@@ -22,9 +22,7 @@ Story supports three objective types. A map can use any one of them, or combine 
 - Hard disks: `SFlag` / `SFlagDropZone`
 - Bombs: `SBombTargetObjectiveTrigger`
 
-### SComputerObjectiveTrigger (computer / ND133 "modem" neutralization objective)
-
-This is the **ND133 neutralization** objective — the one the Spy's **Modem** gadget services (`SGadBomb`, in-game name "Modem": *"Disables an ND133 by hacking its control device"*). The Spy sticks a modem on a surface with a **clear line of sight to the ND133, within range**, and it neutralizes the ND133 remotely; the Spy can leave and come back to finish it. The game enforces placement with player messages *"No surface to stick the modem"*, *"You are too far from a ND133"*, *"Modem can't see ND133"*, *"Can't place a modem from this position"*; HUD states are `<TriggerName> : Neutralization in progress` then `ND133 neutralized`.
+### SComputerObjectiveTrigger (computer objective)
 
 Adding one in the editor:
 1. Select the actor in the **Actor Class Browser**.
@@ -33,13 +31,10 @@ Adding one in the editor:
 
 > **IMPORTANT:** place the computer so it does **not intersect any collision geometry**. If it does, players cannot capture it. The correct height is **approximately 78 units from the ground**.
 
-- `DominationCaptureTime`: time the Spies need to neutralize the ND133 (the modem's hack duration).
-- `InteractionDistanceToCenter`: the modem's **reach** — how close to the ND133 the Spy must plant it (line of sight is enforced separately). The `gameplay` tool exposes this as the trigger's `reach`.
+- `DominationCaptureTime`: time the Spies need to capture the objective trigger.
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Neutralization in progress`.
 - **Gotcha:** `CaptureTime` does **not** affect `SComputerObjectiveTrigger` actors. Only `DominationCaptureTime` needs to be set.
 - To finish the objective, link it to an `SObjective` (see below).
-
-> **Design note:** to make the modem mechanic matter, place the ND133 where a Spy must find a plant spot with line of sight to it (behind glass, down a Merc-watched sightline), with a covered approach (a vent, ledge or zipline) — so the Mercenaries sweep likely modem spots rather than just camp the ND133.
 
 ### SFlag (hard disk objective)
 
@@ -56,11 +51,9 @@ The hard disk must be extracted into a drop zone (`SFlagDropZone`).
 
 The drop zone for `SFlag` objectives. Place one in the level and link it through the `DropZone` field of an `SFlag`. **No properties need to be configured** on `SFlagDropZone`.
 
-### SBombTargetObjectiveTrigger (bomb / sabotage objective)
+### SBombTargetObjectiveTrigger (bomb objective)
 
-A **bomb the Spy plants and then protects** until it detonates — distinct from the ND133/modem neutralization above. The plant action reads `Place Bomb`; once planted a countdown runs and the Mercenaries race to find and defuse it. HUD states: `<TriggerName> : Under attack`, then `: Bombed` if it blows or `: Secured` if the Mercs save it. Spy tip: *"After placing your bomb, try to protect it. Use teamplay to cover a zone."* Merc tip: *"Once the bomb countdown appears, you have a few seconds to find the bomb."*
-
-- `CaptureTime`: the bomb's **fuse**, in seconds, once it is planted.
+- `CaptureTime`: time in seconds before the bomb explodes.
 - `TriggerName`: name shown on the HUD, as in `<TriggerName> : Under attack`.
 - Link it to an `SObjective`.
 - (From the Alarms page: `SBombTargetObjectiveTrigger` **cannot be locked** by an alarm.)
@@ -155,15 +148,7 @@ Objective triggers:
 - An `SFlag` needs 1-5 `SFlagDropZone`s.
   - Each `dropZones` entry is `{id, at}`, a new `SFlagDropZone`, or `{ref: id}`, one another flag's entry made: **flags may share drop zones**, and a shared zone is made once.
   - A `ref` that names no drop zone, or one a flag lists twice, is an error (`story.flag-dropzones`).
-- A `terminal` trigger is an `SComputerObjectiveTrigger` (the ND133 the Spy neutralizes with a modem)
-  and uses `DominationCaptureTime` (plus `reach` → `InteractionDistanceToCenter`, the modem's reach);
-  a `bomb` trigger is an `SBombTargetObjectiveTrigger` (a planted
-  bomb with a fuse) and uses `CaptureTime`. When the author gives no objective `description`/
-  `descriptionDef`, the `SObjective` gets default coaching per kind — terminal → Spy "Neutralize
-  <name>: place your modem where it can see the ND133, then fall back while it hacks." / Merc "Defend
-  <name>; stop the spies neutralizing the ND133."; bomb → Spy "Plant a bomb at <name> and protect it
-  until it detonates." / Merc "Defend <name>; find and defuse the bomb before it blows."; flag →
-  steal/carry.
+- An `SBombTargetObjectiveTrigger` uses `CaptureTime`.
 
 Sectors (`gameplay.story.sectors`):
 - The top mission is `GM_Multi` with `bChained True`.
@@ -184,4 +169,4 @@ Deathmatch:
 
 Before you rely on an enum value, check the live enum names with `map_query what:"schema" classes:["SBase.SMission"]` (the schema takes full class names).
 
-- Rules: `story.no-mission`, `story.no-multi`, `story.no-objective`, `story.unresolved-reference`, `story.trigger-kind`, `story.objective-orphan`, `story.objective-no-trigger`, `story.mission-empty`, `story.minimum-objectives`, `story.sector-chain`, `story.visibility-zone`, `modes.missing`, `objectives.flag-dropzones`, `objectives.dropzone-unused`, `objectives.terminal-placement`, `objectives.terminal-capture-time`, `objectives.modem-reach`, `diskhunt.disk-count`, `diskhunt.disk-group`, `diskhunt.disk-clearance`, `diskhunt.disk-unlisted`, `deathmatch.security`, `objectiveplayers.problems`, `objectiveplayers.targets`
+- Rules: `story.no-mission`, `story.no-multi`, `story.no-objective`, `story.unresolved-reference`, `story.trigger-kind`, `story.objective-orphan`, `story.objective-no-trigger`, `story.mission-empty`, `story.minimum-objectives`, `story.sector-chain`, `story.visibility-zone`, `modes.missing`, `objectives.flag-dropzones`, `objectives.dropzone-unused`, `objectives.terminal-placement`, `objectives.terminal-capture-time`, `diskhunt.disk-count`, `diskhunt.disk-group`, `diskhunt.disk-clearance`, `diskhunt.disk-unlisted`, `deathmatch.security`, `objectiveplayers.problems`, `objectiveplayers.targets`
