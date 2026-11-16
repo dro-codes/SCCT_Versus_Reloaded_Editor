@@ -14,6 +14,7 @@
 #include "CompareBackup.h"
 #include "UnsavedChangesModel.h"
 #include "LightmapFix.h"
+#include "McpBridge.h"
 #include "SelfUpdater.h"
 #include "CommandPalette.h"
 #include "Version.h"
@@ -176,9 +177,16 @@ namespace
             return 0;
         }
         // The frame goes only when the editor is closing: the session ended
-        // cleanly, unless the engine is going down with an error.
-        if (message == WM_DESTROY) CrashRecovery::EndSession();
+        // cleanly, unless the engine is going down with an error. The MCP
+        // bridge stops taking calls.
+        if (message == WM_DESTROY)
+        {
+            CrashRecovery::EndSession();
+            McpBridge::Shutdown();
+        }
         if (message == WM_INITMENUPOPUP && reinterpret_cast<HMENU>(w) == recentMenu) { RebuildRecentMenu(); return 0; }
+        // RE+ Tools > MCP: its check marks and "(connected)".
+        if (message == WM_INITMENUPOPUP) McpBridge::UpdateMenu(reinterpret_cast<HMENU>(w));
         if (message == WM_COMMAND)
         {
             // Rebuilding geometry makes every hidden actor visible again, so
@@ -320,6 +328,8 @@ namespace
             if (!SetTimer(frameWindow, kTimer, 10000, nullptr)) { error = "SetTimer failed"; return false; }
             if (!SetTimer(frameWindow, kOfferTimer, 1000, nullptr)) { error = "SetTimer failed"; return false; }
             if (!SetTimer(frameWindow, kConveyorTimer, 500, nullptr)) { error = "SetTimer failed"; return false; }
+            installStep = "McpBridge::AttachUiThread";
+            McpBridge::AttachUiThread(frameWindow); // once; the server starts when [Mcp] Enabled=1
             installStep = "InstallMenus";
             if (!InstallMenus()) { error = "menu bar not ready"; return false; }
             return true;
@@ -434,7 +444,9 @@ namespace
                "RE+ Tools: Map Design (its own Keys... window lists the plan's shortcuts), Brush Visibility, Placement,\r\n"
                "Gameplay Connections, SMagicEvent Workbench, SCamNetwork Manager, Working Views, Assemblies,\r\n"
                "Scatter Props (fill the builder brush or a circle round the last click with weighted static meshes,\r\n"
-               "previewed in the viewports, placed as one Undo step), JSON.\r\n";
+               "previewed in the viewports, placed as one Undo step), JSON.\r\n"
+               "RE+ Tools > MCP: Enable MCP server lets an AI agent (Claude Code, Claude Desktop) read and change the open map\r\n"
+               "through Reloaded.Editor.Mcp.exe; Require approval shows each change first. Each call's map edits are one Undo step.\r\n";
     }
     LRESULT CALLBACK ShortcutsProc(HWND window, UINT message, WPARAM w, LPARAM l)
     {
@@ -599,6 +611,12 @@ bool EditorExtras::OpenMap(const std::string& path, HWND owner, const char* titl
 void EditorExtras::OpenMap(const std::string& path, bool confirmDiscard)
 {
     OpenMap(path, frameWindow, "Open Recent", confirmDiscard);
+}
+
+bool EditorExtras::HasUnsavedChanges()
+{
+    try { return UnsavedChanges::Unsaved(changes, Editor::MapOpened(), Editor::ContentRevision(), Editor::MapFile()); }
+    catch (...) { return false; } // No map yet.
 }
 
 void EditorExtras::Attach(HWND frame)

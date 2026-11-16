@@ -49,6 +49,8 @@ try {
     $files = [ordered]@{
         'Reloaded_Editor.exe' = $LauncherPath
         'Reloaded.Editor.dll' = Join-Path $BinaryDirectory 'Reloaded.Editor.dll'
+        # The MCP server; the updater installs it beside the DLL.
+        'Reloaded.Editor.Mcp.exe' = Join-Path $BinaryDirectory 'Reloaded.Editor.Mcp.exe'
         'README.md' = Join-Path $repository 'README.md'
     }
     foreach ($source in $files.Values) {

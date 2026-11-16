@@ -4,6 +4,11 @@
 #include "LightmapFix.h"
 #include "EngineLog.h"
 #include "MapCheckLog.h"
+#include "SaveBackups.h"
+#include <algorithm>
+#include <filesystem>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <cstdio>
@@ -93,6 +98,23 @@ int __cdecl SaveLoadedMap(const char* path)
         mov  saved, eax
     }
     return saved;
+}
+
+// The batch's save of the open map: the editor's save, LightmapFix's repair
+// (the Save hooks are call-site patches, so this write must ask for it), then
+// the stock SAVEMAPPROP for the interface package. False when the editor said
+// the save failed. Plain data only: the batch runs it inside __try.
+bool SaveSequence(const char* path, const char* mapProp)
+{
+    if (!SaveLoadedMap(path))
+        return false;
+
+    LightmapFix::RepairSavedMap(path);
+
+    char cmd[MAX_PATH + 64];
+    _snprintf_s(cmd, sizeof(cmd), _TRUNCATE, "SAVEMAPPROP MAP=\"%s\"", mapProp);
+    ExecEditorCommand(cmd);
+    return true;
 }
 
 void* EditorLevel()
@@ -454,11 +476,25 @@ void __cdecl AppendLine(const char* text)
         LogLine(text);
 }
 
-void RouteToFeed(void (__cdecl *sink)(const char*))
+// The sinks a run replaces, put back when it ends: a bridge call or a tool
+// window may have set its own.
+struct Sinks
 {
-    EngineLog::SetSink(sink);
-    MapCheckLog::SetSink(sink);
-    LightmapFix::SetDamageSink(sink);
+    EngineLog::Sink engine;
+    MapCheckLog::Sink mapCheck;
+    LightmapFix::DamageSink damage;
+};
+
+Sinks RouteToFeed(void (__cdecl *sink)(const char*))
+{
+    return Sinks{ EngineLog::SetSink(sink), MapCheckLog::SetSink(sink), LightmapFix::SetDamageSink(sink) };
+}
+
+void RestoreSinks(const Sinks& previous)
+{
+    EngineLog::SetSink(previous.engine);
+    MapCheckLog::SetSink(previous.mapCheck);
+    LightmapFix::SetDamageSink(previous.damage);
 }
 
 std::string ElapsedText(DWORD ms)
@@ -537,14 +573,7 @@ MapResult ProcessMap(HWND frame, const char* path, const char* fileName, const c
         _snprintf_s(note, sizeof(note), _TRUNCATE, "Saving: %s", base);
         AppendLine(note);
 
-        if (!SaveLoadedMap(path))
-            return Map_SaveFailed;
-
-        LightmapFix::RepairSavedMap(path);
-
-        _snprintf_s(cmd, sizeof(cmd), _TRUNCATE, "SAVEMAPPROP MAP=\"%s\"", fileName);
-        ExecEditorCommand(cmd);
-        return Map_Ok;
+        return SaveSequence(path, fileName) ? Map_Ok : Map_SaveFailed;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -580,7 +609,7 @@ void RunBatch(const std::vector<std::string>& maps, HWND frame)
 
     ShowWindow(frame, SW_HIDE);
     EnableWindow(frame, FALSE);
-    RouteToFeed(&AppendLine);
+    const Sinks previousSinks = RouteToFeed(&AppendLine);
 
     int rebuilt = 0, skipped = 0, failed = 0;
     std::vector<std::string> repaired, needsAttention;
@@ -654,7 +683,7 @@ void RunBatch(const std::vector<std::string>& maps, HWND frame)
             break;
     }
 
-    RouteToFeed(nullptr);
+    RestoreSinks(previousSinks);
     EnableWindow(frame, TRUE);
     ShowWindow(frame, SW_SHOW);
     InvalidateRect(frame, nullptr, TRUE);
@@ -701,7 +730,169 @@ bool HasCommandLineFlag(const char* flag)
 
 bool g_unlocked;
 
+// ---------------------------------------------------------------------
+//  One map, for the MCP bridge
+// ---------------------------------------------------------------------
+enum SaveResult { Save_Ok, Save_Failed, Save_Crashed };
+
+SaveResult SaveGuarded(const char* path, const char* mapProp)
+{
+    __try
+    {
+        return SaveSequence(path, mapProp) ? Save_Ok : Save_Failed;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return Save_Crashed;
+    }
+}
+
+bool BuildGuarded()
+{
+    __try
+    {
+        CallBuildBracket(kPrepareForBuild);
+        BuildLoadedMap();
+        CallBuildBracket(kRestoreAfterBuild);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
+std::vector<std::string>* g_buildLog;
+
+// Called from inside the engine's hooks: nothing may escape.
+void __cdecl CollectLine(const char* text)
+{
+    if (!text || !*text)
+        return;
+    LogLine(text);
+    try { if (g_buildLog) g_buildLog->push_back(text); }
+    catch (...) {}
+}
+
+std::optional<FILETIME> WriteTime(const std::string& path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data = {};
+    if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &data))
+        return std::nullopt;
+    return data.ftLastWriteTime;
+}
+
+bool Changed(const std::optional<FILETIME>& before, const std::optional<FILETIME>& after)
+{
+    return after && (!before || CompareFileTime(&*before, &*after) != 0);
+}
+
 } // namespace
+
+void RebuildAllMaps::SaveMapTo(const std::string& path)
+{
+    namespace fs = std::filesystem;
+    if (g_running)
+        throw std::runtime_error("Rebuild All Maps is running; save when it has finished.");
+    if (!EditorLevel())
+        throw std::runtime_error("No map is open to save.");
+    const fs::path file(path);
+    const std::string stem = file.stem().string();
+    if (stem.empty() || path.size() >= MAX_PATH)
+        throw std::runtime_error("Cannot save the map to \"" + path + "\".");
+    std::error_code error;
+    const auto full = fs::absolute(file, error).lexically_normal();
+    if (error)
+        throw std::runtime_error("Cannot save the map to \"" + path + "\".");
+    const std::string target = full.string();
+    if (fs::exists(full, error) && !CanOpenForWrite(target.c_str()))
+        throw std::runtime_error(target + " is read-only or open in another program; the map was not saved.");
+
+    // Before the save writes over it, as File > Save does.
+    SaveBackups::BeforeMapSave(("MAP SAVE FILE=\"" + path + "\"").c_str());
+
+    // The interface package is kept and goes aside for SAVEMAPPROP, as Level
+    // Snapshot does: the stock save asks before writing a package smaller
+    // than the file it replaces, and nothing may ask during a bridge call.
+    // It comes back if the save writes none (a map without settings). A save
+    // under the map's own name first loads its package as File > Open does
+    // (from the file only when it is not in memory), so the pictures and
+    // settings in it ride along; a save under a new name carries the open
+    // map's settings over, as Save As does.
+    const fs::path system = SaveBackups::Folder().parent_path().parent_path();
+    const fs::path utc = system.parent_path() / "Packages" / "Textures" / (stem + "-i.utc");
+    const char* loaded = LoadedLevelPackage();
+    if (loaded && _stricmp(loaded, stem.c_str()) == 0)
+        ExecEditorCommand(("LOADMAPPROP MAP=\"" + stem + "\"").c_str());
+    fs::path kept;
+    if (fs::exists(utc, error))
+    {
+        SYSTEMTIME now = {};
+        GetLocalTime(&now);
+        char stamp[32];
+        _snprintf_s(stamp, sizeof(stamp), _TRUNCATE, "%04u%02u%02u-%02u%02u%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+        const fs::path folder = system / "ReloadedEditor" / "snapshot-backups";
+        fs::create_directories(folder, error);
+        kept = folder / (stem + "-i." + stamp + ".utc");
+        if (fs::copy_file(utc, kept, fs::copy_options::overwrite_existing, error) && fs::remove(utc, error))
+            LogLine(("kept " + utc.string() + " as " + kept.string()).c_str());
+        else
+        {
+            LogLine(("could not set " + utc.string() + " aside; SAVEMAPPROP saves over it").c_str());
+            kept.clear();
+        }
+        // The newest copies of this map's package stay (their names sort by
+        // time); Level Snapshot's and Generate Minimap's share the folder.
+        std::vector<fs::path> copies;
+        const std::string prefix = stem + "-i.";
+        for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error))
+        {
+            const std::string name = it->path().filename().string();
+            if (name.size() > prefix.size() && _strnicmp(name.c_str(), prefix.c_str(), prefix.size()) == 0 && _stricmp(it->path().extension().string().c_str(), ".utc") == 0)
+                copies.push_back(it->path());
+        }
+        std::sort(copies.begin(), copies.end(), [](const fs::path& a, const fs::path& b) { return a.filename().string() > b.filename().string(); });
+        for (size_t i = 20; i < copies.size(); ++i)
+            if (copies[i] != kept) fs::remove(copies[i], error);
+    }
+    auto putBack = [&]
+    {
+        std::error_code ignored;
+        if (!kept.empty() && !fs::exists(utc, ignored))
+            fs::copy_file(kept, utc, fs::copy_options::overwrite_existing, ignored);
+    };
+
+    const auto before = WriteTime(target);
+    const SaveResult result = SaveGuarded(path.c_str(), stem.c_str());
+    putBack();
+    if (result == Save_Crashed)
+        throw std::runtime_error("The editor faulted while saving " + target + ". Save under a new name, then restart the editor.");
+    if (result == Save_Failed || !Changed(before, WriteTime(target)))
+        throw std::runtime_error("The editor did not write " + target + "; the map was not saved. Check that the file is not read-only or open in another program.");
+    LogLine(("saved " + target).c_str());
+}
+
+std::vector<std::string> RebuildAllMaps::BuildCurrentMap()
+{
+    if (g_running)
+        throw std::runtime_error("Rebuild All Maps is running.");
+    if (!EditorLevel())
+        throw std::runtime_error("No map is open to build.");
+    std::vector<std::string> log;
+    g_buildLog = &log;
+    // A Map Check sink also keeps the window Build All raises at its end shut.
+    const MapCheckLog::Sink mapCheck = MapCheckLog::SetSink(&CollectLine);
+    const LightmapFix::DamageSink damage = LightmapFix::SetDamageSink(&CollectLine);
+    const DWORD started = GetTickCount();
+    const bool built = BuildGuarded();
+    MapCheckLog::SetSink(mapCheck);
+    LightmapFix::SetDamageSink(damage);
+    g_buildLog = nullptr;
+    if (!built)
+        throw std::runtime_error("The build faulted inside the editor. Save the map under a new name and restart the editor before building again.");
+    LogLine(("built the open map in " + ElapsedText(GetTickCount() - started)).c_str());
+    return log;
+}
 
 void RebuildAllMaps::Initialize()
 {

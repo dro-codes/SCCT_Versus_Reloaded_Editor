@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="8" height="6" tilewidth="32" tileheight="32" infinite="0" nextlayerid="4" nextobjectid="5">
+ <tileset firstgid="1" name="plan" tilewidth="32" tileheight="32" tilecount="4" columns="4">
+  <image source="plan.png" width="128" height="32"/>
+  <tile id="0" type="floor"/>
+  <tile id="1"><properties><property name="kind" value="wall"/></properties></tile>
+  <tile id="2" class="spy"/>
+  <tile id="3" class="merc"/>
+ </tileset>
+ <group id="3" name="Storey 1">
+  <layer id="1" name="Ground" width="8" height="6">
+   <data encoding="csv">
+2,2,2,2,2,2,2,2,
+2,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,2,
+2,2,2,2,2,2,2,2
+</data>
+  </layer>
+  <layer id="2" name="Starts" width="8" height="6">
+   <data encoding="base64" compression="zlib">
+   eJxjYCAMmLGIsTAwNFBLnhIAAKF8AZY=
+   </data>
+  </layer>
+  <objectgroup id="4" name="Objects">
+   <object id="1" name="Server" type="terminal" x="112" y="80"><point/></object>
+   <object id="2" name="Net" type="camnet" x="176" y="48"><point/></object>
+   <object id="3" name="Ledge" type="ledge" x="64" y="40"><polyline points="0,0 96,0"/></object>
+   <object id="4" name="Store" type="room" x="224" y="32" width="64" height="96"/>
+  </objectgroup>
+ </group>
+</map>

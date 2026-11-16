@@ -1,0 +1,1004 @@
+{
+ "actors": [
+  {
+   "at": [
+    -1696.0,
+    0.0,
+    128.0
+   ],
+   "cls": "Engine.ZoneInfo",
+   "id": "SpyBase",
+   "kind": "other",
+   "label": "Spy base",
+   "position": [
+    -1696.0,
+    0.0,
+    128.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    128.0
+   ],
+   "cls": "Engine.ZoneInfo",
+   "id": "ServerRoom",
+   "kind": "other",
+   "label": "Server room",
+   "position": [
+    0.0,
+    0.0,
+    128.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    1696.0,
+    0.0,
+    128.0
+   ],
+   "cls": "Engine.ZoneInfo",
+   "id": "MercBase",
+   "kind": "other",
+   "label": "Merc base",
+   "position": [
+    1696.0,
+    0.0,
+    128.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -1760.0,
+    -64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "SpyStart1",
+   "kind": "spawn-spy",
+   "label": "SpyStart1",
+   "position": [
+    -1760.0,
+    -64.0,
+    48.0
+   ],
+   "yaw": 2.0819091796875
+  },
+  {
+   "at": [
+    -1632.0,
+    -64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "SpyStart2",
+   "kind": "spawn-spy",
+   "label": "SpyStart2",
+   "position": [
+    -1632.0,
+    -64.0,
+    48.0
+   ],
+   "yaw": 2.2467041015625
+  },
+  {
+   "at": [
+    -1760.0,
+    64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "SpyStart3",
+   "kind": "spawn-spy",
+   "label": "SpyStart3",
+   "position": [
+    -1760.0,
+    64.0,
+    48.0
+   ],
+   "yaw": 357.9180908203125
+  },
+  {
+   "at": [
+    -1632.0,
+    64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "SpyStart4",
+   "kind": "spawn-spy",
+   "label": "SpyStart4",
+   "position": [
+    -1632.0,
+    64.0,
+    48.0
+   ],
+   "yaw": 357.7532958984375
+  },
+  {
+   "at": [
+    1632.0,
+    -64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "MercStart1",
+   "kind": "spawn-merc",
+   "label": "MercStart1",
+   "position": [
+    1632.0,
+    -64.0,
+    48.0
+   ],
+   "yaw": 177.7532958984375
+  },
+  {
+   "at": [
+    1760.0,
+    -64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "MercStart2",
+   "kind": "spawn-merc",
+   "label": "MercStart2",
+   "position": [
+    1760.0,
+    -64.0,
+    48.0
+   ],
+   "yaw": 177.9180908203125
+  },
+  {
+   "at": [
+    1632.0,
+    64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "MercStart3",
+   "kind": "spawn-merc",
+   "label": "MercStart3",
+   "position": [
+    1632.0,
+    64.0,
+    48.0
+   ],
+   "yaw": 182.2467041015625
+  },
+  {
+   "at": [
+    1760.0,
+    64.0,
+    48.0
+   ],
+   "cls": "Engine.PlayerStart",
+   "id": "MercStart4",
+   "kind": "spawn-merc",
+   "label": "MercStart4",
+   "position": [
+    1760.0,
+    64.0,
+    48.0
+   ],
+   "yaw": 182.0819091796875
+  },
+  {
+   "at": [
+    1696.0,
+    352.0,
+    0.0
+   ],
+   "cls": "SBase.SAmmoStock",
+   "id": "AmmoStock",
+   "kind": "ingredient",
+   "label": "ammo",
+   "position": [
+    1696.0,
+    352.0,
+    0.0
+   ],
+   "yaw": 270.0
+  },
+  {
+   "at": [
+    1504.0,
+    352.0,
+    64.0
+   ],
+   "cls": "SBase.SInfirmary",
+   "id": "Infirmary",
+   "kind": "ingredient",
+   "label": "infirmary",
+   "position": [
+    1504.0,
+    352.0,
+    64.0
+   ],
+   "yaw": 270.0
+  },
+  {
+   "at": [
+    -1696.0,
+    352.0,
+    64.0
+   ],
+   "cls": "SBase.SInfirmary",
+   "id": "Infirmary_2",
+   "kind": "ingredient",
+   "label": "infirmary",
+   "position": [
+    -1696.0,
+    352.0,
+    64.0
+   ],
+   "yaw": 270.0
+  },
+  {
+   "at": [
+    0.0,
+    -256.0,
+    78.0
+   ],
+   "cls": "SBase.SComputerObjectiveTrigger",
+   "id": "ServerTerminal",
+   "kind": "objective",
+   "label": "terminal ServerTerminal",
+   "position": [
+    0.0,
+    -256.0,
+    78.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    256.0,
+    64.0
+   ],
+   "cls": "SBase.SObjective",
+   "id": "ServerObjective",
+   "kind": "objective",
+   "label": "objective Server",
+   "position": [
+    0.0,
+    256.0,
+    64.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -720.0,
+    -96.0,
+    48.0
+   ],
+   "cls": "SBase.SLaserTrigger",
+   "id": "CorridorLaser",
+   "kind": "laser",
+   "label": "laser CorridorLaser",
+   "position": [
+    -720.0,
+    -96.0,
+    48.0
+   ],
+   "yaw": 90.0
+  },
+  {
+   "at": [
+    -720.0,
+    -96.0,
+    112.0
+   ],
+   "cls": "SBase.SAlarm",
+   "id": "ServerAlarm",
+   "kind": "alarm",
+   "label": "alarm Server alarm",
+   "position": [
+    -720.0,
+    -96.0,
+    112.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -460.8,
+    460.8,
+    288.0
+   ],
+   "cls": "SBase.SCamNetwork",
+   "id": "CamServer",
+   "kind": "camnet",
+   "label": "CamNet Server room",
+   "position": [
+    -460.8,
+    460.8,
+    288.0
+   ],
+   "yaw": 315.0
+  },
+  {
+   "at": [
+    -1219.2,
+    0.0,
+    224.0
+   ],
+   "cls": "SBase.SCamNetwork",
+   "id": "CamWest",
+   "kind": "camnet",
+   "label": "CamNet West corridor",
+   "position": [
+    -1219.2,
+    0.0,
+    224.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    1219.2,
+    0.0,
+    224.0
+   ],
+   "cls": "SBase.SCamNetwork",
+   "id": "CamEast",
+   "kind": "camnet",
+   "label": "CamNet East corridor",
+   "position": [
+    1219.2,
+    0.0,
+    224.0
+   ],
+   "yaw": 180.0
+  },
+  {
+   "at": [
+    0.0,
+    256.0,
+    64.0
+   ],
+   "cls": "SBase.SMission",
+   "id": "Mission",
+   "kind": "other",
+   "label": "mission Mission",
+   "position": [
+    0.0,
+    256.0,
+    64.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -96.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk1",
+   "kind": "disk",
+   "label": "disk 1",
+   "position": [
+    -96.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -1008.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk2",
+   "kind": "disk",
+   "label": "disk 2",
+   "position": [
+    -1008.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    816.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk3",
+   "kind": "disk",
+   "label": "disk 3",
+   "position": [
+    816.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    96.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk4",
+   "kind": "disk",
+   "label": "disk 1",
+   "position": [
+    96.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -816.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk5",
+   "kind": "disk",
+   "label": "disk 2",
+   "position": [
+    -816.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    1008.0,
+    0.0,
+    48.0
+   ],
+   "cls": "SBase.SDisk",
+   "id": "Disk6",
+   "kind": "disk",
+   "label": "disk 3",
+   "position": [
+    1008.0,
+    0.0,
+    48.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    80.0
+   ],
+   "cls": "SBase.SMission",
+   "id": "DiskHunt",
+   "kind": "other",
+   "label": "Disk Hunt mission",
+   "position": [
+    0.0,
+    0.0,
+    80.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "cls": "SBase.SMagicEvent",
+   "id": "SecurityOff",
+   "kind": "other",
+   "label": "security off",
+   "position": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "cls": "SBase.SMission",
+   "id": "Deathmatch",
+   "kind": "other",
+   "label": "Deathmatch mission",
+   "position": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    296.0
+   ],
+   "cls": "Engine.Light",
+   "id": "ObjectiveRoom_Light",
+   "kind": "light",
+   "label": "ceiling light",
+   "position": [
+    0.0,
+    0.0,
+    296.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    -1696.0,
+    0.0,
+    232.0
+   ],
+   "cls": "Engine.Light",
+   "id": "SpySpawn_Light",
+   "kind": "light",
+   "label": "ceiling light",
+   "position": [
+    -1696.0,
+    0.0,
+    232.0
+   ],
+   "yaw": 0.0
+  },
+  {
+   "at": [
+    1696.0,
+    0.0,
+    232.0
+   ],
+   "cls": "Engine.Light",
+   "id": "MercSpawn_Light",
+   "kind": "light",
+   "label": "ceiling light",
+   "position": [
+    1696.0,
+    0.0,
+    232.0
+   ],
+   "yaw": 0.0
+  }
+ ],
+ "bounds": {
+  "max": [
+   2080.0,
+   912.0,
+   320.0
+  ],
+  "min": [
+   -2080.0,
+   -512.0,
+   0.0
+  ]
+ },
+ "doorways": [
+  {
+   "at": [
+    -520.0,
+    0.0,
+    0.0
+   ],
+   "id": "WestCorridor_Portal",
+   "portal": true,
+   "width": 192.0,
+   "yaw": 90.0
+  },
+  {
+   "at": [
+    520.0,
+    0.0,
+    0.0
+   ],
+   "id": "EastCorridor_Portal",
+   "portal": true,
+   "width": 192.0,
+   "yaw": 90.0
+  },
+  {
+   "at": [
+    -256.0,
+    520.0,
+    0.0
+   ],
+   "id": "VentDrop_Portal",
+   "portal": true,
+   "width": 96.0,
+   "yaw": 0.0
+  }
+ ],
+ "labels": [
+  {
+   "at": [
+    -1144.0,
+    264.0,
+    0.0
+   ],
+   "kind": "zone",
+   "text": "Spy base"
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "kind": "zone",
+   "text": "Server room"
+  },
+  {
+   "at": [
+    1304.0,
+    0.0,
+    0.0
+   ],
+   "kind": "zone",
+   "text": "Merc base"
+  },
+  {
+   "at": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "kind": "room",
+   "text": "Objective room"
+  },
+  {
+   "at": [
+    -1696.0,
+    0.0,
+    0.0
+   ],
+   "kind": "room",
+   "text": "Spy spawn"
+  },
+  {
+   "at": [
+    1696.0,
+    0.0,
+    0.0
+   ],
+   "kind": "room",
+   "text": "Merc spawn"
+  }
+ ],
+ "lines": [
+  {
+   "from": [
+    -720.0,
+    -96.00000000000001,
+    48.0
+   ],
+   "ids": [
+    "CorridorLaser"
+   ],
+   "kind": "laser",
+   "to": [
+    -720.0,
+    87.99999999999999,
+    48.0
+   ]
+  },
+  {
+   "from": [
+    -720.0,
+    -96.0,
+    48.0
+   ],
+   "ids": [
+    "CorridorLaser",
+    "ServerAlarm"
+   ],
+   "kind": "alarm",
+   "to": [
+    -720.0,
+    -96.0,
+    112.0
+   ]
+  },
+  {
+   "from": [
+    -460.8,
+    460.8,
+    288.0
+   ],
+   "ids": [
+    "CamServer",
+    "CamWest"
+   ],
+   "kind": "camnet",
+   "to": [
+    -1219.2,
+    0.0,
+    224.0
+   ]
+  },
+  {
+   "from": [
+    -1219.2,
+    0.0,
+    224.0
+   ],
+   "ids": [
+    "CamWest",
+    "CamEast"
+   ],
+   "kind": "camnet",
+   "to": [
+    1219.2,
+    0.0,
+    224.0
+   ]
+  },
+  {
+   "from": [
+    1219.2,
+    0.0,
+    224.0
+   ],
+   "ids": [
+    "CamEast",
+    "CamServer"
+   ],
+   "kind": "camnet",
+   "to": [
+    -460.8,
+    460.8,
+    288.0
+   ]
+  }
+ ],
+ "pieces": [
+  {
+   "box": {
+    "max": [
+     512.0,
+     512.0,
+     320.0
+    ],
+    "min": [
+     -512.0,
+     -512.0,
+     0.0
+    ]
+   },
+   "id": "ObjectiveRoom",
+   "kind": "Room",
+   "name": "Objective room",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": "ServerRoom"
+  },
+  {
+   "box": {
+    "max": [
+     -528.0,
+     96.00000000000003,
+     256.0
+    ],
+    "min": [
+     -1296.0,
+     -96.00000000000003,
+     0.0
+    ]
+   },
+   "id": "WestCorridor",
+   "kind": "Corridor",
+   "name": "West corridor",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 90.0,
+   "zone": "SpyBase"
+  },
+  {
+   "box": {
+    "max": [
+     1296.0,
+     96.00000000000003,
+     256.0
+    ],
+    "min": [
+     528.0,
+     -96.00000000000003,
+     0.0
+    ]
+   },
+   "id": "EastCorridor",
+   "kind": "Corridor",
+   "name": "East corridor",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 90.0,
+   "zone": "MercBase"
+  },
+  {
+   "box": {
+    "max": [
+     -1312.0,
+     384.0,
+     256.0
+    ],
+    "min": [
+     -2080.0,
+     -384.0,
+     0.0
+    ]
+   },
+   "id": "SpySpawn",
+   "kind": "Room",
+   "name": "Spy spawn",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": "SpyBase"
+  },
+  {
+   "box": {
+    "max": [
+     2080.0,
+     384.0,
+     256.0
+    ],
+    "min": [
+     1312.0,
+     -384.0,
+     0.0
+    ]
+   },
+   "id": "MercSpawn",
+   "kind": "Room",
+   "name": "Merc spawn",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": "MercBase"
+  },
+  {
+   "box": {
+    "max": [
+     -1456.0,
+     912.0,
+     125.0
+    ],
+    "min": [
+     -1552.0,
+     400.0,
+     0.0
+    ]
+   },
+   "id": "SpyVent",
+   "kind": "Vent",
+   "name": "Vent from spy spawn",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": "SpyBase"
+  },
+  {
+   "box": {
+    "max": [
+     -208.0,
+     912.0,
+     125.0
+    ],
+    "min": [
+     -1552.0,
+     816.0,
+     0.0
+    ]
+   },
+   "id": "VentAlong",
+   "kind": "Vent",
+   "name": "Vent along",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 90.0,
+   "zone": "SpyBase"
+  },
+  {
+   "box": {
+    "max": [
+     -208.0,
+     912.0,
+     125.0
+    ],
+    "min": [
+     -304.0,
+     528.0,
+     0.0
+    ]
+   },
+   "id": "VentDrop",
+   "kind": "Vent",
+   "name": "Vent into objective room",
+   "space": true,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": "SpyBase"
+  },
+  {
+   "box": {
+    "max": [
+     -512.0,
+     96.0,
+     256.0
+    ],
+    "min": [
+     -528.0,
+     -96.0,
+     0.0
+    ]
+   },
+   "id": "WestCorridor_Portal",
+   "kind": "Doorway",
+   "name": "West corridor portal",
+   "space": false,
+   "storey": "Ground",
+   "yaw": 90.0,
+   "zone": ""
+  },
+  {
+   "box": {
+    "max": [
+     528.0,
+     96.0,
+     256.0
+    ],
+    "min": [
+     512.0,
+     -96.0,
+     0.0
+    ]
+   },
+   "id": "EastCorridor_Portal",
+   "kind": "Doorway",
+   "name": "East corridor portal",
+   "space": false,
+   "storey": "Ground",
+   "yaw": 90.0,
+   "zone": ""
+  },
+  {
+   "box": {
+    "max": [
+     -208.0,
+     528.0,
+     125.0
+    ],
+    "min": [
+     -304.0,
+     512.0,
+     0.0
+    ]
+   },
+   "id": "VentDrop_Portal",
+   "kind": "Doorway",
+   "name": "Vent into objective room portal",
+   "space": false,
+   "storey": "Ground",
+   "yaw": 0.0,
+   "zone": ""
+  }
+ ]
+}

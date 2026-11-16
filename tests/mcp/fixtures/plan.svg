@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- A two-storey plan as Inkscape saves it; one SVG unit is 8 Unreal units. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="400" height="300" viewBox="0 0 400 300" data-scale="8">
+  <title>Test plan</title>
+  <defs>
+    <symbol id="spy-start"><circle r="4"/></symbol>
+  </defs>
+  <g inkscape:groupmode="layer" inkscape:label="Ground floor" id="layer1" data-storey="0">
+    <rect id="west-room" class="room" x="0" y="0" width="100" height="100" style="fill:#eeeeee"/>
+    <text x="30" y="50"><tspan>Spy base</tspan></text>
+    <rect id="hall" data-kind="corridor" x="100" y="40" width="100" height="20"/>
+    <polygon id="server" points="200,0 300,0 300,40 260,40 260,100 200,100" data-name="Server room"/>
+    <rect class="pillar" x="20" y="20" width="10" height="10"/>
+    <circle class="spy" cx="20" cy="80" r="4"/>
+    <circle class="spy marker" cx="30" cy="80" r="4"/>
+    <use xlink:href="#spy-start" x="40" y="80"/>
+    <circle data-kind="terminal" cx="220" cy="20" r="3" data-name="Main server"/>
+    <line data-kind="camera" x1="95" y1="5" x2="85" y2="15"/>
+    <line data-kind="laser" x1="150" y1="40" x2="150" y2="60" data-h="48"/>
+    <rect id="link" data-kind="corridor" x="220" y="100" width="20" height="100"/>
+    <g transform="translate(200,200) scale(2)" class="rooms">
+      <rect id="annex" x="0" y="0" width="40" height="40"/>
+      <circle data-kind="merc" cx="10" cy="10" r="2"/>
+      <circle data-kind="merc" cx="20" cy="10" r="2"/>
+      <circle data-kind="merc" cx="30" cy="10" r="2" data-yaw="90"/>
+    </g>
+    <rect x="0" y="200" width="50" height="50" style="display: none"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Upper" id="layer2">
+    <rect data-kind="room" id="loft" x="0" y="0" width="100" height="60" data-height="256"/>
+    <path data-kind="vent" d="M 0 60 h 50 v 20 h -50 Z"/>
+    <path data-kind="ledge" d="m 10,10 80,0"/>
+    <circle data-kind="camnet" cx="90" cy="50" r="3" data-yaw="180"/>
+    <circle data-kind="light" cx="50" cy="30" r="20" data-prop-LightHue="40"/>
+  </g>
+</svg>

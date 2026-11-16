@@ -1,0 +1,127 @@
+versioninfo
+{
+	"editorversion" "400"
+	"editorbuild" "8864"
+	"mapversion" "3"
+	"formatversion" "100"
+	"prefab" "0"
+}
+world
+{
+	"id" "1"
+	"mapversion" "3"
+	"classname" "worldspawn"
+	"skyname" "sky_day01_01"
+	solid
+	{
+		"id" "2"
+		side
+		{
+			"id" "1"
+			"plane" "(-64 64 128) (64 64 128) (64 -64 128)"
+			"material" "DEV/DEV_MEASUREGENERIC01B"
+			"uaxis" "[1 0 0 0] 0.25"
+			"vaxis" "[0 -1 0 0] 0.25"
+			"rotation" "0"
+			"lightmapscale" "16"
+			"smoothing_groups" "0"
+		}
+		side
+		{
+			"id" "2"
+			"plane" "(-64 -64 0) (64 -64 0) (64 64 0)"
+			"material" "DEV/DEV_MEASUREGENERIC01B"
+		}
+		side
+		{
+			"id" "3"
+			"plane" "(-64 64 128) (-64 -64 128) (-64 -64 0)"
+			"material" "BRICK/BRICKWALL001A"
+		}
+		side
+		{
+			"id" "4"
+			"plane" "(64 64 0) (64 -64 0) (64 -64 128)"
+			"material" "BRICK/BRICKWALL001A"
+		}
+		side
+		{
+			"id" "5"
+			"plane" "(64 64 128) (-64 64 128) (-64 64 0)"
+			"material" "BRICK/BRICKWALL001A"
+		}
+		side
+		{
+			"id" "6"
+			"plane" "(64 -64 0) (-64 -64 0) (-64 -64 128)"
+			"material" "BRICK/BRICKWALL001A"
+			"dispinfo"
+			{
+				"power" "2"
+			}
+		}
+		editor
+		{
+			"color" "0 130 223"
+			"visgroupshown" "1"
+		}
+	}
+	solid
+	{
+		"id" "20"
+		side { "id" "21" "plane" "(-64 64 400) (64 64 400) (64 -64 400)" "material" "TOOLS/TOOLSCLIP" }
+		side { "id" "22" "plane" "(-64 -64 300) (64 -64 300) (64 64 300)" "material" "TOOLS/TOOLSCLIP" }
+		side { "id" "23" "plane" "(-64 64 400) (-64 -64 400) (-64 -64 300)" "material" "TOOLS/TOOLSCLIP" }
+		side { "id" "24" "plane" "(64 64 300) (64 -64 300) (64 -64 400)" "material" "TOOLS/TOOLSCLIP" }
+		side { "id" "25" "plane" "(64 64 400) (-64 64 400) (-64 64 300)" "material" "TOOLS/TOOLSCLIP" }
+		side { "id" "26" "plane" "(64 -64 300) (-64 -64 300) (-64 -64 400)" "material" "TOOLS/TOOLSCLIP" }
+	}
+}
+entity
+{
+	"id" "30"
+	"classname" "func_door"
+	"speed" "100"
+	solid
+	{
+		"id" "31"
+		side { "id" "32" "plane" "(100 20 100) (200 20 100) (200 -20 100)" "material" "METAL/METALDOOR001" }
+		side { "id" "33" "plane" "(100 -20 0) (200 -20 0) (200 20 0)" "material" "METAL/METALDOOR001" }
+		side { "id" "34" "plane" "(100 20 100) (100 -20 100) (100 -20 0)" "material" "METAL/METALDOOR001" }
+		side { "id" "35" "plane" "(200 20 0) (200 -20 0) (200 -20 100)" "material" "METAL/METALDOOR001" }
+		side { "id" "36" "plane" "(200 20 100) (100 20 100) (100 20 0)" "material" "METAL/METALDOOR001" }
+		side { "id" "37" "plane" "(200 -20 0) (100 -20 0) (100 -20 100)" "material" "METAL/METALDOOR001" }
+	}
+}
+entity
+{
+	"id" "40"
+	"classname" "info_player_terrorist"
+	"angles" "0 90 0"
+	"origin" "-32 0 0"
+}
+entity
+{
+	"id" "41"
+	"classname" "info_player_counterterrorist"
+	"angles" "0 270 0"
+	"origin" "32 0 0"
+}
+entity
+{
+	"id" "42"
+	"classname" "light"
+	"_light" "255 255 255 200"
+	"origin" "0 0 100"
+}
+entity
+{
+	"id" "43"
+	"classname" "prop_static"
+	"model" "models/props/crate.mdl"
+	"origin" "0 32 0"
+}
+cameras
+{
+	"activecamera" "-1"
+}

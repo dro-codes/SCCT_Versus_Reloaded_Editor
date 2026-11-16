@@ -1,0 +1,105 @@
+{
+  "format": "scct.level-spec",
+  "version": 1,
+  "map": {"name": "SECURE VAULT", "file": "SecuD"},
+  "profile": "release",
+  "geometry": {
+    "pieces": [
+      {"id": "Lobby", "kind": "Room", "size": [768, 768, 256], "at": [0, 0], "name": "Lobby"},
+      {"id": "Hall", "kind": "Room", "size": [256, 1024, 256], "name": "Security hall", "attach": {"to": "Lobby", "side": "north"}},
+      {"id": "Vault", "kind": "Room", "size": [1024, 768, 320], "name": "Vault", "attach": {"to": "Hall", "side": "north"}},
+      {"id": "Guardroom", "kind": "Room", "size": [512, 512, 256], "name": "Guard room", "attach": {"to": "Hall", "side": "east"}},
+      {"id": "Entrance", "kind": "Room", "size": [512, 512, 256], "name": "Entrance", "attach": {"to": "Lobby", "side": "south"}}
+    ],
+    "doorways": [
+      {"id": "HallDoorway", "between": ["Lobby", "Hall"], "size": [128, 192]},
+      {"id": "VaultDoorway", "between": ["Hall", "Vault"], "size": [192, 192]},
+      {"id": "GuardDoorway", "between": ["Hall", "Guardroom"], "size": [96, 192]},
+      {"id": "EntranceDoorway", "between": ["Lobby", "Entrance"], "size": [128, 192]}
+    ]
+  },
+  "zones": [
+    {"id": "FrontZone", "locationName": "Lobby", "spaces": ["Entrance", "Lobby"]},
+    {"id": "HallZone", "locationName": "Security hall", "spaces": ["Hall"]},
+    {"id": "VaultZone", "locationName": "Vault", "spaces": ["Vault"]},
+    {"id": "GuardZone", "locationName": "Guard room", "spaces": ["Guardroom"]}
+  ],
+  "spawns": {
+    "spy": {"in": "Entrance", "count": 4, "facing": {"toward": "Lobby"}},
+    "merc": {"in": "Guardroom", "count": 4, "facing": {"toward": "Hall"}}
+  },
+  "mechanisms": {
+    "doors": [
+      {"id": "VaultDoor", "mesh": "SecuD_STM.Doors.Vault192", "at": {"doorway": "VaultDoorway"}, "open": {"offset": [0, 0, 192]}, "moveTime": 2, "stayOpen": 5, "trigger": {"kind": "panel", "hackTime": 8, "usableBy": "spy"}},
+      {"id": "HallDoor", "mesh": "SecuD_STM.Doors.Door128", "at": {"doorway": "HallDoorway"}, "trigger": {"kind": "button", "usableBy": "both"}},
+      {"id": "GuardDoor", "mesh": "SecuD_STM.Doors.Door96", "at": {"doorway": "GuardDoorway"}, "open": {"yaw": 90}, "trigger": {"kind": "presence", "usableBy": "merc"}}
+    ],
+    "buttons": [
+      {"id": "VaultLightSwitch", "kind": "button", "at": {"in": "Vault", "u": -0.48, "v": -0.3, "h": "floor+100"}, "facing": 0, "targets": ["VaultLight"], "text": "Lights"}
+    ]
+  },
+  "gameplay": {
+    "modes": ["story", "diskhunt", "deathmatch"],
+    "story": {
+      "mission": {"id": "Mission", "name": "Vault job", "description": "Get into the vault", "descriptionDef": "Keep the spies out of the vault"},
+      "objectives": [
+        {"id": "VaultObjective", "name": "Vault", "description": "Hack the vault terminal or steal the drive", "descriptionDef": "Protect the vault", "visibilityZone": "VaultZone",
+         "triggers": [
+           {"id": "VaultTerminal", "kind": "terminal", "at": {"in": "Vault", "v": 0.3}, "dominationCaptureTime": 12},
+           {"id": "VaultDrive", "kind": "flag", "at": {"in": "Vault", "u": 0.3, "v": -0.2}, "resetTime": 30,
+            "dropZones": [{"id": "EntranceDrop", "at": {"in": "Entrance", "u": -0.3}}, {"id": "LobbyDrop", "at": {"in": "Lobby", "u": -0.4, "v": -0.4}}]}
+         ]},
+        {"id": "HallServers", "name": "Hall servers", "triggers": [{"id": "ServerBomb", "kind": "bomb", "at": {"in": "Hall", "v": 0.4}, "captureTime": 40}]}
+      ]
+    },
+    "diskhunt": {"disks": {"in": ["Lobby", "Hall", "Vault"], "count": 9}, "resetTime": 30, "disableSecurity": true},
+    "deathmatch": {"disableSecurity": true}
+  },
+  "security": {
+    "devices": [
+      {"id": "HallLaserLow", "kind": "laser", "in": "Hall", "alarm": "HallAlarm", "detected": "spy"},
+      {"id": "HallLaserHigh", "kind": "laser", "at": {"in": "Hall", "u": -0.5, "v": 0.2, "h": "floor+120"}, "facing": 0, "length": 248, "alarm": "HallAlarm", "hideLaser": true},
+      {"id": "VaultCamera", "kind": "camera", "at": {"in": "Vault", "u": -0.45, "v": 0.45, "h": "ceiling-24"}, "facing": {"toward": "VaultTerminal"}, "coneAngle": 40, "maxDistance": 1200, "patrolAngle": 90, "rotationVelocity": 5000, "detectionDelay": 0.5, "alarm": "VaultAlarm"},
+      {"id": "VaultMotion", "kind": "motion", "box": {"in": "Vault", "height": 180}, "alarm": "VaultAlarm", "detected": "spy", "detectionDelay": 0.3},
+      {"id": "LobbyPresence", "kind": "presence", "at": {"in": "Lobby", "v": 0.3}, "radius": 96, "height": 64, "alarm": "LobbyAlarm", "detected": "spy"},
+      {"id": "HallMine", "kind": "mine", "at": {"in": "Hall", "v": -0.3}, "alarm": "HallAlarm"}
+    ],
+    "alarms": [
+      {"id": "HallAlarm", "name": "Hall alarm", "description": "Lasers tripped in the security hall", "duration": 30, "priority": 5, "lockMovers": [{"mover": "VaultDoor"}]},
+      {"id": "VaultAlarm", "name": "Vault alarm", "description": "Intruders in the vault", "duration": 45, "priority": 5, "outputs": ["VaultLight"], "lockMovers": [{"mover": "VaultDoor"}], "lockObjectives": ["VaultObjective"]},
+      {"id": "LobbyAlarm", "name": "Lobby sensor", "description": "Movement in the lobby", "duration": 10, "priority": 1, "outputs": ["LobbyLight"]}
+    ],
+    "camnet": [
+      {"id": "CamLobby", "camName": "Lobby", "at": {"in": "Lobby", "u": 0.45, "v": -0.45, "h": "ceiling-32"}, "first": true, "constraints": {"pitch": [-60, 0], "yaw": [90, 180]}},
+      {"id": "CamHall", "camName": "Security hall", "at": {"in": "Hall", "v": -0.45, "h": "ceiling-32"}, "constraints": {"pitch": [-45, 0], "yaw": [45, 135]}},
+      {"id": "CamVault", "camName": "Vault", "at": {"in": "Vault", "u": 0.45, "v": 0.45, "h": "ceiling-32"}, "constraints": {"pitch": [-60, 0], "yaw": [-180, -90]}},
+      {"id": "CamGuard", "camName": "Guard room", "at": {"in": "Guardroom", "u": 0.4, "v": 0.4, "h": "ceiling-32"}}
+    ]
+  },
+  "environment": {
+    "lights": [
+      {"id": "VaultLight", "preset": "ceiling", "in": "Vault", "switchable": true, "brightness": 80, "radius": 600},
+      {"id": "LobbyLight", "preset": "spot", "in": "Lobby", "switchable": true, "hue": 0, "saturation": 0},
+      {"id": "HallLight", "preset": "echelon-spot", "at": {"in": "Hall", "h": "ceiling-16"}, "radius": 700}
+    ],
+    "volumes": [{"id": "VaultName", "class": "Volume", "box": {"in": "Vault"}, "locationName": "Vault floor", "priority": 1}],
+    "ingredients": [
+      {"kind": "ammo", "in": "Guardroom"},
+      {"kind": "infirmary", "in": "Guardroom"},
+      {"kind": "infirmary", "in": "Entrance"},
+      {"kind": "extinguisher", "at": {"in": "Hall", "u": 0.45, "v": -0.1}}
+    ]
+  },
+  "settings": {
+    "mapName": "SECURE VAULT",
+    "briefSpy": "Lasers, cameras and a motion sensor guard the vault.",
+    "briefMerc": "The vault's security is yours.",
+    "legend": "VAULT|Lobby, hall and vault",
+    "modes": [
+      {"mode": "story", "respawn": 10, "timeLimit": 12},
+      {"mode": "diskhunt", "respawn": 8, "timeLimit": 10, "scoreLimit": 6, "handicap": 9, "numDisksMax": 9},
+      {"mode": "deathmatch", "respawn": 6, "timeLimit": 10}
+    ]
+  },
+  "provenance": {"source": "Hand-written example", "notes": ["The bomb target is never locked by an alarm.", "Door meshes are placeholders in the map's own SecuD_STM package."]}
+}

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scct://schema/stages",
+  "title": "scct.stages version 2 (zones / sectors)",
+  "description": "A zones plan (Reloaded.Editor/StageModel.h; Map Design Tools > Zones..., bridge ops stage.read, stage.preview and stage.apply). The map's top SMission (GM_Multi, bChained True) holds one zone mission per zone in match order; each zone mission (Tag Zone<N>Mission, GM_Undefined, bChained False) holds that zone's SObjectives, all live when the zone starts, and its MinimumObjectives is how many end the zone. A zone's completion fires one SMagicEvent tagged Zone<N>_Complete whose group holds the actions. Objectives are named by actor path, so a plan belongs to the map it came from. Every objective in the map must be in exactly one zone. Checks this schema cannot express: an objective in two zones, a zone's required above its objective count, the plan's required above all objectives.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "zones"],
+  "properties": {
+    "format": {"const": "scct.stages"},
+    "version": {"const": 2, "description": "Version 1 plans (the earlier counting-event window) are refused; rebuild them from the map."},
+    "required": {"type": "integer", "minimum": 0, "description": "Objectives the spies need to win the match (the top mission's MinimumObjectives); 0 means every zone's threshold added up."},
+    "mission": {"type": "string", "description": "Path of the top mission (as read back from the map)."},
+    "zones": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/zone"}}
+  },
+  "$defs": {
+    "line": {"type": "string", "maxLength": 200, "pattern": "^[^\\r\\n]*$", "description": "Up to 200 characters on one line."},
+    "delay": {"type": "string", "pattern": "^\\+?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$", "description": "Seconds after the zone completes, 0-86400, as a string."},
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objectives", "actions"],
+      "properties": {
+        "name": {"$ref": "#/$defs/line", "description": "The zone mission's ObjectiveName (default \"Zone <N>\")."},
+        "brief": {"$ref": "#/$defs/line", "description": "Spy briefing: the zone mission's Description (default \"Complete the objectives\")."},
+        "briefDefend": {"$ref": "#/$defs/line", "description": "Merc briefing: DescriptionDEF (default \"Defend the objectives\")."},
+        "objectives": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "SObjective actor paths; apply refuses an empty zone."},
+        "required": {"type": "integer", "minimum": 0, "description": "How many of the zone's objectives end it (MinimumObjectives); 0 means all of them."},
+        "mission": {"type": "string", "description": "Path of an existing SMission to use as this zone's mission (otherwise one tagged Zone<N>Mission, or a new one)."},
+        "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {"kind": {"enum": ["open", "light", "sound", "announce", "trigger"]}},
+      "oneOf": [
+        {
+          "description": "Open a door or lift (trigger a mover); with hold (default true) a timed door is switched to TriggerToggle so it stays open.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "target"],
+          "properties": {"kind": {"const": "open"}, "target": {"type": "string", "minLength": 1}, "hold": {"type": "boolean"}, "delay": {"$ref": "#/$defs/delay"}}
+        },
+        {
+          "description": "Switch an STriggerLight.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "target"],
+          "properties": {"kind": {"const": "light"}, "target": {"type": "string", "minLength": 1}, "delay": {"$ref": "#/$defs/delay"}}
+        },
+        {
+          "description": "Fire an existing sound trigger (target), or make a SoundTrigger Zone<N>_Sound<i> for a loaded sound asset.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "anyOf": [{"required": ["sound"]}, {"required": ["target"]}],
+          "properties": {"kind": {"const": "sound"}, "sound": {"type": "string", "pattern": "^Sound'[^']+'$"}, "target": {"type": "string", "minLength": 1}, "delay": {"$ref": "#/$defs/delay"}}
+        },
+        {
+          "description": "Show a banner on both HUDs: an SAlarm Zone<N>_Announce that locks and triggers nothing.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {"const": "announce"},
+            "title": {"$ref": "#/$defs/line"},
+            "merc": {"$ref": "#/$defs/line"},
+            "spy": {"$ref": "#/$defs/line"},
+            "seconds": {"type": "string", "pattern": "^\\+?[0-9]+(\\.0*)?$", "description": "Whole seconds 1-3600 (default \"8\")."},
+            "delay": {"$ref": "#/$defs/delay"}
+          }
+        },
+        {
+          "description": "Trigger (or untrigger) any other actor by path, or any Tag.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "anyOf": [{"required": ["target"]}, {"required": ["tag"]}],
+          "properties": {
+            "kind": {"const": "trigger"},
+            "target": {"type": "string", "minLength": 1},
+            "tag": {"type": "string", "pattern": "^[A-Za-z0-9_]{1,63}$"},
+            "untrigger": {"type": "boolean"},
+            "delay": {"$ref": "#/$defs/delay"}
+          }
+        }
+      ]
+    }
+  }
+}

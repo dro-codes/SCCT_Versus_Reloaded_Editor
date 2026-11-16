@@ -1,0 +1,17 @@
+// A two-storey Versus test plan: spy base west, merc base east, a server
+// room between them reached through doors, and a vent loft upstairs.
+--- storey 0 ---
+#########################
+#S.S.....#......#....M.M#
+#........D..O...D.......#
+#S.S.....#..K...#....M.M#
+####.#####......#####.###
+#...C....#..B..F#...X...#
+#.L......D......D..A.H..#
+#........#..Z...#.......#
+#########################
+--- storey 1 ---
+#########################
+#..N.....VVVVVVV.....N..#
+#.................L.....#
+#########################

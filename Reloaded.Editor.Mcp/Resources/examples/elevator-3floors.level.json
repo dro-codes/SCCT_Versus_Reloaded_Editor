@@ -1,0 +1,101 @@
+{
+  "format": "scct.level-spec",
+  "version": 1,
+  "map": {"name": "TOWER", "file": "ToweD"},
+  "profile": "release",
+  "storeys": [{"id": "Ground", "z": 0, "name": "Ground floor"}, {"id": "First", "z": 384, "name": "Offices"}, {"id": "Top", "z": 768, "name": "Roof floor"}],
+  "geometry": {
+    "pieces": [
+      {"id": "Lobby", "kind": "Room", "size": [1024, 768, 288], "at": [0, 0], "storey": "Ground", "name": "Lobby"},
+      {"id": "Office", "kind": "Room", "size": [1024, 768, 288], "at": [0, 0], "storey": "First", "name": "Offices"},
+      {"id": "RoofFloor", "kind": "Room", "size": [1024, 768, 288], "at": [0, 0], "storey": "Top", "name": "Roof floor"},
+      {"id": "Shaft", "kind": "Room", "size": [256, 256, 1056], "at": [672, 0], "storey": "Ground", "name": "Lift shaft"}
+    ],
+    "doorways": [
+      {"id": "LobbyLiftDoor", "between": ["Lobby", "Shaft"], "size": [160, 192]},
+      {"id": "OfficeLiftDoor", "between": ["Office", "Shaft"], "size": [160, 192]},
+      {"id": "RoofLiftDoor", "between": ["RoofFloor", "Shaft"], "size": [160, 192]}
+    ],
+    "vertical": [
+      {"id": "LobbyStairs", "kind": "stairs", "from": "Ground", "to": "First", "at": {"in": "Lobby", "u": -0.35}},
+      {"id": "ServiceLift", "kind": "lift", "from": "First", "to": "Top", "at": {"in": "Office", "u": 0.25, "v": -0.3}}
+    ]
+  },
+  "zones": [
+    {"id": "GroundZone", "locationName": "Lobby", "spaces": ["Lobby"]},
+    {"id": "OfficeZone", "locationName": "Offices", "spaces": ["Office"]},
+    {"id": "RoofZone", "locationName": "Roof floor", "spaces": ["RoofFloor"]},
+    {"id": "ShaftZone", "locationName": "Lift", "spaces": ["Shaft"]}
+  ],
+  "spawns": {
+    "spy": {"in": "Lobby", "count": 4, "facing": {"toward": "Shaft"}},
+    "merc": {"in": "RoofFloor", "count": 4, "facing": {"toward": "Shaft"}}
+  },
+  "mechanisms": {
+    "lifts": [{"id": "MainLift", "shaft": "Shaft", "storeys": ["Ground", "First", "Top"], "start": "Ground", "mesh": "ToweD_STM.Lift.Car256", "moveTime": 3,
+               "doorMesh": "ToweD_STM.Lift.Door160", "doorOpen": {"offset": [0, 0, 192]}, "doorMoveTime": 1}]
+  },
+  "gameplay": {
+    "modes": ["story", "diskhunt", "deathmatch"],
+    "story": {
+      "mission": {"id": "Mission", "name": "Tower", "description": "Reach the roof floor uplink", "descriptionDef": "Defend the uplink"},
+      "objectives": [{"id": "Uplink", "name": "Uplink", "triggers": [{"id": "UplinkTerminal", "kind": "terminal", "at": {"in": "RoofFloor", "u": -0.3, "v": 0.3}, "dominationCaptureTime": 12}]}]
+    },
+    "diskhunt": {"disks": {"in": ["Lobby", "Office", "RoofFloor"], "count": 9}, "resetTime": 30},
+    "deathmatch": {"disableSecurity": true}
+  },
+  "security": {
+    "devices": [{"id": "RoofSensor", "kind": "presence", "at": {"in": "RoofFloor", "u": -0.3, "v": 0.1}, "radius": 128, "detected": "spy"}],
+    "camnet": [
+      {"id": "CamLobby", "camName": "Lobby", "at": {"in": "Lobby", "u": -0.45, "v": 0.45, "h": "ceiling-32"}, "first": true},
+      {"id": "CamOffice", "camName": "Offices", "at": {"in": "Office", "u": -0.45, "v": 0.45, "h": "ceiling-32"}},
+      {"id": "CamRoof", "camName": "Roof floor", "at": {"in": "RoofFloor", "u": -0.45, "v": -0.45, "h": "ceiling-32"}}
+    ]
+  },
+  "events": {
+    "magic": [
+      {"id": "UplinkWarning", "at": {"in": "RoofFloor", "u": 0.4, "v": 0.4, "h": "floor+64"},
+       "document": {"format": "scct.smagic-event", "version": 1, "class": "SBase.SMagicEvent",
+                    "properties": {"Groups": [{"EventGroup": [], "Repeat": "0", "Sequence": "False", "SequenceIndex": "0"}]}}}
+    ],
+    "messages": [{"id": "UplinkMessage", "spy": "You are near the uplink", "merc": "Spies on the roof floor", "time": 5, "priority": 1, "at": {"in": "RoofFloor", "u": 0.4, "v": 0.3, "h": "floor+64"}}],
+    "links": [
+      {"from": "RoofSensor", "to": "UplinkWarning"},
+      {"from": "UplinkWarning", "to": "UplinkMessage", "delay": 1},
+      {"from": "UplinkWarning", "to": "RoofLight", "delay": 0.5}
+    ],
+    "level": [{"event": "UplinkMessage", "sendAtTime": -120}],
+    "triggerLights": [{"light": "RoofLight", "object": "RoofConsole", "initiallyOn": true}]
+  },
+  "environment": {
+    "lights": [
+      {"id": "RoofLight", "preset": "ceiling", "in": "RoofFloor", "switchable": true},
+      {"id": "OfficeSpot", "preset": "spot", "at": {"in": "Office", "u": 0.3, "v": 0.3, "h": "ceiling-16"}, "radius": 500}
+    ],
+    "sounds": [{"id": "LobbyHum", "class": "AmbientSound", "sound": "ToweD_Snd.Ambient.Hum", "at": {"in": "Lobby", "h": "ceiling-32"}, "radius": 600, "volume": 128}],
+    "volumes": [{"id": "OfficeName", "class": "Volume", "box": {"in": "Office"}, "locationName": "Open-plan offices", "priority": 1}],
+    "objects": [{"id": "RoofConsole", "mesh": "ToweD_STM.Props.Console", "at": {"in": "RoofFloor", "u": 0.3, "v": 0.45}, "yaw": 270, "damageable": true, "hitPoints": 50}],
+    "ingredients": [
+      {"kind": "ammo", "in": "RoofFloor"},
+      {"kind": "infirmary", "in": "RoofFloor"},
+      {"kind": "infirmary", "in": "Lobby"}
+    ]
+  },
+  "ges": [
+    {"kind": "pipe", "points": [{"in": "Office", "u": -0.48, "v": 0.48, "h": 0}, {"in": "Office", "u": -0.48, "v": 0.48, "h": 256}, {"in": "Office", "u": -0.43, "v": 0.48, "h": 0}]}
+  ],
+  "geTriggers": [{"id": "OfficeGE", "toggle": true, "geMask": 2, "at": {"in": "Office", "u": -0.4, "v": 0.4}}],
+  "settings": {
+    "mapName": "TOWER",
+    "briefSpy": "Climb the tower to the uplink.",
+    "briefMerc": "Hold the roof floor.",
+    "legend": "TOWER|Three floors and a lift",
+    "modes": [
+      {"mode": "story", "respawn": 10, "timeLimit": 12},
+      {"mode": "diskhunt", "respawn": 8, "timeLimit": 10, "scoreLimit": 6, "handicap": 9, "numDisksMax": 9},
+      {"mode": "deathmatch", "respawn": 6, "timeLimit": 10}
+    ]
+  },
+  "level": {"deathPawnHeight": -512, "motionTracking": "standard", "geActivationMask": 1},
+  "provenance": {"source": "Hand-written example", "notes": ["MainLift is an SLift with one key per storey, a door and a call switch on each storey's opening onto the shaft, a switch and an SLiftDoor in the car; ServiceLift is a design.lift platform.", "Mesh and sound paths are placeholders in the map's own ToweD_STM and ToweD_Snd packages."]}
+}

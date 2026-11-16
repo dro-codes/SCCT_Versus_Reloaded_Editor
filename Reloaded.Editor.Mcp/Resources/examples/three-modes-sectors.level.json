@@ -1,0 +1,132 @@
+{
+  "format": "scct.level-spec",
+  "version": 1,
+  "map": {"name": "HARBOUR SECTORS", "file": "HarbD"},
+  "profile": "release",
+  "storeys": [{"id": "Quay", "z": 0}],
+  "geometry": {
+    "pieces": [
+      {"id": "Docks", "kind": "Room", "size": [768, 768, 288], "at": [-1232, 0], "storey": "Quay", "name": "Docks"},
+      {"id": "EntryCorridor", "kind": "Corridor", "size": [192, 432, 256], "name": "Entry corridor", "attach": {"to": "Docks", "side": "west"}},
+      {"id": "SpyEntry", "kind": "Room", "size": [768, 768, 256], "name": "Spy entry", "attach": {"to": "EntryCorridor", "side": "west"}},
+      {"id": "Warehouse", "kind": "Room", "size": [768, 768, 288], "name": "Warehouse", "attach": {"to": "Docks", "side": "east"}},
+      {"id": "Control", "kind": "Room", "size": [768, 768, 288], "name": "Control room", "attach": {"to": "Warehouse", "side": "east"}},
+      {"id": "BarracksCorridor", "kind": "Corridor", "size": [192, 432, 256], "name": "Barracks corridor", "attach": {"to": "Warehouse", "side": "north"}},
+      {"id": "Barracks", "kind": "Room", "size": [768, 768, 256], "name": "Merc barracks", "attach": {"to": "BarracksCorridor", "side": "north"}}
+    ],
+    "doorways": [
+      {"id": "DocksGate", "between": ["Docks", "Warehouse"], "size": [192, 192]},
+      {"id": "ControlGate", "between": ["Warehouse", "Control"], "size": [192, 192]},
+      {"id": "DocksHatch", "between": ["Docks", "Warehouse"], "offset": 256, "size": [96, 192]},
+      {"id": "ControlHatch", "between": ["Warehouse", "Control"], "offset": 256, "size": [96, 192]}
+    ]
+  },
+  "zones": [
+    {"id": "EntryZone", "locationName": "Entry", "spaces": ["SpyEntry", "EntryCorridor"]},
+    {"id": "DocksZone", "locationName": "Docks", "spaces": ["Docks"]},
+    {"id": "WarehouseZone", "locationName": "Warehouse", "spaces": ["Warehouse"]},
+    {"id": "ControlZone", "locationName": "Control room", "spaces": ["Control"]},
+    {"id": "BarracksZone", "locationName": "Barracks", "spaces": ["Barracks", "BarracksCorridor"]}
+  ],
+  "spawns": {
+    "spy": {"in": "SpyEntry", "count": 4, "facing": {"toward": "Docks"}},
+    "merc": {"in": "Barracks", "count": 4, "facing": {"toward": "Warehouse"}},
+    "toggles": [
+      {"id": "SpyForward1", "team": "spy", "at": {"in": "Docks", "u": -0.35, "v": -0.35}, "enabledBy": "SpyForward", "facing": {"toward": "Warehouse"}},
+      {"id": "SpyForward2", "team": "spy", "at": {"in": "Docks", "u": -0.35, "v": -0.15}, "enabledBy": "SpyForward", "facing": {"toward": "Warehouse"}},
+      {"id": "SpyForward3", "team": "spy", "at": {"in": "Docks", "u": -0.35, "v": 0.05}, "enabledBy": "SpyForward", "facing": {"toward": "Warehouse"}}
+    ]
+  },
+  "mechanisms": {
+    "doors": [
+      {"id": "DocksShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "DocksGate"}, "moveTime": 1.5, "trigger": {"kind": "event"}},
+      {"id": "ControlShutter", "mesh": "HarbD_STM.Doors.Shutter192", "at": {"doorway": "ControlGate"}, "moveTime": 1.5, "trigger": {"kind": "event"}},
+      {"id": "DocksHatch_Door", "mesh": "HarbD_STM.Doors.Hatch96", "at": {"doorway": "DocksHatch"}, "stayOpen": 3, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 96}},
+      {"id": "ControlHatch_Door", "mesh": "HarbD_STM.Doors.Hatch96", "at": {"doorway": "ControlHatch"}, "stayOpen": 3, "trigger": {"kind": "presence", "usableBy": "merc", "radius": 96}}
+    ]
+  },
+  "gameplay": {
+    "modes": ["story", "diskhunt", "deathmatch"],
+    "story": {
+      "mission": {"id": "Mission", "name": "Harbour", "description": "Work through the harbour sector by sector", "descriptionDef": "Hold each sector of the harbour"},
+      "objectives": [
+        {"id": "CraneControls", "name": "Crane controls", "triggers": [{"id": "CraneTerminal", "kind": "terminal", "at": {"in": "Docks", "u": 0.3, "v": 0.3}, "dominationCaptureTime": 12}]},
+        {"id": "CargoManifest", "name": "Cargo manifest", "triggers": [{"id": "ManifestDrive", "kind": "flag", "at": {"in": "Warehouse", "u": 0.3, "v": 0.3}, "resetTime": 30, "dropZones": [{"id": "EntryDrop", "at": {"in": "SpyEntry", "u": -0.3}}]}]},
+        {"id": "FuelTanks", "name": "Fuel tanks", "triggers": [{"id": "FuelBomb", "kind": "bomb", "at": {"in": "Warehouse", "u": -0.3, "v": -0.3}, "captureTime": 45}]},
+        {"id": "Mainframe", "name": "Mainframe", "visibilityZone": "ControlZone", "triggers": [{"id": "MainframeTerminal", "kind": "terminal", "at": {"in": "Control", "v": 0.3}, "dominationCaptureTime": 15}]}
+      ],
+      "sectors": [
+        {"id": "SectorDocks", "name": "Docks", "brief": "Hack the crane controls", "briefDefend": "Protect the crane controls", "objectives": ["CraneControls"],
+         "actions": [
+           {"kind": "open", "target": "DocksShutter", "hold": true},
+           {"kind": "announce", "title": "Warehouse open", "merc": "The spies are into the warehouse", "spy": "The warehouse is open", "seconds": 6},
+           {"kind": "trigger", "tag": "SpyForward", "delay": 1}
+         ]},
+        {"id": "SectorWarehouse", "name": "Warehouse", "brief": "Steal the manifest or blow the fuel tanks", "briefDefend": "Protect the warehouse", "objectives": ["CargoManifest", "FuelTanks"], "required": 1,
+         "actions": [
+           {"kind": "open", "target": "ControlShutter", "hold": true},
+           {"kind": "announce", "title": "Control room open", "merc": "Fall back to the control room", "spy": "The control room is open", "seconds": 6}
+         ]},
+        {"id": "SectorControl", "name": "Control room", "brief": "Hack the mainframe", "briefDefend": "Protect the mainframe", "objectives": ["Mainframe"]}
+      ]
+    },
+    "diskhunt": {
+      "disks": [
+        {"id": "Disk1", "at": {"in": "Docks", "u": -0.2, "v": 0.35}},
+        {"id": "Disk2", "at": {"in": "Docks", "u": 0.35, "v": -0.2}},
+        {"id": "Disk3", "at": {"in": "Docks", "u": 0.0, "v": 0.0}},
+        {"id": "Disk4", "at": {"in": "Warehouse", "u": -0.35, "v": 0.2}},
+        {"id": "Disk5", "at": {"in": "Warehouse", "u": 0.2, "v": -0.35}},
+        {"id": "Disk6", "at": {"in": "Warehouse", "u": 0.0, "v": 0.0}},
+        {"id": "Disk7", "at": {"in": "Control", "u": -0.3, "v": -0.3}},
+        {"id": "Disk8", "at": {"in": "Control", "u": 0.3, "v": -0.3}},
+        {"id": "Disk9", "at": {"in": "Control", "u": 0.0, "v": 0.0}}
+      ],
+      "resetTime": 30,
+      "disableSecurity": true,
+      "mission": {"id": "DiskHuntMission"}
+    },
+    "deathmatch": {"disableSecurity": true, "mission": {"id": "DeathmatchMission"}},
+    "playerCounts": [{"objective": "FuelTanks", "min": 4}],
+    "targets": {"mission": "Mission", "sizes": [2, 3, 3, 3, 3, 3, 3, 3]}
+  },
+  "security": {
+    "devices": [
+      {"id": "WarehouseCamera", "kind": "camera", "at": {"in": "Warehouse", "u": -0.45, "v": 0.45, "h": "ceiling-24"}, "facing": {"toward": "ManifestDrive"}, "coneAngle": 40, "maxDistance": 1200, "patrolAngle": 90, "alarm": "WarehouseAlarm"},
+      {"id": "DocksLaser", "kind": "laser", "in": "Docks", "alarm": "DocksAlarm", "detected": "spy"}
+    ],
+    "alarms": [
+      {"id": "WarehouseAlarm", "name": "Warehouse alarm", "description": "Spies seen in the warehouse", "duration": 30, "priority": 5, "lockMovers": [{"mover": "ControlShutter"}], "lockObjectives": ["CargoManifest"]},
+      {"id": "DocksAlarm", "name": "Docks alarm", "description": "Laser tripped on the docks", "duration": 20, "priority": 3, "outputs": ["DocksLight"]}
+    ],
+    "camnet": [
+      {"id": "CamDocks", "camName": "Docks", "at": {"in": "Docks", "u": -0.45, "v": -0.45, "h": "ceiling-32"}, "first": true},
+      {"id": "CamWarehouse", "camName": "Warehouse", "at": {"in": "Warehouse", "u": 0.45, "v": -0.45, "h": "ceiling-32"}},
+      {"id": "CamControl", "camName": "Control room", "at": {"in": "Control", "u": 0.45, "v": 0.45, "h": "ceiling-32"}}
+    ]
+  },
+  "environment": {
+    "lights": [
+      {"id": "DocksLight", "preset": "ceiling", "in": "Docks", "switchable": true, "brightness": 72},
+      {"id": "ControlSpot", "preset": "echelon-spot", "at": {"in": "Control", "h": "ceiling-16"}, "radius": 900}
+    ],
+    "ingredients": [
+      {"kind": "ammo", "in": "Barracks"},
+      {"kind": "infirmary", "in": "Barracks"},
+      {"kind": "infirmary", "in": "SpyEntry"}
+    ]
+  },
+  "settings": {
+    "mapName": "HARBOUR SECTORS",
+    "briefSpy": "Fight through the docks, the warehouse and the control room.",
+    "briefMerc": "Hold every sector of the harbour.",
+    "legend": "HARBOUR|Three sectors in a row",
+    "legendInBrief": "1. Docks|2. Warehouse|3. Control room",
+    "modes": [
+      {"mode": "story", "respawn": 10, "timeLimit": 15},
+      {"mode": "diskhunt", "respawn": 8, "timeLimit": 10, "scoreLimit": 6, "handicap": 9, "numDisksMax": 9},
+      {"mode": "deathmatch", "respawn": 6, "timeLimit": 10}
+    ]
+  },
+  "provenance": {"source": "Hand-written example", "notes": ["Sector missions follow the Zones window: a chained GM_Multi mission holding one GM_Undefined mission per sector.", "Each shutter opens only from its sector (trigger kind event), so held open it stays open; a merc presence trigger on it would toggle it shut again. The mercs pass through the hatches beside the shutters.", "Door meshes are placeholders in the map's own HarbD_STM package; import real ones first."]}
+}

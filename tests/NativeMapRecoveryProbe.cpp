@@ -1446,7 +1446,8 @@ void RunTest() {
             GetPrivateProfileIntA("test", "brush_grid_snap_only", 0, configuration.c_str()) != 0,
             GetPrivateProfileIntA("test", "character_preview_only", 0, configuration.c_str()) != 0,
             GetPrivateProfileIntA("test", "stair_smooth_only", 0, configuration.c_str()) != 0,
-            GetPrivateProfileIntA("test", "optimise_only", 0, configuration.c_str()) != 0);
+            GetPrivateProfileIntA("test", "optimise_only", 0, configuration.c_str()) != 0,
+            GetPrivateProfileIntA("test", "mcp_bridge_only", 0, configuration.c_str()) != 0);
         return;
     }
     using RecoverFn = int(__cdecl*)(const char*, const char*, char*, unsigned int);

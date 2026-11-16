@@ -1,6 +1,8 @@
 // Included by NativeMapRecoveryProbe after its existing fixture helpers.
 #include "../Reloaded.Editor/Include/nlohmann/json.hpp"
+#include "mcp/McpPipeClient.h"
 #include <stdexcept>
+#include <functional>
 #include <map>
 #include <set>
 #include <filesystem>
@@ -271,8 +273,48 @@ void Screenshot(HWND window,const std::filesystem::path& path)
     std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<char*>(&header),sizeof(header));out.write(reinterpret_cast<char*>(&info.bmiHeader),sizeof(info.bmiHeader));out.write(pixels.data(),pixels.size());
     DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(window,screen);
 }
+// MCP bridge section: the windows its bridge client closes, and the safety
+// nets that close them when it could not, so a failed check cannot leave the
+// editor waiting on a window nobody answers.
+const wchar_t* const kMcpProbeBox=L"RE+ MCP probe: a modal dialog";
+const wchar_t* const kMcpReviewClass=L"ReloadedMapAuthoringPreview";
+const wchar_t* const kMcpReviewTitle=L"Approve a change from the MCP client";
+int mcpReviewTicks=0;
+void CALLBACK CloseMcpProbeBox(HWND,UINT,UINT_PTR,DWORD)
+{
+    if(HWND box=McpPipe::OwnWindow(L"#32770",kMcpProbeBox))PostMessageW(box,WM_COMMAND,IDOK,0);
 }
-void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=false, bool snapOnly=false, bool charactersOnly=false, bool stairsOnly=false, bool optimiseOnly=false)
+void CALLBACK CancelStuckMcpReview(HWND,UINT,UINT_PTR,DWORD)
+{
+    HWND review=McpPipe::OwnWindow(kMcpReviewClass,kMcpReviewTitle);
+    if(!review){mcpReviewTicks=0;return;}
+    if(++mcpReviewTicks>90)PostMessageW(review,WM_COMMAND,MAKEWPARAM(IDCANCEL,BN_CLICKED),0);
+}
+// A PNG's size from its IHDR; false when the bytes are no PNG.
+bool PngSize(const std::string& png,int& width,int& height)
+{
+    static const unsigned char signature[8]={0x89,'P','N','G','\r','\n',0x1a,'\n'};
+    if(png.size()<24 || memcmp(png.data(),signature,8) || png.compare(12,4,"IHDR"))return false;
+    auto word=[&](size_t at){uint32_t v=0;for(size_t i=0;i<4;++i)v=(v<<8)|static_cast<unsigned char>(png[at+i]);return v;};
+    width=static_cast<int>(word(16));height=static_cast<int>(word(20));
+    return width>0 && height>0;
+}
+// The title Undo History shows for the newest step Undo would take back
+// (UTransBuffer at UEditorEngine+0x148: FTransaction records of 0x28 bytes at
+// +0x28, Num +0x2c, UndoCount +0x34; the title FString at +0x14).
+std::string NewestUndoTitle()
+{
+    auto editor=*reinterpret_cast<unsigned char**>(kEditor);
+    auto trans=editor?*reinterpret_cast<unsigned char**>(editor+0x148):nullptr;
+    if(!trans)return {};
+    auto data=*reinterpret_cast<unsigned char**>(trans+0x28);
+    const int count=*reinterpret_cast<int*>(trans+0x2c),undone=*reinterpret_cast<int*>(trans+0x34);
+    if(!data || undone<0 || count-undone<1)return {};
+    auto title=*reinterpret_cast<const char**>(data+(count-1-undone)*0x28+0x14);
+    return title?title:"";
+}
+}
+void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=false, bool snapOnly=false, bool charactersOnly=false, bool stairsOnly=false, bool optimiseOnly=false, bool mcpOnly=false)
 {
     using J=nlohmann::json;
     try
@@ -636,6 +678,433 @@ void RunWorkflowTests(HMODULE editorDll, const char* destination, bool restart=f
             }
         };
         if(optimiseOnly){optimiseAssets();finish("Optimise Map Assets");return;}
+        // MCP bridge (tests/McpBridgeNativeNotes.md): the probe is the client
+        // Reloaded.Editor.Mcp.exe would be, on the editor's own pipe, working
+        // from a thread of its own while this, the frame's thread, runs the
+        // calls. It starts from a new map, so it needs no fixture.
+        auto mcpBridge=[&]()
+        {
+            namespace B=Mcp::Bridge;
+            constexpr UINT enableServer=41460,requireApproval=41461,disconnectClient=41463; // McpBridge::kEnable, kRequireApproval, kDisconnect
+            const auto ini=(directory/"Reloaded_Editor.ini").string();
+            auto setting=[&](const char* key){return GetPrivateProfileIntA("Mcp",key,0,ini.c_str())!=0;};
+            auto lower=[](std::string text){for(auto& c:text)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));return text;};
+            auto pick=[](const J& value,const char* pointer){const J::json_pointer at(pointer);return value.contains(at)?value.at(at):J();};
+            const DWORD pid=GetCurrentProcessId();
+            const bool enabledAtStart=setting("Enabled");
+            if(!enabledAtStart)SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+            require(setting("Enabled"),"RE+ Tools > MCP > Enable MCP server writes [Mcp] Enabled=1");
+            if(setting("RequireApproval"))SendMessageW(frameWindow,WM_COMMAND,requireApproval,0);
+            McpPipe::Client client;McpPipe::Worker worker;
+            auto onWorker=[&](std::function<void()> job,DWORD budget=600000){worker.Run(std::move(job),budget);};
+            // This thread pumps messages for that long: windows paint, timers run.
+            auto pump=[&](DWORD ms){onWorker([ms]{Sleep(ms);});};
+            // One call and its whole reply, ok or not.
+            auto bridge=[&](const std::string& op,const J& args=J::object(),const J& options=J::object(),DWORD timeout=180000)
+            {
+                Record("workflow",("mcp "+op).c_str());
+                J reply;onWorker([&]{reply=client.Call(op,args,options,timeout);},timeout+60000);
+                return reply;
+            };
+            // One call that must succeed: its result.
+            auto run=[&](const std::string& op,const J& args=J::object(),const J& options=J::object(),DWORD timeout=180000)
+            {
+                const auto reply=bridge(op,args,options,timeout);
+                if(!McpPipe::Ok(reply))throw std::runtime_error(op+" over the bridge failed: "+reply.dump().substr(0,3000));
+                return reply.at("result");
+            };
+            auto paths=[&]{std::set<std::string> found;for(const auto& a:call({{"op","actors"}}))found.insert(a.at("path").get<std::string>());return found;};
+            auto members=[](const J& piece){std::set<std::string> found;if(piece.is_object())for(const auto& m:piece.value("members",J::array()))found.insert(m.at("path").get<std::string>());return found;};
+            auto within=[](const std::set<std::string>& part,const std::set<std::string>& whole){return !part.empty() && std::includes(whole.begin(),whole.end(),part.begin(),part.end());};
+            auto apart=[](const std::set<std::string>& part,const std::set<std::string>& whole){for(const auto& p:part)if(whole.count(p))return false;return !part.empty();};
+            auto room=[](const std::string& name){return J{{"kind","Room"},{"construction","Carve"},{"width",512},{"length",512},{"height",256},{"thickness",16},{"ceiling",true},{"portal",false},{"name",name}};};
+            auto block=[&](const std::string& name,int x,int y){return J{{"spec",room(name)},{"position",{x,y,0}},{"rotation",{0,0,0}}};};
+            auto undoTitle=[](unsigned n,const std::string& label){return "MCP "+std::to_string(n)+": "+label;};
+
+            // Handshake: nothing before hello, the same protocol major or nothing, one client.
+            J early,mismatch,hello,second;
+            onWorker([&]
+            {
+                client.Open(pid,20000);
+                early=client.Wait(client.Post("editor.state"),10000);
+                auto newer=B::Hello("native-probe","1");newer["protocol"]["major"]=B::kProtocolMajor+8;
+                client.Send(newer);mismatch=client.Wait(0,10000);
+                hello=client.Hello("native-probe","1",10000);
+            });
+            require(McpPipe::Code(early)=="protocol_mismatch","a call before hello is refused (protocol_mismatch)");
+            require(McpPipe::Code(mismatch)=="protocol_mismatch","a hello of another protocol major is refused and the pipe stays open");
+            require(hello.value("t",std::string())=="hello" && hello.value("pid",0ul)==pid && hello.value("enabled",false),"hello names the editor's process and says the server is on");
+            require(hello.value("ops",J())==B::OpList(),"hello lists the policy table's ops, none of them blocked");
+            onWorker([&]{McpPipe::Client other;other.Open(pid,10000);second=other.Wait(0,10000);});
+            require(McpPipe::Code(second)=="busy" && McpPipe::Reason(second)=="another_client","a second client is told another client holds the editor (busy, another_client)");
+
+            // What the bridge refuses before the editor sees it.
+            auto refused=[&](const std::string& op,const J& args,const char* why){const auto reply=bridge(op,args);return McpPipe::Code(reply)=="refused" && McpPipe::Reason(reply)==why;};
+            require(refused("light.set",{{"actor",{{"path","MyLevel.Light0"},{"class","Engine.Light"}}},{"properties",J::object()}},"blocked"),"light.set is refused over the bridge (blocked)");
+            require(refused("mcp.probe.unknown",J::object(),"unknown_op"),"an op the bridge does not have is refused (unknown_op)");
+            if(!setting("AllowRawExec"))require(refused("exec",{{"command","STAT FPS"}},"raw_exec_off"),"exec is refused while [Mcp] AllowRawExec is off");
+            if(!setting("AllowPlay"))require(refused("play.level",J::object(),"play_off"),"play.level is refused while [Mcp] AllowPlay is off");
+
+            // Reading.
+            {
+                const auto reply=bridge("editor.state");
+                const auto state=reply.value("result",J::object());
+                require(McpPipe::Ok(reply) && state.value("open",false),"editor.state answers for the open map");
+                require(pick(reply,"/state/expect")==J{{"level",state.value("level",J())},{"generation",state.value("generation",J())},{"revision",state.value("contentRevision",J())}},
+                    "the state block's expect is {level, generation, revision: contentRevision}");
+                const auto query=bridge("actors.query",{{"limit",5}});
+                require(McpPipe::Ok(query) && pick(query,"/result/actors").is_array() && pick(query,"/log").is_array() && pick(query,"/undo/steps")==0,
+                    "actors.query reads the map, with the call's log lines and no Undo step");
+            }
+
+            // A new map: what follows needs no fixture.
+            const auto fresh=run("map.new",{{"discard",true}},{{"label","probe new map"}},300000);
+            require(fresh.value("open",false) && fresh.value("mapFile",std::string()).empty() && fresh.value("dirty",true)==false,"map.new starts an empty map with no file and nothing to save");
+
+            // One change: its own result, one Undo step named after the call, its history file.
+            {
+                const auto before=paths();
+                const auto placed=bridge("design.block",block("MCP probe room",-2048,-2048),{{"label","probe room"}});
+                const unsigned placedCall=placed.value("call",0u);
+                const auto piece=members(pick(placed,"/result"));
+                require(McpPipe::Ok(placed) && within(piece,paths()) && apart(piece,before),"design.block over the bridge places the piece and answers with the piece, not its one-step plan");
+                require(pick(placed,"/undo")==J{{"call",placedCall},{"steps",1}},"the change is one Undo step of its call");
+                require(WorkflowProbe::NewestUndoTitle()==undoTitle(placedCall,"probe room"),"Undo History names the step \"MCP <call>: <label>\"");
+                bool logged=false;
+                std::error_code error;
+                const auto suffix="-"+std::to_string(placedCall)+"-design.block.json";
+                for(std::filesystem::directory_iterator it(directory/"ReloadedEditor"/"Mcp"/"history",error),end;!error && it!=end;it.increment(error))
+                {
+                    const auto name=it->path().filename().string();
+                    logged=logged || (name.size()>suffix.size() && name.compare(name.size()-suffix.size(),suffix.size(),suffix)==0);
+                }
+                require(logged,"the change is written to System\\ReloadedEditor\\Mcp\\history");
+            }
+
+            // A dry run changes nothing.
+            {
+                const auto revision=pick(run("editor.state"),"/contentRevision");
+                const auto actorsNow=paths();
+                const auto dry=bridge("design.block",block("MCP probe dry run",2048,-2048),{{"label","probe dry run"},{"dryRun",true}});
+                require(McpPipe::Ok(dry) && pick(dry,"/result/dryRun")==true && pick(dry,"/result/preview").is_array() && !pick(dry,"/result/preview").empty() && pick(dry,"/undo/steps")==0,
+                    "a dry run answers with its preview rows and makes no Undo step");
+                require(paths()==actorsNow && pick(run("editor.state"),"/contentRevision")==revision,"a dry run changes nothing");
+            }
+
+            // expect: a change against an older revision is refused; the current one runs.
+            {
+                const auto expect=pick(bridge("editor.state"),"/state/expect");
+                auto older=expect;older["revision"]=older.value("revision",0u)-1;
+                const auto actorsNow=paths();
+                const auto stale=bridge("design.block",block("MCP probe stale",2048,2048),{{"label","probe stale"},{"expect",older}});
+                require(McpPipe::Code(stale)=="stale" && McpPipe::Reason(stale)=="map_edited","a change against an older revision is refused as stale (map_edited)");
+                require(paths()==actorsNow && pick(bridge("editor.state"),"/state/expect")==expect,"a stale change changes nothing");
+                require(McpPipe::Ok(bridge("design.block",block("MCP probe expected",2048,2048),{{"label","probe expected"},{"expect",expect}})),"the same change against the current revision runs");
+            }
+
+            // A modal dialog: calls are answered busy, editor.state says why.
+            {
+                J read,state;
+                worker.Start([&]
+                {
+                    HWND box=nullptr;
+                    for(int i=0;i<400 && !(box=McpPipe::OwnWindow(L"#32770",WorkflowProbe::kMcpProbeBox));++i)Sleep(25);
+                    if(!box)throw std::runtime_error("The probe's message box did not open.");
+                    read=client.Call("actors.query",{{"limit",1}},J::object(),20000);
+                    state=client.Call("editor.state",J::object(),J::object(),20000);
+                    PostMessageW(box,WM_COMMAND,IDOK,0);
+                });
+                const UINT_PTR timer=SetTimer(nullptr,0,30000,WorkflowProbe::CloseMcpProbeBox);
+                MessageBoxW(frameWindow,L"The MCP bridge probe closes this box.",WorkflowProbe::kMcpProbeBox,MB_OK);
+                KillTimer(nullptr,timer);
+                worker.Finish(120000);
+                require(McpPipe::Code(read)=="busy" && McpPipe::Reason(read)=="modal","a call while a modal dialog is open is answered busy (modal)");
+                require(McpPipe::Ok(state) && pick(state,"/result/busy")=="modal","editor.state still answers while a modal dialog is open, saying busy: modal");
+                require(McpPipe::Ok(bridge("actors.query",{{"limit",1}})),"calls run again once the dialog is closed");
+            }
+
+            // A plan whose second step fails: the first step's change is rolled back.
+            {
+                const auto actorsNow=paths();const auto titleNow=WorkflowProbe::NewestUndoTitle();
+                const auto revision=pick(run("editor.state"),"/contentRevision");
+                const J missing={{"$bind",{{"step","good"},{"ptr","/no/such/members"}}}};
+                J plan={{"label","probe rollback"},{"steps",J::array()}};
+                plan["steps"].push_back({{"id","good"},{"op","design.block"},{"args",block("MCP probe rolled back",-2048,2048)}});
+                plan["steps"].push_back({{"id","bad"},{"op","select"},{"args",{{"actors",missing}}}});
+                const auto rolled=bridge("mcp.plan",plan,{{"label","probe rollback"}});
+                require(!McpPipe::Ok(rolled) && pick(rolled,"/error/details/failedStep")=="bad" && pick(rolled,"/error/details/rolledBack")==true && pick(rolled,"/error/details/section")=="steps",
+                    "a plan whose second step fails names that step and is rolled back");
+                require(!pick(rolled,"/error/details/steps/good").is_null(),"the failure reports what the step before it returned");
+                const auto stateAfter=run("editor.state");
+                require(paths()==actorsNow,"the rolled-back plan leaves the map's actors as they were");
+                require(stateAfter.value("canRedo",true)==false,"no Redo is left to replay the rolled-back plan");
+                require(pick(rolled,"/undo/steps")==0 && WorkflowProbe::NewestUndoTitle()==titleNow,"the rolled-back plan leaves no Undo step");
+                // ContentRevision counts every transaction, the rolled-back one too, so it moves on.
+                Record("mcp_rollback_content_revision",(revision.dump()+" -> "+pick(stateAfter,"/contentRevision").dump()).c_str());
+            }
+
+            // A plan of two changes is one Undo step.
+            {
+                const auto actorsNow=paths();
+                J plan={{"label","probe two pieces"},{"steps",J::array()}};
+                plan["steps"].push_back({{"id","first"},{"op","design.block"},{"args",block("MCP probe first",-3072,2048)}});
+                plan["steps"].push_back({{"id","second"},{"op","design.block"},{"args",block("MCP probe second",-3072,3072)}});
+                const auto joined=bridge("mcp.plan",plan,{{"label","probe two pieces"}});
+                const unsigned joinedCall=joined.value("call",0u);
+                const auto both=paths();
+                require(McpPipe::Ok(joined) && pick(joined,"/undo/steps")==1 && within(members(pick(joined,"/result/steps/first")),both) && within(members(pick(joined,"/result/steps/second")),both),
+                    "a two-step plan places both pieces as one Undo step");
+                require(WorkflowProbe::NewestUndoTitle()==undoTitle(joinedCall,"probe two pieces"),"Undo History shows the plan as one entry");
+                Exec("TRANSACTION UNDO");
+                require(paths()==actorsNow,"one TRANSACTION UNDO takes both pieces back");
+                Exec("TRANSACTION REDO");
+                require(paths()==both,"one TRANSACTION REDO puts both back");
+                Exec("TRANSACTION UNDO");
+            }
+
+            // undo.call: only while the call's steps are the newest.
+            {
+                const auto own=bridge("design.block",block("MCP probe undo",3072,-3072),{{"label","probe undo"}});
+                const unsigned ownCall=own.value("call",0u);
+                const auto ownPiece=members(pick(own,"/result"));
+                const auto withOwn=paths();
+                call({{"op","design.block"},{"spec",room("Probe interleaved edit")},{"position",{3072,3072,0}},{"rotation",{0,0,0}}});
+                const auto blocked=bridge("undo.call",{{"call",ownCall}});
+                require(McpPipe::Code(blocked)=="refused" && McpPipe::Reason(blocked)=="not_newest" && within(ownPiece,paths()),"undo.call refuses while an edit made since sits on top of the call (not_newest)");
+                Exec("TRANSACTION UNDO");
+                require(paths()==withOwn,"the editor's own Undo takes the later edit back");
+                const auto undone=bridge("undo.call",{{"call",ownCall}});
+                require(McpPipe::Ok(undone) && pick(undone,"/result/done")==1 && apart(ownPiece,paths()),"undo.call undoes the call once its steps are the newest again");
+                const auto again=bridge("undo.call",{{"call",ownCall}});
+                require(McpPipe::Code(again)=="refused" && McpPipe::Reason(again)=="already_undone","undo.call refuses a call that is undone already");
+                const auto latest=bridge("design.block",block("MCP probe undo latest",3072,-2048),{{"label","probe undo latest"}});
+                const auto latestUndo=bridge("undo.call",{{"call",latest.value("call",0u)}});
+                require(McpPipe::Ok(latestUndo) && apart(members(pick(latest,"/result")),paths()),"undo.call undoes the newest call at once");
+            }
+
+            // spec.material: the piece's polygons take that material, not the browser's current one.
+            {
+                const auto materials=run("assets.search",{{"kind","material"},{"limit",500}}).value("assets",J::array());
+                auto captured=[&](const J& piece)
+                {
+                    const auto capture=call({{"op","assembly.capture"},{"members",piece.at("members")},{"position",{0,0,0}},{"rotation",{0,0,0}}});
+                    std::string text;for(const auto& a:capture.at("actors"))text+=a.value("text",std::string());
+                    return lower(text);
+                };
+                const auto plainText=captured(run("design.block",block("MCP probe default texture",0,-3072),{{"label","probe default texture"}}));
+                std::string material;
+                for(const auto& asset:materials)
+                {
+                    const auto path=asset.value("path",std::string());
+                    if(!path.empty() && path.find_first_of("\"' \r\n")==std::string::npos && plainText.find(lower(path))==std::string::npos){material=path;break;}
+                }
+                Record("mcp_spec_material",material.c_str());
+                require(!material.empty(),"assets.search finds a loaded material other than the blockout's default");
+                if(!material.empty())
+                {
+                    auto textured=block("MCP probe material",0,3072);textured["spec"]["material"]=material;
+                    const auto piece=run("design.block",textured,{{"label","probe material"}});
+                    require(pick(piece,"/spec/material")==material && captured(piece).find(lower(material))!=std::string::npos,"spec.material textures the piece's polygons");
+                }
+            }
+
+            // Build All, and Map Check's answer.
+            {
+                const auto built=bridge("build.all",J::object(),{{"label","probe build"}},900000);
+                require(McpPipe::Ok(built) && pick(built,"/result/ok")==true,"build.all builds the map over the bridge");
+                require(pick(built,"/dialogs").is_array() && pick(built,"/dialogs").empty(),"the build's progress window is left to run: the dialog watchdog answered nothing");
+                const auto check=run("mapcheck.run",J::object(),J::object(),300000);
+                bool shaped=pick(check,"/rows").is_array() && pick(check,"/summary").is_object();
+                if(shaped)for(const auto& row:check.at("rows"))
+                {
+                    const auto severity=row.value("severity",std::string());
+                    shaped=shaped && (severity=="error" || severity=="warning" || severity=="info") && row.contains("group") && row.contains("check")
+                        && pick(row,"/message").is_string() && pick(row,"/actors").is_array() && pick(row,"/surfaces").is_array();
+                }
+                for(const char* count:{"/summary/errors","/summary/warnings","/summary/info"})shaped=shaped && pick(check,count).is_number();
+                Record("mcp_mapcheck",pick(check,"/summary").dump().c_str());
+                require(shaped,"mapcheck.run answers {rows:[{severity, group, check, message, actors, surfaces}], summary:{errors, warnings, info}}");
+            }
+
+            // A geometric event: GE ADD with the points in Map Design's order.
+            {
+                const auto ladder=bridge("ge.add",{{"command","LADDER"},{"points",J::array({J::array({-2048,-2048,16}),J::array({-2048,-2048,272}),J::array({-2016,-2048,16})})}},{{"label","probe ladder"}});
+                const auto command=pick(ladder,"/result/command");
+                require(McpPipe::Ok(ladder) && command.is_string() && command.get<std::string>().rfind("GE ADD LADDER X1=",0)==0,"ge.add runs GE ADD LADDER with its points");
+                Record("mcp_ge_add_undo",pick(ladder,"/undo").dump().c_str()); // spike S1: whether GE ADD makes an Undo step
+            }
+
+            // A screenshot: the viewport must be visible, which the probe's editor is not.
+            {
+                const bool hidden=!IsWindowVisible(frameWindow);
+                if(hidden){ShowWindow(frameWindow,SW_SHOWNOACTIVATE);pump(1500);}
+                const auto shot=bridge("view.screenshot",{{"viewport","perspective"},{"maxEdge",1024}});
+                if(hidden)ShowWindow(frameWindow,SW_HIDE);
+                const auto encoded=pick(shot,"/result/png");
+                const auto png=encoded.is_string()?B::Unbase64(encoded.get<std::string>()):std::string();
+                int width=0,height=0;
+                const bool decoded=WorkflowProbe::PngSize(png,width,height);
+                if(decoded)std::ofstream(directory/"mcp_screenshot.png",std::ios::binary)<<png;
+                require(decoded && pick(shot,"/result/width")==width && pick(shot,"/result/height")==height && (std::max)(width,height)>256,"view.screenshot returns a PNG of the perspective view over 256 pixels");
+            }
+
+            // A blob over 8 MiB: authoring.export of a map made big enough, read back in pieces.
+            {
+                constexpr uint64_t eightMiB=8ull*1024*1024;
+                auto exported=run("authoring.export",J::object(),J::object(),600000);
+                unsigned batches=0;size_t fillers=0;
+                while(exported.value("size",uint64_t{0})<=eightMiB && batches<12)
+                {
+                    J document={{"format","scct.map-changes"},{"version",2},{"map","*"},{"description","MCP probe: actors that make the export big"},{"operations",J::array()}};
+                    for(int i=0;i<400;++i,++fillers)
+                        document["operations"].push_back({{"op","create"},{"id","McpProbeFill"+std::to_string(fillers)},{"class","Engine.Light"},
+                            {"properties",{{"Location",{{"X",std::to_string(-6000+static_cast<int>(fillers%100)*120)},{"Y",std::to_string(-6000+static_cast<int>(fillers/100)*120)},{"Z","128"}}}}}});
+                    run("blob.free",{{"blob",exported.at("blob")}});
+                    run("authoring.apply",{{"document",document}},{{"label","probe export filler"}},600000);++batches;
+                    exported=run("authoring.export",J::object(),J::object(),600000);
+                }
+                const auto size=exported.value("size",uint64_t{0});
+                Record("mcp_blob",(std::to_string(size)+" bytes, "+std::to_string(fillers)+" filler lights").c_str());
+                require(size>eightMiB,"authoring.export over the bridge writes the export to a blob over 8 MiB");
+                std::string data;bool eof=false;size_t chunks=0;
+                onWorker([&]
+                {
+                    while(!eof && data.size()<=size)
+                    {
+                        const auto chunk=client.Call("blob.read",{{"blob",exported.at("blob")},{"offset",data.size()},{"size",B::kBlobChunk}},J::object(),120000);
+                        if(!McpPipe::Ok(chunk))throw std::runtime_error("blob.read failed: "+chunk.dump().substr(0,2000));
+                        const auto bytes=B::Unbase64(chunk.at("result").value("data",std::string()));
+                        eof=chunk.at("result").value("eof",true);data+=bytes;++chunks;
+                        if(bytes.empty())break;
+                    }
+                },900000);
+                bool parsed=false;
+                try{parsed=J::parse(data).value("format",std::string())=="scct.map-authoring";}catch(const std::exception&){}
+                require(eof && data.size()==size && chunks>=3 && parsed,"blob.read returns the whole export in 4 MiB pieces");
+                require(McpPipe::Ok(bridge("blob.free",{{"blob",exported.at("blob")}})) && McpPipe::Code(bridge("blob.read",{{"blob",exported.at("blob")}}))=="invalid","blob.free deletes the blob");
+                require(McpPipe::Code(bridge("blob.read",{{"blob","..\\library"}}))=="invalid","a blob handle naming another file is refused");
+                if(batches)require(pick(run("undo.steps",{{"count",batches}}),"/done")==batches,"the filler actors undo, one step per batch");
+            }
+
+            // map.save, map.new, map.open: the saved map comes back.
+            {
+                const auto savedPiece=run("design.block",block("MCP probe saved",-1024,1024),{{"label","probe saved piece"}});
+                const auto file=directory.parent_path()/"Packages"/"MapsEd"/"McpProbeD.sdc";
+                const auto saved=run("map.save",{{"path","McpProbeD.sdc"},{"overwrite",true}},{{"label","probe save"}},900000);
+                require(saved.value("saved",false) && std::filesystem::exists(file) && lower(saved.value("file",std::string())).find("mcpprobed.sdc")!=std::string::npos,
+                    "map.save writes Packages\\MapsEd\\McpProbeD.sdc");
+                require(run("editor.state").value("dirty",true)==false,"the saved map has no unsaved changes");
+                run("map.new",{{"discard",true}},J::object(),300000);
+                require(apart(members(savedPiece),paths()),"map.new leaves the saved piece behind");
+                const auto opened=run("map.open",{{"path","McpProbeD.sdc"}},J::object(),900000);
+                require(lower(opened.value("mapFile",std::string())).find("mcpprobed.sdc")!=std::string::npos && opened.value("dirty",true)==false,"map.open opens the saved map, with nothing to save");
+                require(within(members(savedPiece),paths()),"the saved piece comes back with the map");
+            }
+
+            // design.register on the saved map: the Map Design panel's library lists the
+            // piece (design.pieces), and library.json has it under the map's file. An
+            // unsaved map's entry stays in memory until its first save.
+            {
+                const auto placedPiece=run("design.block",block("MCP probe registered",-1024,-3072),{{"label","probe register"}});
+                const auto key=call({{"op","map"}}).at("key").get<std::string>();
+                auto listed=[&]
+                {
+                    std::ifstream in(directory/"ReloadedEditor"/"library.json");J library;in>>library;
+                    const auto pieces=library["maps"].value(key,J::object()).value("design",J::object()).value("pieces",J::array());
+                    for(const auto& entry:pieces)if(entry.value("members",J())==placedPiece.at("members"))return true;
+                    return false;
+                };
+                auto shown=[&]
+                {
+                    const auto pieces=pick(run("design.pieces"),"/pieces");
+                    if(pieces.is_array())for(const auto& entry:pieces)if(entry.value("members",J())==placedPiece.at("members"))return true;
+                    return false;
+                };
+                require(!key.empty(),"the reopened map has a library key");
+                require(run("design.register",{{"pieces",J::array({placedPiece})}},{{"label","probe register"}}).value("registered",0)==1 && shown() && listed(),
+                    "design.register records the piece for the Map Design panel, in library.json under the map's file");
+                require(run("design.register",{{"pieces",J::array({placedPiece})}}).value("registered",-1)==0,"registering the same brushes again adds nothing");
+                require(run("design.unregister",{{"members",placedPiece.at("members")}}).value("unregistered",0)==1 && !shown() && !listed(),"design.unregister takes the record out again");
+            }
+
+            // Require approval: the change waits in the review window, the rest is answered busy.
+            {
+                SendMessageW(frameWindow,WM_COMMAND,requireApproval,0);
+                require(setting("RequireApproval"),"RE+ Tools > MCP > Require approval writes [Mcp] RequireApproval=1");
+                const UINT_PTR timer=SetTimer(nullptr,0,1000,WorkflowProbe::CancelStuckMcpReview);
+                // answer: IDOK, IDCANCEL, or 0 for a cancel message from the client.
+                auto review=[&](const std::string& name,int answer,J& during)
+                {
+                    J reply;
+                    onWorker([&]
+                    {
+                        const auto id=client.Post("design.block",block(name,1024,-1024),{{"label",name}});
+                        during["asked"]=client.Until(id,"awaiting_approval",60000);
+                        HWND window=nullptr;
+                        for(int i=0;i<400 && !(window=McpPipe::OwnWindow(WorkflowProbe::kMcpReviewClass,WorkflowProbe::kMcpReviewTitle));++i)Sleep(25);
+                        if(!window)throw std::runtime_error("The approval window did not open: "+during["asked"].dump().substr(0,2000));
+                        const auto ticket=during["asked"].value("ticket",std::string());
+                        during["read"]=client.Call("actors.query",{{"limit",1}},J::object(),20000);
+                        during["change"]=client.Call("design.block",block("MCP probe queued",1024,1024),J::object(),20000);
+                        during["state"]=client.Call("editor.state",J::object(),J::object(),20000);
+                        during["status"]=client.Call("approval.status",{{"ticket",ticket}},J::object(),20000);
+                        during["log"]=client.Call("log.tail",{{"since",0}},J::object(),20000);
+                        if(answer)PostMessageW(window,WM_COMMAND,MAKEWPARAM(answer,BN_CLICKED),0);
+                        else client.Cancel(id);
+                        J later=J::array();
+                        reply=client.Wait(id,120000,[&](const J& message){later.push_back(message);});
+                        during["later"]=later;
+                        during["outcome"]=client.Call("approval.status",{{"ticket",ticket}},J::object(),20000);
+                    },300000);
+                    return reply;
+                };
+                J during;
+                const auto approved=review("probe approved",IDOK,during);
+                require(during["asked"].value("stage",std::string())=="awaiting_approval" && !during["asked"].value("ticket",std::string()).empty(),"with Require approval on, a change first asks for approval, with a ticket");
+                require(McpPipe::Code(during["read"])=="busy" && McpPipe::Reason(during["read"])=="approval_pending" && McpPipe::Code(during["change"])=="busy" && McpPipe::Reason(during["change"])=="approval_pending",
+                    "while the approval window is open other calls are answered busy (approval_pending)");
+                require(McpPipe::Ok(during["state"]) && pick(during["state"],"/result/cached")==true && pick(during["state"],"/result/busy")=="approval_pending","editor.state answers from its cache during the review, saying busy");
+                require(pick(during["status"],"/result/status")=="pending" && McpPipe::Ok(during["log"]),"approval.status says pending, and log.tail answers, during the review");
+                bool approvedStage=false;for(const auto& message:during["later"])approvedStage=approvedStage || message.value("stage",std::string())=="approved";
+                require(McpPipe::Ok(approved) && approvedStage && within(members(pick(approved,"/result")),paths()),"Approve applies the change, after an approved progress message");
+                require(pick(during["outcome"],"/result/status")=="done" && pick(during["outcome"],"/result/outcome/ok")==true,"approval.status then reports the ticket done, with its outcome");
+                const auto beforeDecline=paths();
+                J declinedDuring;const auto declined=review("probe declined",IDCANCEL,declinedDuring);
+                require(McpPipe::Code(declined)=="denied" && McpPipe::Reason(declined)=="user_declined" && paths()==beforeDecline && pick(declinedDuring["outcome"],"/result/status")=="denied",
+                    "Cancel in the approval window declines the change (denied) and changes nothing");
+                J cancelledDuring;const auto cancelled=review("probe cancelled",0,cancelledDuring);
+                require(McpPipe::Code(cancelled)=="cancelled" && paths()==beforeDecline && pick(cancelledDuring["outcome"],"/result/status")=="cancelled",
+                    "a cancel message from the client closes the approval window (cancelled)");
+                std::vector<J> progress;J readPlan;
+                onWorker([&]{readPlan=client.Call("mcp.plan",{{"steps",J::array({{{"id","look"},{"op","actors.query"},{"args",{{"limit",1}}}}})}},J::object(),60000,&progress);});
+                bool asked=false;for(const auto& message:progress)asked=asked || message.value("stage",std::string())=="awaiting_approval";
+                require(McpPipe::Ok(readPlan) && !asked,"a plan of reads only runs without asking for approval");
+                SendMessageW(frameWindow,WM_COMMAND,requireApproval,0);
+                KillTimer(nullptr,timer);
+                require(!setting("RequireApproval"),"Require approval turns off again");
+            }
+
+            // The menu: Disconnect client, then the server off and on.
+            {
+                SendMessageW(frameWindow,WM_COMMAND,disconnectClient,0);
+                bool closed=false;
+                onWorker([&]{try{for(int i=0;i<60 && !closed;++i)client.Receive(250);}catch(const McpPipe::Closed&){closed=true;}});
+                require(closed,"RE+ Tools > MCP > Disconnect client closes the pipe");
+                J again;onWorker([&]{client.Open(pid,15000);again=client.Hello("native-probe","1",10000);});
+                require(again.value("t",std::string())=="hello","a client connects again after a disconnect");
+                SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+                client.Close();
+                bool gone=false;
+                onWorker([&]{for(int i=0;i<60 && !gone;++i){gone=!McpPipe::Listening(pid);if(!gone)Sleep(250);}});
+                require(!setting("Enabled") && gone,"turning the server off writes Enabled=0 and takes the pipe away");
+                SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+                J back;onWorker([&]{client.Open(pid,20000);back=client.Hello("native-probe","1",10000);});
+                require(setting("Enabled") && back.value("t",std::string())=="hello","turning it on again lets a client connect");
+            }
+            client.Close();
+            if(!enabledAtStart)SendMessageW(frameWindow,WM_COMMAND,enableServer,0);
+        };
+        if(mcpOnly){mcpBridge();finish("MCP bridge: handshake, refusals, busy and stale replies, plans with rollback and Undo, blobs, map files, design records, builds, pictures and approval");return;}
         auto checkSurfaceBrushSelection=[&](size_t minimumBrushes)
         {
             auto read=[](uintptr_t p){return *reinterpret_cast<uintptr_t*>(p);};

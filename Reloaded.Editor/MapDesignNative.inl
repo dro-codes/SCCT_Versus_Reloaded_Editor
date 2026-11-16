@@ -256,12 +256,29 @@ namespace
     // goes into the brush shape and the actor stays unrotated, so the geometry
     // build agrees with the wireframes and the design views. New pieces take
     // the texture browser's current material, like a native builder-brush
-    // addition would.
-    Json PlaceBlockout(const Json& spec,const Pose& frame,const Json& previous)
+    // addition would, unless the spec names one (spec.material, a loaded
+    // material's path), which then stays with the piece when it is rebuilt.
+    std::string BlockoutMaterial(const Json& spec)
     {
         std::string material;
+        if(spec.contains("material") && !spec.at("material").is_null())
+        {
+            if(!spec.at("material").is_string())throw std::runtime_error("A blockout material is a material path such as Package.Group.Name.");
+            material=spec.at("material").get<std::string>();
+            if(material.empty() || material.find_first_of("\"\r\n '")!=std::string::npos)throw std::runtime_error("A blockout material is a material path such as Package.Group.Name, without spaces or quotes.");
+            const auto found=Find(material);
+            if(!found || !IsA(found,"Material"))throw std::runtime_error("Load the blockout material first: "+material);
+            material=Path(found);
+            if(material.find_first_of("\"\r\n ")!=std::string::npos)throw std::runtime_error("The blockout material's path has spaces or quotes: "+material);
+            return material;
+        }
         try{material=CurrentAsset(false);}catch(const std::exception&){}
         if(material.find_first_of("\"\r\n ")!=std::string::npos)material.clear();
+        return material;
+    }
+    Json PlaceBlockout(const Json& spec,const Pose& frame,const Json& previous)
+    {
+        const auto material=BlockoutMaterial(spec);
         Design::CheckVector(frame.position);auto definition=Design::Definition(spec,frame.rotation,material);
         auto prepared=PreparePlacement(definition,{frame.position,{}},"Design_"+Id().substr(0,12)+"_",LevelPath(),{});
         if(!pasteHookReady || insertionText)throw std::runtime_error("Native brush insertion is unavailable or busy.");

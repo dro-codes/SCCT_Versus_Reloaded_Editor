@@ -13,8 +13,9 @@ public:
     static uint32_t ScanForDamage(const char* path);
 
     // Where the warning for a damaged map goes; without a sink it is a message box.
+    // Returns the sink it replaces, for the caller to put back.
     typedef void (__cdecl *DamageSink)(const char* message);
-    static void SetDamageSink(DamageSink sink);
+    static DamageSink SetDamageSink(DamageSink sink);
 
     // Told of every save that reached RepairSavedMap and wrote its file:
     // File > Save and Save As by any route (menu, Ctrl+L, the engine's own

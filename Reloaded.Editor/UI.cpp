@@ -29,6 +29,7 @@
 #include "CommandPalette.h"
 #include "ScatterTool.h"
 #include "Appearance.h"
+#include "McpBridge.h"
 
 #include "Version.h"
 
@@ -206,6 +207,14 @@ static void InjectReloadedMenuItems(HWND frame)
 
     UndoHistory::InstallMenu(bar); // Edit > Undo History, after Redo
     PlacementTools::InstallMenu(bar); // RE+ Tools > Placement
+
+    // RE+ Tools > MCP, last: the server AI agents reach the editor through.
+    if (MenuPosByText(reTools, "&MCP") < 0)
+        if (HMENU mcp = McpBridge::BuildMenu())
+        {
+            AppendMenuA(reTools, MF_SEPARATOR, 0, nullptr);
+            AppendMenuA(reTools, MF_POPUP, reinterpret_cast<UINT_PTR>(mcp), "&MCP");
+        }
 
     HMENU view = SubMenuWithCommand(bar, 40065); // "Advanced Options" lives in View
     if (view)

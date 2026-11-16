@@ -20,6 +20,24 @@ typedef void (__fastcall *SerializeFn)(void* self, void* edx, const char* text, 
 SerializeFn     g_original;
 EngineLog::Sink g_sink;
 
+// Listeners are read on whichever thread logs and added from the UI thread.
+// A fixed table under a slim lock needs no construction before DllMain runs.
+constexpr int   kListeners = 8;
+EngineLog::Sink g_listeners[kListeners];
+SRWLOCK         g_listenersLock = SRWLOCK_INIT;
+
+void Notify(const char* line)
+{
+    EngineLog::Sink listeners[kListeners] = {};
+    AcquireSRWLockShared(&g_listenersLock);
+    for (int i = 0; i < kListeners; ++i)
+        listeners[i] = g_listeners[i];
+    ReleaseSRWLockShared(&g_listenersLock);
+    for (auto listener : listeners)
+        if (listener)
+            listener(line);
+}
+
 const char* EventName(int index)
 {
     void** namesData = *reinterpret_cast<void***>(GNAMES_DATA);
@@ -50,8 +68,9 @@ void __fastcall SerializeHook(void* self, void* edx, const char* text, int event
             char line[512];
             _snprintf_s(line, sizeof(line), _TRUNCATE, "%s: %s", eventName, text);
             Logger::log(line);
-            if (g_sink)
-                g_sink(line);
+            if (const auto sink = g_sink)
+                sink(line);
+            Notify(line);
         }
     }
 
@@ -89,7 +108,38 @@ void EngineLog::Initialize()
     if (h) CloseHandle(h);
 }
 
-void EngineLog::SetSink(Sink sink)
+EngineLog::Sink EngineLog::SetSink(Sink sink)
 {
+    const Sink previous = g_sink;
     g_sink = sink;
+    return previous;
+}
+
+void EngineLog::AddListener(Sink listener)
+{
+    if (!listener)
+        return;
+    AcquireSRWLockExclusive(&g_listenersLock);
+    bool added = false;
+    for (auto& slot : g_listeners)
+        if (slot == listener)
+            added = true;
+    for (auto& slot : g_listeners)
+        if (!added && !slot)
+        {
+            slot = listener;
+            added = true;
+        }
+    ReleaseSRWLockExclusive(&g_listenersLock);
+    if (!added)
+        Logger::log("EngineLog: no room for another log listener");
+}
+
+void EngineLog::RemoveListener(Sink listener)
+{
+    AcquireSRWLockExclusive(&g_listenersLock);
+    for (auto& slot : g_listeners)
+        if (slot == listener)
+            slot = nullptr;
+    ReleaseSRWLockExclusive(&g_listenersLock);
 }

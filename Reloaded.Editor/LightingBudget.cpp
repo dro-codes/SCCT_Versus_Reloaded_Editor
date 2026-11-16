@@ -52,9 +52,9 @@ struct Snapshot
     unsigned generation = 0;
 };
 
-Snapshot Measure(const Thresholds& thresholds)
+// One scene read can be measured against more than one set of limits.
+Snapshot FromScene(const Workflow::Json& scene, const Thresholds& thresholds)
 {
-    const auto scene = Workflow::Editor::LightingBudgetScene();
     Snapshot snapshot;
     std::vector<Light> lights;
     for (const auto& item : scene.at("lights"))
@@ -107,6 +107,8 @@ Snapshot Measure(const Thresholds& thresholds)
                 + "; " + std::to_string(over) + " zone(s) over");
     return snapshot;
 }
+
+Snapshot Measure(const Thresholds& thresholds) { return FromScene(Workflow::Editor::LightingBudgetScene(), thresholds); }
 
 std::string Intro(const Thresholds& t)
 {
@@ -627,7 +629,56 @@ int Ask(HWND owner, Prompt& prompt)
 }
 
 std::set<std::string> quietMaps;
+
+Workflow::Json Paths(const Snapshot& snapshot, const std::vector<int>& lights)
+{
+    Workflow::Json out = Workflow::Json::array();
+    for (int index : lights)
+        if (index >= 0 && static_cast<size_t>(index) < snapshot.paths.size()) out.push_back(snapshot.paths[static_cast<size_t>(index)]);
+    return out;
+}
+
+Workflow::Json ZoneJson(const Snapshot& snapshot, const ZoneReport& zone)
+{
+    Workflow::Json usage = Workflow::Json::object();
+    for (const auto& [kind, count] : zone.usage) usage[UsageName(kind)] = count;
+    return {{"zone", zone.zone}, {"name", zone.name}, {"lights", zone.total}, {"inGame", zone.inGame}, {"usage", usage},
+            {"worstLeaf", zone.worstLeaf}, {"worstLeafIndex", zone.worstLeafIndex}, {"worstLeafLights", Paths(snapshot, zone.worstLeafLights)},
+            {"overlap", zone.overlap}, {"overlapLights", Paths(snapshot, zone.overlapLights)},
+            {"over", zone.Over()}, {"overLeaf", zone.overLeaf}, {"overOverlap", zone.overOverlap}};
+}
 } // namespace
+
+Workflow::Json Measure()
+{
+    using Workflow::Json;
+    const auto thresholds = LoadThresholds();
+    const auto scene = Workflow::Editor::LightingBudgetScene();
+    const auto snapshot = FromScene(scene, thresholds);
+    const auto warning = FromScene(scene, ForBuildWarning(thresholds));
+    const auto& report = snapshot.report;
+    Json zones = Json::array();
+    for (const auto& zone : report.zones) zones.push_back(ZoneJson(snapshot, zone));
+    Json hotspots = Json::array();
+    for (const auto& hotspot : report.hotspots)
+    {
+        if (hotspots.size() >= 50) break;
+        Json item{{"kind", hotspot.kind == Hotspot::Kind::Leaf ? "leaf" : "overlap"}, {"zone", hotspot.zone}, {"label", HotspotLabel(hotspot)},
+                  {"lights", Paths(snapshot, hotspot.lights)}};
+        if (hotspot.kind == Hotspot::Kind::Leaf) item["leaf"] = hotspot.leaf;
+        hotspots.push_back(std::move(item));
+    }
+    const auto& t = report.thresholds;
+    Json result{{"map", snapshot.map}, {"generation", snapshot.generation}, {"leavesKnown", report.leavesKnown}, {"overlapExact", report.overlapExact},
+                {"thresholds", {{"leafLights", t.leafLights}, {"overlap", t.overlap}}},
+                {"totals", {{"lights", report.map.total}, {"inGame", report.map.inGame}, {"worstLeaf", report.map.worstLeaf}, {"overlap", report.map.overlap}}},
+                {"over", report.Over()}, {"zones", zones}, {"hotspots", hotspots},
+                // What the warning before Build All would say: every shipped map is over the guideline, few over this.
+                {"buildWarning", {{"over", warning.report.Over()}, {"leafLights", warning.report.thresholds.leafLights}, {"overlap", warning.report.thresholds.overlap},
+                                  {"enabled", thresholds.warnBeforeBuild}}}};
+    if (report.Over()) result["summary"] = Summary(report);
+    return result;
+}
 
 void Open(HWND owner)
 {

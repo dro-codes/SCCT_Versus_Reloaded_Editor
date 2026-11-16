@@ -187,21 +187,28 @@ std::vector<double> InitialFloors(const Read& map)
     return z.empty() ? map.storeys : Minimap::ParseFloorList(Minimap::FloorList(z));
 }
 
+// The map as it stands now, leaving the window's copy alone.
+Read ReadMap()
+{
+    Read fresh;
+    fresh.scene = Editor::MinimapScene();
+    fresh.markers = Markers();
+    fresh.storeys = Storeys(fresh.scene);
+    fresh.generation = Editor::MapGeneration();
+    fresh.revision = Editor::ContentRevision();
+    return fresh;
+}
+
 const Read& Map(bool reread)
 {
     const unsigned generation = Editor::MapGeneration(), revision = Editor::ContentRevision();
     if (reread || generation != cache.generation || revision != cache.revision)
     {
-        Read fresh;
-        fresh.scene = Editor::MinimapScene();
-        fresh.markers = Markers();
-        fresh.storeys = Storeys(fresh.scene);
+        Read fresh = ReadMap();
         // Another map starts from its own floors (those its in-game map
         // already has, else the ones found); the same map keeps the heights
         // typed in for it.
         if (generation != cache.generation) floors = InitialFloors(fresh);
-        fresh.generation = generation;
-        fresh.revision = revision;
         cache = std::move(fresh);
     }
     return cache;
@@ -581,14 +588,12 @@ void SaveImage()
 }
 
 // Every floor's picture with the shared camera, imported into the map package
-// and set as the map's in-game map.
-void SetInGameMap()
+// and set as the map's in-game map. Returns ApplyMinimap's result.
+Json ApplyInGame(const Read& map, Options options, const std::vector<double>& floorBases)
 {
-    const auto& map = Map(false);
-    auto options = Current();
     options.size = Minimap::kGameSize; // What the game's map page is laid out for.
     const auto camera = CameraFor(map, options);
-    auto bands = Minimap::Bands(floors);
+    auto bands = Minimap::Bands(floorBases);
     if (bands.empty()) bands.push_back(Minimap::Band{});
     const auto heights = Minimap::FloorHeights(bands);
     const auto stem = MapStem().empty() ? std::string("Untitled") : MapStem();
@@ -600,11 +605,17 @@ void SetInGameMap()
         WriteFile(file, Minimap::Tga32(options.size, options.size, Render(map, options, camera)));
         images.emplace_back(heights[i], file);
     }
-    const auto applied = Editor::ApplyMinimap(camera, images);
+    auto applied = Editor::ApplyMinimap(camera, images);
+    Logger::log("Minimap: set " + std::to_string(applied.at("floors").size()) + " floor(s) for " + stem);
+    cache.revision = ~0u; // The LevelInfo changed; read it again for the next picture.
+    return applied;
+}
+
+void SetInGameMap()
+{
+    const auto applied = ApplyInGame(Map(false), Current(), floors);
     const auto& set = applied.at("floors");
     const auto& unused = applied.at("unused");
-    Logger::log("Minimap: set " + std::to_string(set.size()) + " floor(s) for " + stem);
-    cache.revision = ~0u; // The LevelInfo changed; read it again for the next picture.
     std::string text = "The in-game map now has " + std::to_string(set.size()) + " floor(s) (" + set.front().at("texture").get<std::string>()
                      + (set.size() > 1 ? " and up" : "") + "). Save the map to keep it; Undo puts the old settings back.";
     if (!unused.empty())
@@ -614,12 +625,11 @@ void SetInGameMap()
 
 // The picture as the Briefing texture of <Map>-i: backed up, loaded, imported,
 // saved by the stock route and checked, as Level Snapshot does for Menu.
-void WriteBriefing()
+struct Briefing { fs::path utc; Snapshot::Texture texture; bool backedUp = false; };
+Briefing WriteBriefingPicture(const Read& map, Options options)
 {
     const auto stem = MapStem();
     const auto package = Snapshot::PackageName(stem);
-    const auto& map = Map(false);
-    auto options = Current();
     options.size = Minimap::kGameSize;
     const auto image = Render(map, options, CameraFor(map, options));
     const fs::path textures = Editor::Directory().parent_path().parent_path() / "Packages" / "Textures";
@@ -678,8 +688,14 @@ void WriteBriefing()
         throw;
     }
     Logger::log("Minimap: wrote the Briefing texture of " + utc.string());
-    Status("Saved as the Briefing texture of " + utc.filename().string() + " (" + std::to_string(written.width) + " x " + std::to_string(written.height)
-         + "), the plan the lobby shows. " + (backups.empty() ? std::string("") : "The previous package is in ReloadedEditor\\snapshot-backups."));
+    return { utc, written, !backups.empty() };
+}
+
+void WriteBriefing()
+{
+    const auto written = WriteBriefingPicture(Map(false), Current());
+    Status("Saved as the Briefing texture of " + written.utc.filename().string() + " (" + std::to_string(written.texture.width) + " x " + std::to_string(written.texture.height)
+         + "), the plan the lobby shows. " + (written.backedUp ? "The previous package is in ReloadedEditor\\snapshot-backups." : std::string("")));
 }
 
 // --- Window ----------------------------------------------------------------
@@ -839,6 +855,82 @@ void Open(HWND owner)
     if (!window) throw std::runtime_error("Cannot open the minimap window.");
     Build();
     Run([] { Map(true); FillFloors(); ShowBand(); Redraw(); });
+}
+
+Json Apply(const Json& request)
+{
+    const Json given = request.is_object() ? request : Json::object();
+    const auto map = ReadMap();
+    if (map.scene.faces.empty()) throw std::runtime_error("The map has no built geometry to draw. Build it first (build.all or Rebuild Geometry), then set the minimap.");
+    Options options;
+    options.objectives = given.value("objectives", true);
+    options.spawns = given.value("spawns", false);
+    options.meshes = given.value("meshes", true);
+    const auto framing = given.value("framing", std::string("gameplay"));
+    if (framing == "gameplay") options.framing = 0;
+    else if (framing == "everything") options.framing = 1;
+    else if (framing == "current")
+    {
+        if (!Minimap::Usable(map.scene.camera) || !Minimap::TopDown(map.scene.camera))
+            throw std::runtime_error("The map has no top-down minimap camera to keep; use framing \"gameplay\" or \"everything\".");
+        options.framing = 2;
+    }
+    else throw std::runtime_error("framing is \"gameplay\", \"everything\" or \"current\".");
+    const auto& palettes = Minimap::Palettes();
+    if (given.contains("style"))
+    {
+        const auto& style = given.at("style");
+        if (style.is_number_integer())
+        {
+            const auto index = style.get<int>();
+            if (index < 0 || index >= static_cast<int>(palettes.size())) throw std::runtime_error("style is a palette index from 0 to " + std::to_string(palettes.size() - 1) + ".");
+            options.palette = static_cast<size_t>(index);
+        }
+        else
+        {
+            const auto name = Workflow::Fold(style.get<std::string>());
+            size_t found = palettes.size();
+            for (size_t i = 0; i < palettes.size(); ++i) if (Workflow::Fold(palettes[i].name) == name) found = i;
+            if (found == palettes.size())
+            {
+                std::string names;
+                for (const auto& palette : palettes) names += (names.empty() ? "" : ", ") + std::string(palette.name);
+                throw std::runtime_error("Unknown minimap style; choose one of: " + names + ".");
+            }
+            options.palette = found;
+        }
+    }
+    std::vector<double> bases;
+    if (given.contains("floors"))
+    {
+        for (const auto& z : given.at("floors"))
+        {
+            const double value = z.get<double>();
+            if (!std::isfinite(value) || std::abs(value) > 1000000) throw std::runtime_error("Floor heights are numbers inside the world.");
+            bases.push_back(value);
+        }
+        // The same limits as the window's floor list.
+        std::sort(bases.begin(), bases.end());
+        bases.erase(std::unique(bases.begin(), bases.end()), bases.end());
+        if (bases.size() > 32) throw std::runtime_error("A minimap takes at most 32 floors.");
+    }
+    else bases = InitialFloors(map);
+    auto result = ApplyInGame(map, options, bases);
+    const auto camera = CameraFor(map, options);
+    const auto frame = Minimap::FrameOf(camera);
+    result["camera"] = {{"centre", {frame.cx, frame.cy}}, {"size", frame.half * 2}};
+    if (given.value("briefing", false))
+    {
+        auto briefing = options;
+        const int floor = given.value("briefingFloor", 0);
+        const auto bands = Minimap::Bands(bases);
+        if (floor < 0 || floor > static_cast<int>(bands.size())) throw std::runtime_error("briefingFloor is 1 to " + std::to_string(bands.size()) + ", or 0 for the whole map.");
+        briefing.band = floor ? bands[static_cast<size_t>(floor - 1)] : Minimap::Band{};
+        const auto written = WriteBriefingPicture(map, briefing);
+        result["briefing"] = {{"file", written.utc.string()}, {"width", written.texture.width}, {"height", written.texture.height}, {"backedUp", written.backedUp}};
+    }
+    if (window) Run([] { Redraw(true); });
+    return result;
 }
 
 bool HandleCommand(UINT command)

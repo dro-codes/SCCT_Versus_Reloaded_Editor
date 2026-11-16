@@ -2073,129 +2073,25 @@ static void UAS_RestoreEditorFocus(HWND startHwnd)
     }
 }
 
-static void __cdecl SB_HandleMakeUAS(void* this_ptr)
+// What one Build UAS run did: the outcome the dialogs (or the bridge) report.
+struct UAS_BuildResult
 {
-    HWND hBrowser = GetParentHWND(this_ptr);
+    bool                         ok = false;
+    int                          encoded = 0;
+    std::vector<UAS_SoundReport> report;
+    int                          missingCount = 0;
+    std::string                  missingList;
+    DWORD                        lastErr = 0;
+    long long                    size = -1;     // the .uas on disk afterwards, -1 when there is none
+};
 
-    // Resolve the current map from the editor frame title bar - the actual
-    // open file, "... - [<path>\<Map>.sdc]". It's authoritative, unlike the
-    // browser's derived "Map: <name>" label; no path in the title means
-    // nothing is loaded (fresh boot / New Map). Falls back to the label if
-    // the title has no path. mapName feeds the picker default below.
-    char mapText[256] = {};
-    bool fromTitle = false;
-    g_uasEditorFrame = nullptr;
-    EnumWindows(UAS_FindEditorFrame, 0);
-    char title[512] = {};
-    if (g_uasEditorFrame != nullptr)
-        GetWindowTextA(g_uasEditorFrame, title, sizeof(title));
-
-    const char* slash = strrchr(title, '\\');
-    if (slash != nullptr)   // "...\AquaD.sdc]" -> "AquaD"
-    {
-        size_t i = 0;
-        for (const char* s = slash + 1; *s && *s != '.' && *s != ']' && i + 1 < sizeof(mapText); ++s)
-            mapText[i++] = *s;
-        mapText[i] = '\0';
-        fromTitle = mapText[0] != '\0';   // a real file is open (even if named "None")
-    }
-    if (!fromTitle)         // no path in the title: fall back to the status label
-    {
-        EnumChildWindows(hBrowser, FindMapLabelProc, reinterpret_cast<LPARAM>(mapText));
-        if (mapText[0] != '\0')
-            memmove(mapText, mapText + 5, strlen(mapText + 5) + 1);  // strip "Map: "
-    }
-
-    const char* mapName = mapText;
-    while (*mapName == ' ' || *mapName == '\t')
-        ++mapName;
-    // A title path means a real map is loaded (any name). "None" is only the
-    // engine's no-map sentinel when it comes from the status label.
-    if (mapName[0] == '\0' || (!fromTitle && _stricmp(mapName, "None") == 0))
-    {
-        MessageBoxA(hBrowser,
-                    "Load a map before building a UAS package.",
-                    "Message", MB_OK);
-        return;
-    }
-
-    // Enumerate every loaded UAX package that owns at least one SF_UAS_STREAM
-    // sound. These are the only packages that contribute to a .uas - non-stream
-    // sounds stay inline in the .uax. Sorted alphabetically.
-    std::vector<std::string> allPkgs = UAS_EnumLoadedSoundPackages();
-    if (allPkgs.empty())
-    {
-        MessageBoxA(hBrowser,
-                    "No Stream-flagged sounds found in any loaded package.\r\n"
-                    "Open the relevant Amb_*.uax / Interface.uax packages first,\r\n"
-                    "then click Build UAS again.",
-                    "Build UAS", MB_OK);
-        return;
-    }
-
-    // Package picker. Default selection:
-    // - "Interface"     - present in every map's UAS per Ubisoft convention.
-    // - "Amb_<mapName>" - the map-specific ambient package, if it exists.
-    UASPkgPickerCtx pkgCtx = {};
-    pkgCtx.packages  = &allPkgs;
-    pkgCtx.cancelled = true;
-    pkgCtx.selected.assign(allPkgs.size(), false);
-
-    char ambGuess[64];
-    snprintf(ambGuess, sizeof(ambGuess), "Amb_%s", mapName);
-    for (size_t i = 0; i < allPkgs.size(); ++i)
-    {
-        if (_stricmp(allPkgs[i].c_str(), "Interface") == 0 ||
-            _stricmp(allPkgs[i].c_str(), ambGuess)    == 0)
-        {
-            pkgCtx.selected[i] = true;
-        }
-    }
-
-    {
-        std::vector<uint8_t> dlgTpl = BuildUASPkgDlgTemplate();
-        DialogBoxIndirectParamA(
-            GetModuleHandleA(nullptr),
-            reinterpret_cast<LPCDLGTEMPLATE>(dlgTpl.data()),
-            hBrowser,
-            UASPkgPickerDlgProc,
-            reinterpret_cast<LPARAM>(&pkgCtx));
-    }
-    if (pkgCtx.cancelled) return;
-
-    std::vector<std::string> chosenPkgs;
-    UAS_PkgFilter pkgFilter;
-    for (size_t i = 0; i < allPkgs.size(); ++i)
-    {
-        if (pkgCtx.selected[i])
-        {
-            chosenPkgs.push_back(allPkgs[i]);
-            pkgFilter.add(allPkgs[i]);
-        }
-    }
-    if (chosenPkgs.empty())
-    {
-        MessageBoxA(hBrowser, "Select at least one package.", "Build UAS", MB_OK);
-        return;
-    }
-
-    // OGG quality slider (no WAV/uncompressed option - PC SCCT Versus only
-    // plays back OGG-encoded UAS streams).
-    UASCompCtx compCtx = {};
-    compCtx.quality   = 50;   // 5.0 = Ubisoft-shipped default
-    compCtx.cancelled = true;
-    {
-        std::vector<uint8_t> dlgTpl = BuildUASCompDlgTemplate();
-        DialogBoxIndirectParamA(
-            GetModuleHandleA(nullptr),
-            reinterpret_cast<LPCDLGTEMPLATE>(dlgTpl.data()),
-            hBrowser,
-            UASCompDlgProc,
-            reinterpret_cast<LPARAM>(&compCtx));
-    }
-    if (compCtx.cancelled) return;
-    const float quality = compCtx.quality / 10.0f;
-
+// The build itself, after the package and quality choices: shared by the
+// Sound Browser button and the MCP bridge's uas.build, which has no dialogs.
+static UAS_BuildResult UAS_RunBuild(const char* mapName,
+                                    const std::vector<std::string>& chosenPkgs,
+                                    const UAS_PkgFilter& pkgFilter,
+                                    float quality)
+{
     // Detach the audio subsystem from <map>.uas BEFORE the rebuild.
     //
     //  The audio subsystem holds a streaming read handle on <map>.uas while
@@ -2460,6 +2356,145 @@ static void __cdecl SB_HandleMakeUAS(void* this_ptr)
         snprintf(tail, sizeof(tail), "  ...and %d more\r\n", missingCount - 30);
         missingList += tail;
     }
+
+    UAS_BuildResult result;
+    result.ok           = ok;
+    result.encoded      = encoded;
+    result.report       = std::move(report);
+    result.missingCount = missingCount;
+    result.missingList  = std::move(missingList);
+    result.lastErr      = lastErr;
+    result.size         = fileSize(uasPathDiag);
+    return result;
+}
+
+static void __cdecl SB_HandleMakeUAS(void* this_ptr)
+{
+    HWND hBrowser = GetParentHWND(this_ptr);
+
+    // Resolve the current map from the editor frame title bar - the actual
+    // open file, "... - [<path>\<Map>.sdc]". It's authoritative, unlike the
+    // browser's derived "Map: <name>" label; no path in the title means
+    // nothing is loaded (fresh boot / New Map). Falls back to the label if
+    // the title has no path. mapName feeds the picker default below.
+    char mapText[256] = {};
+    bool fromTitle = false;
+    g_uasEditorFrame = nullptr;
+    EnumWindows(UAS_FindEditorFrame, 0);
+    char title[512] = {};
+    if (g_uasEditorFrame != nullptr)
+        GetWindowTextA(g_uasEditorFrame, title, sizeof(title));
+
+    const char* slash = strrchr(title, '\\');
+    if (slash != nullptr)   // "...\AquaD.sdc]" -> "AquaD"
+    {
+        size_t i = 0;
+        for (const char* s = slash + 1; *s && *s != '.' && *s != ']' && i + 1 < sizeof(mapText); ++s)
+            mapText[i++] = *s;
+        mapText[i] = '\0';
+        fromTitle = mapText[0] != '\0';   // a real file is open (even if named "None")
+    }
+    if (!fromTitle)         // no path in the title: fall back to the status label
+    {
+        EnumChildWindows(hBrowser, FindMapLabelProc, reinterpret_cast<LPARAM>(mapText));
+        if (mapText[0] != '\0')
+            memmove(mapText, mapText + 5, strlen(mapText + 5) + 1);  // strip "Map: "
+    }
+
+    const char* mapName = mapText;
+    while (*mapName == ' ' || *mapName == '\t')
+        ++mapName;
+    // A title path means a real map is loaded (any name). "None" is only the
+    // engine's no-map sentinel when it comes from the status label.
+    if (mapName[0] == '\0' || (!fromTitle && _stricmp(mapName, "None") == 0))
+    {
+        MessageBoxA(hBrowser,
+                    "Load a map before building a UAS package.",
+                    "Message", MB_OK);
+        return;
+    }
+
+    // Enumerate every loaded UAX package that owns at least one SF_UAS_STREAM
+    // sound. These are the only packages that contribute to a .uas - non-stream
+    // sounds stay inline in the .uax. Sorted alphabetically.
+    std::vector<std::string> allPkgs = UAS_EnumLoadedSoundPackages();
+    if (allPkgs.empty())
+    {
+        MessageBoxA(hBrowser,
+                    "No Stream-flagged sounds found in any loaded package.\r\n"
+                    "Open the relevant Amb_*.uax / Interface.uax packages first,\r\n"
+                    "then click Build UAS again.",
+                    "Build UAS", MB_OK);
+        return;
+    }
+
+    // Package picker. Default selection:
+    // - "Interface"     - present in every map's UAS per Ubisoft convention.
+    // - "Amb_<mapName>" - the map-specific ambient package, if it exists.
+    UASPkgPickerCtx pkgCtx = {};
+    pkgCtx.packages  = &allPkgs;
+    pkgCtx.cancelled = true;
+    pkgCtx.selected.assign(allPkgs.size(), false);
+
+    char ambGuess[64];
+    snprintf(ambGuess, sizeof(ambGuess), "Amb_%s", mapName);
+    for (size_t i = 0; i < allPkgs.size(); ++i)
+    {
+        if (_stricmp(allPkgs[i].c_str(), "Interface") == 0 ||
+            _stricmp(allPkgs[i].c_str(), ambGuess)    == 0)
+        {
+            pkgCtx.selected[i] = true;
+        }
+    }
+
+    {
+        std::vector<uint8_t> dlgTpl = BuildUASPkgDlgTemplate();
+        DialogBoxIndirectParamA(
+            GetModuleHandleA(nullptr),
+            reinterpret_cast<LPCDLGTEMPLATE>(dlgTpl.data()),
+            hBrowser,
+            UASPkgPickerDlgProc,
+            reinterpret_cast<LPARAM>(&pkgCtx));
+    }
+    if (pkgCtx.cancelled) return;
+
+    std::vector<std::string> chosenPkgs;
+    UAS_PkgFilter pkgFilter;
+    for (size_t i = 0; i < allPkgs.size(); ++i)
+    {
+        if (pkgCtx.selected[i])
+        {
+            chosenPkgs.push_back(allPkgs[i]);
+            pkgFilter.add(allPkgs[i]);
+        }
+    }
+    if (chosenPkgs.empty())
+    {
+        MessageBoxA(hBrowser, "Select at least one package.", "Build UAS", MB_OK);
+        return;
+    }
+
+    // OGG quality slider (no WAV/uncompressed option - PC SCCT Versus only
+    // plays back OGG-encoded UAS streams).
+    UASCompCtx compCtx = {};
+    compCtx.quality   = 50;   // 5.0 = Ubisoft-shipped default
+    compCtx.cancelled = true;
+    {
+        std::vector<uint8_t> dlgTpl = BuildUASCompDlgTemplate();
+        DialogBoxIndirectParamA(
+            GetModuleHandleA(nullptr),
+            reinterpret_cast<LPCDLGTEMPLATE>(dlgTpl.data()),
+            hBrowser,
+            UASCompDlgProc,
+            reinterpret_cast<LPARAM>(&compCtx));
+    }
+    if (compCtx.cancelled) return;
+    const float quality = compCtx.quality / 10.0f;
+
+    const UAS_BuildResult built = UAS_RunBuild(mapName, chosenPkgs, pkgFilter, quality);
+    const bool        ok           = built.ok;
+    const int         missingCount = built.missingCount;
+    const std::string missingList  = built.missingList;
 
     // Any missing source means UpdateStreamFile writes a ~1KB stub even though it
     // returns "ok", so only report success when every sound made it in.
@@ -5598,6 +5633,115 @@ static void SB_InstallRefreshLoadGuard()
         return;
     }
     Logger::log("SoundBrowser: the package refresh skips MyLevel");
+}
+
+// A package by name anywhere in memory (a root object of that name), whether
+// or not it holds Stream sounds.
+static bool UAS_PackageInMemory(const std::string& name)
+{
+    void** gobjData  = *reinterpret_cast<void***>(GOBJECTS_DATA);
+    int    gobjCount = *reinterpret_cast<int*>   (GOBJECTS_NUM);
+    if (!gobjData || gobjCount <= 0) return false;
+    for (int i = 0; i < gobjCount; ++i)
+    {
+        const uintptr_t obj = reinterpret_cast<uintptr_t>(gobjData[i]);
+        if (!obj || *reinterpret_cast<uintptr_t*>(obj + UOBJ_OUTER_OFFSET)) continue;
+        char objName[256] = {};
+        if (UAS_GetObjectFName(obj, objName, sizeof(objName)) && _stricmp(objName, name.c_str()) == 0) return true;
+    }
+    return false;
+}
+
+// The engine's progress window can leave its owner disabled; the bridge's
+// build puts back only what it found enabled, and never takes the focus.
+struct UAS_EnabledWindows
+{
+    std::vector<HWND> windows;
+    static BOOL CALLBACK Collect(HWND hwnd, LPARAM lParam)
+    {
+        if (IsWindowEnabled(hwnd)) reinterpret_cast<UAS_EnabledWindows*>(lParam)->windows.push_back(hwnd);
+        return TRUE;
+    }
+    UAS_EnabledWindows() { EnumThreadWindows(GetCurrentThreadId(), Collect, reinterpret_cast<LPARAM>(this)); }
+    void Restore() const { for (HWND hwnd : windows) if (IsWindow(hwnd) && !IsWindowEnabled(hwnd)) EnableWindow(hwnd, TRUE); }
+};
+
+Workflow::Json SoundBrowser::BuildUas(const std::string& mapName, const std::vector<std::string>& packages, float quality)
+{
+    using Workflow::Json;
+    auto plainName = [](const std::string& name)
+    {
+        if (name.empty() || name.size() > 63) return false;
+        for (unsigned char c : name) if (!isalnum(c) && c != '_' && c != '-') return false;
+        return true;
+    };
+    if (!plainName(mapName)) throw std::runtime_error("Save the map under a plain file name first: the .uas is named after it.");
+    if (!std::isfinite(quality) || quality < 0.0f || quality > 10.0f) throw std::runtime_error("UAS quality is an OGG quality from 0 to 10 (5 is the shipped default).");
+    for (const auto& package : packages)
+        if (!plainName(package)) throw std::runtime_error("Not a sound package name: " + package);
+
+    // Each wanted package that is not in memory at all comes from its file;
+    // one already loaded is never read again (unsaved sounds would be lost).
+    std::vector<std::string> loaded = UAS_EnumLoadedSoundPackages();
+    auto listed = [&](const std::string& name)
+    {
+        for (const auto& l : loaded) if (_stricmp(l.c_str(), name.c_str()) == 0) return true;
+        return false;
+    };
+    Json loadedNow = Json::array(), skipped = Json::array();
+    for (const auto& package : packages)
+    {
+        if (listed(package) || UAS_PackageInMemory(package)) continue;
+        const std::string file = "..\\Packages\\Sounds\\" + package + ".uax";
+        if (GetFileAttributesA(file.c_str()) == INVALID_FILE_ATTRIBUTES) { skipped.push_back(package); continue; }
+        ExecEditorCommand(("OBJ LOAD FILE=\"" + file + "\"").c_str());
+        loadedNow.push_back(package);
+    }
+    loaded = UAS_EnumLoadedSoundPackages();
+    std::vector<std::string> chosen;
+    UAS_PkgFilter filter;
+    Json chosenJson = Json::array(), empty = Json::array();
+    for (const auto& package : packages)
+    {
+        bool found = false;
+        for (const auto& l : loaded)
+            if (_stricmp(l.c_str(), package.c_str()) == 0 && std::find(chosen.begin(), chosen.end(), l) == chosen.end())
+            {
+                chosen.push_back(l); filter.add(l); chosenJson.push_back(l); found = true;
+            }
+        if (!found && UAS_PackageInMemory(package)) empty.push_back(package);
+    }
+    if (chosen.empty())
+        throw std::runtime_error("None of the packages has Stream-flagged sounds in memory, so there is nothing to build. Mark the map's streamed sounds "
+                                 "Stream in the Sound Browser (Amb_" + mapName + ".uax, Interface.uax), or list the packages that hold them.");
+
+    const UAS_EnabledWindows enabled;
+    const UAS_BuildResult built = UAS_RunBuild(mapName.c_str(), chosen, filter, quality);
+    enabled.Restore();
+
+    Json sounds = Json::array();
+    for (const auto& r : built.report)
+    {
+        if (sounds.size() >= 500) break;
+        sounds.push_back({{"package", r.package}, {"name", r.name}, {"status", UAS_StatusToShortString(r.status)}});
+    }
+    const std::string log = "..\\Packages\\Sounds\\" + mapName + ".uas.buildlog.txt";
+    if (built.missingCount > 0)
+    {
+        if (UAS_LocateOggenc().empty())
+            throw std::runtime_error("Build UAS could not compress the WAV files to OGG: oggenc.exe is not in the System folder. Put it there and build again.");
+        throw std::runtime_error("Build UAS left out " + std::to_string(built.missingCount) + " sound(s) with no source audio:\r\n" + built.missingList
+                                 + "Put a .wav or .ogg with each of those names into Packages\\Sounds and build again. The per-sound log is " + log + ".");
+    }
+    if (!built.ok)
+        throw std::runtime_error("Build UAS found all the audio but the editor could not write Packages\\Sounds\\" + mapName + ".uas (error "
+                                 + std::to_string(built.lastErr) + "). Close the game if it is running and build again; if the map was saved under a "
+                                 "new name in this session, reopen it first, as the editor's audio still names the old one.");
+    char full[MAX_PATH] = {};
+    const std::string relative = "..\\Packages\\Sounds\\" + mapName + ".uas";
+    if (!GetFullPathNameA(relative.c_str(), MAX_PATH, full, nullptr)) strncpy_s(full, relative.c_str(), _TRUNCATE);
+    return {{"file", full}, {"size", built.size}, {"packages", chosenJson}, {"loaded", loadedNow}, {"skipped", skipped}, {"withoutStreamSounds", empty},
+            {"encoded", built.encoded}, {"quality", quality}, {"sounds", sounds}, {"log", log}};
 }
 
 void SoundBrowser::Initialize()

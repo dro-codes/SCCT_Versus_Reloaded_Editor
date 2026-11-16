@@ -17,6 +17,8 @@ namespace
 {
     constexpr int kHeading=10,kList=11,kStatus=12,kTickAll=13;
     constexpr std::streamoff kMaximumExport=256LL*1024*1024;
+    // The open preview window, for the MCP bridge's CancelReview; one nested modal loop at a time.
+    HWND reviewWindow=nullptr;bool reviewing=false;
     // Streams the export to disk. Pretty-printing a large map's export into one string needs a contiguous block
     // the 32-bit editor rarely has once the map is loaded (ShipD failed with "bad allocation").
     void WriteExport(const std::filesystem::path& path,const Workflow::Json& document)
@@ -143,14 +145,15 @@ namespace
         if(message==WM_DESTROY && state && state->review->placement)WindowPlacement::Remember(window,state->review->placement);
         return DefWindowProc(window,message,w,l);
     }
-    bool Confirm(HWND owner,const Workflow::Json& preview,const Workflow::Json& document)
+    // The import flow and the MCP bridge both preview through this; title/apply name who asked.
+    bool Confirm(HWND owner,const Workflow::Json& preview,const Workflow::Json& document,const wchar_t* title=L"Preview Map JSON Import",const wchar_t* apply=L"Apply changes")
     {
         auto map=document.at("map").get<std::string>();if(map.rfind("unsaved:",0)==0)map="Unsaved map (current editor session)";else if(map=="*")map="The map that is open";
         std::string text="Map: "+map+"\r\n";
         if(!document.value("description",std::string{}).empty())text+=document.at("description").get<std::string>()+"\r\n";
         text+="Changes: "+preview.value("tally",std::string{})+"\r\n"+preview.at("note").get<std::string>()+"\r\n";
-        if(Workflow::Authoring::Deletes(document))text+="This file deletes actors (allowDeletes is on). Undo brings them back.\r\n";
-        Review review;review.title=L"Preview Map JSON Import";review.heading=Wide(text);review.hint=L"Click a row to select its actor in the map.";review.apply=L"Apply changes";
+        if(document.contains("operations") && Workflow::Authoring::Deletes(document))text+="This file deletes actors (allowDeletes is on). Undo brings them back.\r\n";
+        Review review;review.title=title;review.heading=Wide(text);review.hint=L"Click a row to select its actor in the map.";review.apply=apply;
         for(const auto& row:preview.value("rows",Workflow::Json::array()))
         {
             ReviewRow line;int i=0;
@@ -173,6 +176,7 @@ bool Show(HWND owner,const Review& review,std::vector<size_t>* ticked)
     WNDCLASSW cls{};cls.lpfnWndProc=PreviewProc;cls.hInstance=GetModuleHandle(nullptr);cls.lpszClassName=L"ReloadedMapAuthoringPreview";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
     auto window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,review.title.c_str(),WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT,920,660,owner,nullptr,cls.hInstance,&state);
     if(!window)throw std::runtime_error("Could not open the change list.");
+    reviewWindow=window;struct ClearReview{~ClearReview(){reviewWindow=nullptr;}}clearReview;
     if(review.placement)WindowPlacement::Restore(window,review.placement);
     EnableWindow(owner,FALSE);ShowWindow(window,SW_SHOW);MSG message{};
     while(IsWindow(window))
@@ -213,4 +217,17 @@ void Open(HWND owner,bool exporting)
     }
     catch(const std::exception& e){MessageBoxW(owner,Wide(e.what()).c_str(),L"Map JSON",MB_OK|MB_ICONERROR);}
 }
+// The MCP bridge's approval: previews preview/document through the import dialog and
+// returns true when the user chose Approve. CancelReview closes an open one as Cancel.
+bool ReviewChange(HWND owner,const Workflow::Json& preview,const Workflow::Json& document)
+{
+    if(reviewing)throw std::runtime_error("Another change preview is already open in the editor; answer it first.");
+    struct Guard{Guard(){reviewing=true;}~Guard(){reviewing=false;}}guard;
+    return Confirm(owner,preview,document,L"Approve a change from the MCP client",L"Approve");
+}
+void CancelReview()
+{
+    if(reviewWindow && IsWindow(reviewWindow))PostMessage(reviewWindow,WM_COMMAND,MAKEWPARAM(IDCANCEL,BN_CLICKED),0);
+}
+bool Reviewing(){return reviewing;}
 }

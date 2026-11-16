@@ -84,6 +84,8 @@ namespace Workflow::Editor
     Json RebuildPrefabInstances(const Json& definition, const Json& jobs);
     bool Compatible(const std::string& actorPath, const std::string& type);
     bool Exec(const std::string& command);
+    // The same, with what the command printed (the bridge's exec op).
+    bool Exec(const std::string& command, std::string& output);
     void Redraw();
     // The editor's main frame (the root window the menus belong to), or null.
     HWND MainWindow();
@@ -338,6 +340,23 @@ namespace Workflow::Editor
     Json AddAlarmLocks(const Json& alarm,const Json& targets);
     Json SetActorProperties(const Json& identity,const Json& properties);
     Json InspectSettingsActor(const Json& identity);
+    // The LevelInfo as settings.inspect reads it: InspectSettingsActor's
+    // snapshot plus the settings the property sheet leaves out that
+    // EditSettings (McpEditor.h) writes through ImportText (schema "direct").
+    Json LevelSettings();
+    // Textures built BSP surfaces in one Undo step: those listed by index,
+    // and those of the brushes whose faces point the named ways (floor up,
+    // ceiling down, +X east, -X west, +Y north, -Y south; all when none are
+    // named). Returns {surfaces, texture}.
+    Json TextureSurfaces(const std::string& texture, const Json& surfaces, const Json& brushes, const Json& faces);
+    // A loaded object that is not an actor or a class (a package's map
+    // settings, a material), by path: InspectActor's snapshot shape
+    // ({actor: identity, level, generation, values, schema, unavailable}), and
+    // its editable properties set in one Undo step, refused as stale when
+    // before (the values read) no longer matches. Returns the fresh snapshot.
+    // Which packages may be changed is the caller's rule.
+    Json InspectObject(const std::string& path);
+    Json SetObjectProperties(const std::string& path, const Json& properties, const Json& before = Json());
     Json CreateSecurityActor(const std::string& type,const Pose& pose,const Json& properties);
     Json CreateMotionSensor(const Vector& low,const Vector& high,const Json& properties);
     Json MoveSecurityActor(const Json& identity,const Pose& pose,const Json& properties,const Json& followers = Json{});

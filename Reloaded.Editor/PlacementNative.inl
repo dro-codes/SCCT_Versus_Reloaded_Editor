@@ -90,14 +90,15 @@ namespace
     // level geometry: what a pawn stands on) and the source actor, which the
     // trace ignores. It returns GMem's FCheckResult list, nearest first:
     // Next +0, Actor +4, Location +8, Normal +0x14. The FMemMark it is taken
-    // under is popped with 0x10e03004.
+    // under is popped with 0x10e03004. A null source ignores no actor
+    // (scene.trace); actor is what was hit (the LevelInfo for the BSP).
     struct PlaceFVec { float x,y,z; };
-    struct PlaceHit { int found; float location[3],normal[3]; };
+    struct PlaceHit { int found; float location[3],normal[3]; Address actor; };
     bool PlaceTraceRaw(Address level,Address source,const PlaceFVec* start,PlaceFVec end,PlaceHit* out)
     {
         __try
         {
-            out->found=0;
+            out->found=0;out->actor=0;
             const Address info=reinterpret_cast<Address(__thiscall*)(void*)>(0x10e047d3)(reinterpret_cast<void*>(level));
             Address mark[3]={0x11691d4c,*reinterpret_cast<Address*>(0x11691d4c),*reinterpret_cast<Address*>(0x11691d58)};
             const PlaceFVec extent{0,0,0};
@@ -105,7 +106,9 @@ namespace
             Address hit=reinterpret_cast<Check>(0x110bc2b0)(reinterpret_cast<void*>(level),0x11691d4c,end,start,&extent,info,0x86u,source);
             for(int i=0;hit && i<256;++i,hit=*reinterpret_cast<Address*>(hit))
             {
-                if(*reinterpret_cast<Address*>(hit+4)==source)continue;
+                const Address actor=*reinterpret_cast<Address*>(hit+4);
+                if(source && actor==source)continue;
+                out->actor=actor;
                 memcpy(out->location,reinterpret_cast<const void*>(hit+8),12);
                 memcpy(out->normal,reinterpret_cast<const void*>(hit+0x14),12);
                 out->found=1;break;

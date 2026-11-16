@@ -1,0 +1,1800 @@
+{
+ "label": "level_build VERSUS STARTER",
+ "post": [
+  {
+   "args": {},
+   "id": "build",
+   "op": "design.build"
+  },
+  {
+   "args": {},
+   "id": "check",
+   "op": "mapcheck.run"
+  },
+  {
+   "args": {
+    "changes": {
+     "ExpliMapInBriefSentry": "\"Hold the server room.\"",
+     "ExpliMapInBriefSpy": "\"Reach the server room and neutralize the server.\"",
+     "LegendMap": "\"STARTER|A three-room Versus layout\"",
+     "LegendMapInBrief": "\"1. Spy base|2. Server room|3. Merc base\"",
+     "MapName": "\"VERSUS STARTER\"",
+     "Modes": [
+      {
+       "GameModeId": "GM_Multi",
+       "RespawnTime": "10",
+       "SentriesLives": "0",
+       "SpiesLives": "0",
+       "TimeLimit": "10"
+      },
+      {
+       "GameModeId": "GM_DiskHunt",
+       "Handicap": "6",
+       "NumDisksMax": "6",
+       "RespawnTime": "10",
+       "ScoreLimit": "4",
+       "SentriesLives": "0",
+       "SpiesLives": "0",
+       "TimeLimit": "10"
+      },
+      {
+       "GameModeId": "GM_DeathMatch",
+       "RespawnTime": "10",
+       "SentriesLives": "0",
+       "SpiesLives": "0",
+       "TimeLimit": "10"
+      }
+     ],
+     "ModesStrings": [
+      {
+       "ExpliModeInBriefSentry": "\"\"",
+       "ExpliModeInBriefSpy": "\"\"",
+       "ExplicationModeSentry": "\"\"",
+       "ExplicationModeSpy": "\"\"",
+       "LegendModeInBriefSentry": "\"The spies must accomplish a certain number of mission objectives. The objectives can be of three kinds. The Mercenaries must prevent them or eliminate the spies.\"",
+       "LegendModeInBriefSpy": "\"The spies must accomplish a certain number of mission objectives. The objectives can be of three kinds. The Mercenaries must prevent them or eliminate the spies.\""
+      },
+      {
+       "ExpliModeInBriefSentry": "\"\"",
+       "ExpliModeInBriefSpy": "\"\"",
+       "ExplicationModeSentry": "\"\"",
+       "ExplicationModeSpy": "\"\"",
+       "LegendModeInBriefSentry": "\"The spies must go through the level and collect a certain number of disks. The Mercenaries must prevent them or eliminate the spies.\"",
+       "LegendModeInBriefSpy": "\"The spies must go through the level and collect a certain number of disks. The Mercenaries must prevent them or eliminate the spies.\""
+      },
+      {
+       "ExpliModeInBriefSentry": "\"\"",
+       "ExpliModeInBriefSpy": "\"\"",
+       "ExplicationModeSentry": "\"\"",
+       "ExplicationModeSpy": "\"\"",
+       "LegendModeInBriefSentry": "\"Both spies and mercenaries must eliminate the opposing team.\"",
+       "LegendModeInBriefSpy": "\"Both spies and mercenaries must eliminate the opposing team.\""
+      }
+     ]
+    }
+   },
+   "id": "mapsettings",
+   "op": "mapsettings.set",
+   "optional": true
+  },
+  {
+   "args": {
+    "maxEdge": 1024,
+    "viewport": "top"
+   },
+   "id": "screenshot",
+   "op": "view.screenshot"
+  }
+ ],
+ "steps": [
+  {
+   "args": {
+    "items": [
+     {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": true,
+       "construction": "Carve",
+       "height": 320.0,
+       "kind": "Room",
+       "length": 1024.0,
+       "name": "Objective room",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 1024.0
+      }
+     },
+     {
+      "position": [
+       -912.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       16384,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Corridor",
+       "length": 768.0,
+       "name": "West corridor",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 192.0
+      }
+     },
+     {
+      "position": [
+       912.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       16384,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Corridor",
+       "length": 768.0,
+       "name": "East corridor",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 192.0
+      }
+     },
+     {
+      "position": [
+       -1696.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": true,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Room",
+       "length": 768.0,
+       "name": "Spy spawn",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 768.0
+      }
+     },
+     {
+      "position": [
+       1696.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": true,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Room",
+       "length": 768.0,
+       "name": "Merc spawn",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 768.0
+      }
+     },
+     {
+      "position": [
+       -1504.0,
+       656.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 125.0,
+       "kind": "Vent",
+       "length": 512.0,
+       "name": "Vent from spy spawn",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 96.0
+      }
+     },
+     {
+      "position": [
+       -880.0,
+       864.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       16384,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 125.0,
+       "kind": "Vent",
+       "length": 1344.0,
+       "name": "Vent along",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 96.0
+      }
+     },
+     {
+      "position": [
+       -256.0,
+       720.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 125.0,
+       "kind": "Vent",
+       "length": 384.0,
+       "name": "Vent into objective room",
+       "portal": false,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 96.0
+      }
+     },
+     {
+      "position": [
+       -520.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       16384,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Doorway",
+       "length": 16.0,
+       "name": "West corridor portal",
+       "portal": true,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 192.0
+      }
+     },
+     {
+      "position": [
+       520.0,
+       0.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       16384,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 256.0,
+       "kind": "Doorway",
+       "length": 16.0,
+       "name": "East corridor portal",
+       "portal": true,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 192.0
+      }
+     },
+     {
+      "position": [
+       -256.0,
+       520.0,
+       0.0
+      ],
+      "previous": null,
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "spec": {
+       "ceiling": false,
+       "construction": "Carve",
+       "height": 125.0,
+       "kind": "Doorway",
+       "length": 16.0,
+       "name": "Vent into objective room portal",
+       "portal": true,
+       "steps": 8,
+       "thickness": 16.0,
+       "width": 96.0
+      }
+     }
+    ]
+   },
+   "id": "blocks1",
+   "op": "design.blockbatch"
+  },
+  {
+   "args": {
+    "document": {
+     "description": "The actors of VERSUS STARTER",
+     "format": "scct.map-changes",
+     "map": "*",
+     "operations": [
+      {
+       "class": "Engine.ZoneInfo",
+       "id": "SpyBase",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1696",
+         "Y": "0",
+         "Z": "128"
+        },
+        "LocationName": "\"Spy base\""
+       }
+      },
+      {
+       "class": "Engine.ZoneInfo",
+       "id": "ServerRoom",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "0",
+         "Y": "0",
+         "Z": "128"
+        },
+        "LocationName": "\"Server room\""
+       }
+      },
+      {
+       "class": "Engine.ZoneInfo",
+       "id": "MercBase",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1696",
+         "Y": "0",
+         "Z": "128"
+        },
+        "LocationName": "\"Merc base\""
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "SpyStart1",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1760",
+         "Y": "-64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "379"
+        },
+        "TeamNumber": "0"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "SpyStart2",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1632",
+         "Y": "-64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "409"
+        },
+        "TeamNumber": "0"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "SpyStart3",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1760",
+         "Y": "64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "65157"
+        },
+        "TeamNumber": "0"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "SpyStart4",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1632",
+         "Y": "64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "65127"
+        },
+        "TeamNumber": "0"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "MercStart1",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1632",
+         "Y": "-64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "32359"
+        },
+        "TeamNumber": "1"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "MercStart2",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1760",
+         "Y": "-64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "32389"
+        },
+        "TeamNumber": "1"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "MercStart3",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1632",
+         "Y": "64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "33177"
+        },
+        "TeamNumber": "1"
+       }
+      },
+      {
+       "class": "Engine.PlayerStart",
+       "id": "MercStart4",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1760",
+         "Y": "64",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "33147"
+        },
+        "TeamNumber": "1"
+       }
+      },
+      {
+       "class": "SBase.SAmmoStock",
+       "id": "AmmoStock",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1696",
+         "Y": "352",
+         "Z": "0"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "49152"
+        },
+        "bInteractInFront": "True",
+        "fInteractionHeight": "60",
+        "fInteractionRadius": "120"
+       }
+      },
+      {
+       "class": "SBase.SInfirmary",
+       "id": "Infirmary",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "1504",
+         "Y": "352",
+         "Z": "64"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "49152"
+        },
+        "bBlockActors": "True",
+        "bBlockPlayers": "True",
+        "bInteractInFront": "True",
+        "fInteractionHeight": "120",
+        "fInteractionRadius": "60"
+       }
+      },
+      {
+       "class": "SBase.SInfirmary",
+       "id": "Infirmary_2",
+       "op": "create",
+       "properties": {
+        "Location": {
+         "X": "-1696",
+         "Y": "352",
+         "Z": "64"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "49152"
+        },
+        "bBlockActors": "True",
+        "bBlockPlayers": "True",
+        "bInteractInFront": "True",
+        "fInteractionHeight": "120",
+        "fInteractionRadius": "60"
+       }
+      },
+      {
+       "class": "SBase.SComputerObjectiveTrigger",
+       "id": "ServerTerminal",
+       "op": "create",
+       "properties": {
+        "DominationCaptureTime": "10",
+        "Location": {
+         "X": "0",
+         "Y": "-256",
+         "Z": "78"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        },
+        "TriggerName": "\"Server\""
+       }
+      },
+      {
+       "class": "SBase.SObjective",
+       "id": "ServerObjective",
+       "op": "create",
+       "properties": {
+        "Description": "\"Neutralize the server\"",
+        "DescriptionDEF": "\"Protect the server\"",
+        "Location": {
+         "X": "0",
+         "Y": "256",
+         "Z": "64"
+        },
+        "ObjectiveName": "\"Server\"",
+        "Triggers": [
+         {
+          "$ref": "ServerTerminal"
+         }
+        ],
+        "TriggersERVisibilityZone": {
+         "$ref": "ServerRoom"
+        }
+       }
+      },
+      {
+       "class": "SBase.SLaserTrigger",
+       "id": "CorridorLaser",
+       "op": "create",
+       "properties": {
+        "DetectedClass": "Class'SBase.SPawnAttaque'",
+        "Event": "ServerAlarm",
+        "LaserLength": "184",
+        "Location": {
+         "X": "-720",
+         "Y": "-96",
+         "Z": "48"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "16384"
+        }
+       }
+      },
+      {
+       "class": "SBase.SAlarm",
+       "id": "ServerAlarm",
+       "op": "create",
+       "properties": {
+        "AlarmDescription": "\"Intruder in the west corridor\"",
+        "AlarmDescriptionSpy": "\"You've been detected\"",
+        "AlarmName": "\"Server alarm\"",
+        "Duration": "30",
+        "Events": [],
+        "Location": {
+         "X": "-720",
+         "Y": "-96",
+         "Z": "112"
+        },
+        "MessagePriority": "5",
+        "ObjectiveTriggersToLock": [
+         {
+          "$ref": "ServerTerminal"
+         }
+        ]
+       }
+      },
+      {
+       "class": "SBase.SCamNetwork",
+       "id": "CamServer",
+       "op": "create",
+       "properties": {
+        "CamName": "\"Server room\"",
+        "Location": {
+         "X": "-460.8",
+         "Y": "460.8",
+         "Z": "288"
+        },
+        "NextCam": {
+         "$ref": "CamWest"
+        },
+        "PitchConstraint": {
+         "X": "0",
+         "Y": "-60",
+         "Z": "10"
+        },
+        "PrevCam": {
+         "$ref": "CamEast"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "57344"
+        },
+        "YawConstraint": {
+         "X": "0",
+         "Y": "-90",
+         "Z": "90"
+        },
+        "bBlockActors": "True",
+        "bBlockPlayers": "True",
+        "bFirstCam": "True"
+       }
+      },
+      {
+       "class": "SBase.SCamNetwork",
+       "id": "CamWest",
+       "op": "create",
+       "properties": {
+        "CamName": "\"West corridor\"",
+        "Location": {
+         "X": "-1219.2",
+         "Y": "0",
+         "Z": "224"
+        },
+        "NextCam": {
+         "$ref": "CamEast"
+        },
+        "PrevCam": {
+         "$ref": "CamServer"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        },
+        "bBlockActors": "True",
+        "bBlockPlayers": "True",
+        "bFirstCam": "False"
+       }
+      },
+      {
+       "class": "SBase.SCamNetwork",
+       "id": "CamEast",
+       "op": "create",
+       "properties": {
+        "CamName": "\"East corridor\"",
+        "Location": {
+         "X": "1219.2",
+         "Y": "0",
+         "Z": "224"
+        },
+        "NextCam": {
+         "$ref": "CamServer"
+        },
+        "PrevCam": {
+         "$ref": "CamWest"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "32768"
+        },
+        "bBlockActors": "True",
+        "bBlockPlayers": "True",
+        "bFirstCam": "False"
+       }
+      },
+      {
+       "class": "SBase.SMission",
+       "id": "Mission",
+       "op": "create",
+       "properties": {
+        "Description": "\"Complete the mission\"",
+        "DescriptionDEF": "\"Defend the server room\"",
+        "GameMode": "GM_Multi",
+        "Location": {
+         "X": "0",
+         "Y": "256",
+         "Z": "64"
+        },
+        "MinimumObjectives": "1",
+        "ObjectiveName": "\"Mission\"",
+        "Objectives": [
+         {
+          "$ref": "ServerObjective"
+         }
+        ],
+        "bChained": "False"
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk1",
+       "op": "create",
+       "properties": {
+        "Group": "1",
+        "Location": {
+         "X": "-96",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk2",
+       "op": "create",
+       "properties": {
+        "Group": "2",
+        "Location": {
+         "X": "-1008",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk3",
+       "op": "create",
+       "properties": {
+        "Group": "3",
+        "Location": {
+         "X": "816",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk4",
+       "op": "create",
+       "properties": {
+        "Group": "1",
+        "Location": {
+         "X": "96",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk5",
+       "op": "create",
+       "properties": {
+        "Group": "2",
+        "Location": {
+         "X": "-816",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SDisk",
+       "id": "Disk6",
+       "op": "create",
+       "properties": {
+        "Group": "3",
+        "Location": {
+         "X": "1008",
+         "Y": "0",
+         "Z": "48"
+        },
+        "ResetTime": "30",
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "SBase.SMission",
+       "id": "DiskHunt",
+       "op": "create",
+       "properties": {
+        "Description": "\"Collect the disks\"",
+        "DescriptionDEF": "\"Stop the spies collecting the disks\"",
+        "GameMode": "GM_DiskHunt",
+        "Location": {
+         "X": "0",
+         "Y": "0",
+         "Z": "80"
+        },
+        "ObjectiveName": "\"Disk Hunt\"",
+        "Triggers": [
+         {
+          "$ref": "Disk1"
+         },
+         {
+          "$ref": "Disk2"
+         },
+         {
+          "$ref": "Disk3"
+         },
+         {
+          "$ref": "Disk4"
+         },
+         {
+          "$ref": "Disk5"
+         },
+         {
+          "$ref": "Disk6"
+         }
+        ]
+       }
+      },
+      {
+       "class": "SBase.SMagicEvent",
+       "id": "SecurityOff",
+       "op": "create",
+       "properties": {
+        "Groups": [
+         {
+          "EventGroup": [
+           {
+            "Delay": "0",
+            "Event": "CorridorLaser",
+            "Type": "EVT_Untrigger",
+            "ValidOn": "EVT_Trigger"
+           }
+          ],
+          "Repeat": "0",
+          "Sequence": "False",
+          "SequenceIndex": "0"
+         }
+        ],
+        "Location": {
+         "X": "0",
+         "Y": "0",
+         "Z": "96"
+        }
+       }
+      },
+      {
+       "class": "SBase.SMission",
+       "id": "Deathmatch",
+       "op": "create",
+       "properties": {
+        "AtResetEvent": "SecurityOff",
+        "Description": "\"Eliminate the mercenaries\"",
+        "DescriptionDEF": "\"Eliminate the spies\"",
+        "GameMode": "GM_DeathMatch",
+        "Location": {
+         "X": "0",
+         "Y": "0",
+         "Z": "96"
+        },
+        "ObjectiveName": "\"Deathmatch\""
+       }
+      },
+      {
+       "class": "Engine.Light",
+       "id": "ObjectiveRoom_Light",
+       "op": "create",
+       "properties": {
+        "EchelonRange": "400",
+        "LightBrightness": "64",
+        "LightEffect": "LE_None",
+        "LightHue": "0",
+        "LightRadius": "16",
+        "LightSaturation": "255",
+        "LightType": "LT_Steady",
+        "Location": {
+         "X": "0",
+         "Y": "0",
+         "Z": "296"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "Engine.Light",
+       "id": "SpySpawn_Light",
+       "op": "create",
+       "properties": {
+        "EchelonRange": "400",
+        "LightBrightness": "64",
+        "LightEffect": "LE_None",
+        "LightHue": "0",
+        "LightRadius": "16",
+        "LightSaturation": "255",
+        "LightType": "LT_Steady",
+        "Location": {
+         "X": "-1696",
+         "Y": "0",
+         "Z": "232"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      },
+      {
+       "class": "Engine.Light",
+       "id": "MercSpawn_Light",
+       "op": "create",
+       "properties": {
+        "EchelonRange": "400",
+        "LightBrightness": "64",
+        "LightEffect": "LE_None",
+        "LightHue": "0",
+        "LightRadius": "16",
+        "LightSaturation": "255",
+        "LightType": "LT_Steady",
+        "Location": {
+         "X": "1696",
+         "Y": "0",
+         "Z": "232"
+        },
+        "Rotation": {
+         "Pitch": "0",
+         "Roll": "0",
+         "Yaw": "0"
+        }
+       }
+      }
+     ],
+     "version": 2
+    }
+   },
+   "id": "actors",
+   "op": "authoring.apply"
+  },
+  {
+   "args": {},
+   "id": "settings",
+   "op": "settings.inspect"
+  },
+  {
+   "args": {
+    "changes": {
+     "MTVOffset": "52",
+     "MTVSlope": "85"
+    },
+    "snapshot": {
+     "$bind": {
+      "step": "settings"
+     }
+    }
+   },
+   "id": "settings_edit",
+   "op": "settings.edit"
+  },
+  {
+   "args": {
+    "pieces": [
+     {
+      "$bind": {
+       "step": "blocks1"
+      }
+     }
+    ]
+   },
+   "id": "register",
+   "op": "design.register"
+  },
+  {
+   "args": {
+    "sidecar": {
+     "actors": {
+      "AmmoStock": {
+       "$bind": {
+        "ptr": "/identities/AmmoStock",
+        "step": "actors"
+       }
+      },
+      "CamEast": {
+       "$bind": {
+        "ptr": "/identities/CamEast",
+        "step": "actors"
+       }
+      },
+      "CamServer": {
+       "$bind": {
+        "ptr": "/identities/CamServer",
+        "step": "actors"
+       }
+      },
+      "CamWest": {
+       "$bind": {
+        "ptr": "/identities/CamWest",
+        "step": "actors"
+       }
+      },
+      "CorridorLaser": {
+       "$bind": {
+        "ptr": "/identities/CorridorLaser",
+        "step": "actors"
+       }
+      },
+      "Deathmatch": {
+       "$bind": {
+        "ptr": "/identities/Deathmatch",
+        "step": "actors"
+       }
+      },
+      "Disk1": {
+       "$bind": {
+        "ptr": "/identities/Disk1",
+        "step": "actors"
+       }
+      },
+      "Disk2": {
+       "$bind": {
+        "ptr": "/identities/Disk2",
+        "step": "actors"
+       }
+      },
+      "Disk3": {
+       "$bind": {
+        "ptr": "/identities/Disk3",
+        "step": "actors"
+       }
+      },
+      "Disk4": {
+       "$bind": {
+        "ptr": "/identities/Disk4",
+        "step": "actors"
+       }
+      },
+      "Disk5": {
+       "$bind": {
+        "ptr": "/identities/Disk5",
+        "step": "actors"
+       }
+      },
+      "Disk6": {
+       "$bind": {
+        "ptr": "/identities/Disk6",
+        "step": "actors"
+       }
+      },
+      "DiskHunt": {
+       "$bind": {
+        "ptr": "/identities/DiskHunt",
+        "step": "actors"
+       }
+      },
+      "Infirmary": {
+       "$bind": {
+        "ptr": "/identities/Infirmary",
+        "step": "actors"
+       }
+      },
+      "Infirmary_2": {
+       "$bind": {
+        "ptr": "/identities/Infirmary_2",
+        "step": "actors"
+       }
+      },
+      "MercBase": {
+       "$bind": {
+        "ptr": "/identities/MercBase",
+        "step": "actors"
+       }
+      },
+      "MercSpawn_Light": {
+       "$bind": {
+        "ptr": "/identities/MercSpawn_Light",
+        "step": "actors"
+       }
+      },
+      "MercStart1": {
+       "$bind": {
+        "ptr": "/identities/MercStart1",
+        "step": "actors"
+       }
+      },
+      "MercStart2": {
+       "$bind": {
+        "ptr": "/identities/MercStart2",
+        "step": "actors"
+       }
+      },
+      "MercStart3": {
+       "$bind": {
+        "ptr": "/identities/MercStart3",
+        "step": "actors"
+       }
+      },
+      "MercStart4": {
+       "$bind": {
+        "ptr": "/identities/MercStart4",
+        "step": "actors"
+       }
+      },
+      "Mission": {
+       "$bind": {
+        "ptr": "/identities/Mission",
+        "step": "actors"
+       }
+      },
+      "ObjectiveRoom_Light": {
+       "$bind": {
+        "ptr": "/identities/ObjectiveRoom_Light",
+        "step": "actors"
+       }
+      },
+      "SecurityOff": {
+       "$bind": {
+        "ptr": "/identities/SecurityOff",
+        "step": "actors"
+       }
+      },
+      "ServerAlarm": {
+       "$bind": {
+        "ptr": "/identities/ServerAlarm",
+        "step": "actors"
+       }
+      },
+      "ServerObjective": {
+       "$bind": {
+        "ptr": "/identities/ServerObjective",
+        "step": "actors"
+       }
+      },
+      "ServerRoom": {
+       "$bind": {
+        "ptr": "/identities/ServerRoom",
+        "step": "actors"
+       }
+      },
+      "ServerTerminal": {
+       "$bind": {
+        "ptr": "/identities/ServerTerminal",
+        "step": "actors"
+       }
+      },
+      "SpyBase": {
+       "$bind": {
+        "ptr": "/identities/SpyBase",
+        "step": "actors"
+       }
+      },
+      "SpySpawn_Light": {
+       "$bind": {
+        "ptr": "/identities/SpySpawn_Light",
+        "step": "actors"
+       }
+      },
+      "SpyStart1": {
+       "$bind": {
+        "ptr": "/identities/SpyStart1",
+        "step": "actors"
+       }
+      },
+      "SpyStart2": {
+       "$bind": {
+        "ptr": "/identities/SpyStart2",
+        "step": "actors"
+       }
+      },
+      "SpyStart3": {
+       "$bind": {
+        "ptr": "/identities/SpyStart3",
+        "step": "actors"
+       }
+      },
+      "SpyStart4": {
+       "$bind": {
+        "ptr": "/identities/SpyStart4",
+        "step": "actors"
+       }
+      }
+     },
+     "brushMode": "pieces",
+     "format": "scct.level-sidecar",
+     "ges": [],
+     "hash": "6f34ee9db4c03347",
+     "map": "VERSUS STARTER",
+     "pieces": {
+      "EastCorridor": {
+       "$bind": {
+        "ptr": "/2",
+        "step": "blocks1"
+       }
+      },
+      "EastCorridor_Portal": {
+       "$bind": {
+        "ptr": "/9",
+        "step": "blocks1"
+       }
+      },
+      "MercSpawn": {
+       "$bind": {
+        "ptr": "/4",
+        "step": "blocks1"
+       }
+      },
+      "ObjectiveRoom": {
+       "$bind": {
+        "ptr": "/0",
+        "step": "blocks1"
+       }
+      },
+      "SpySpawn": {
+       "$bind": {
+        "ptr": "/3",
+        "step": "blocks1"
+       }
+      },
+      "SpyVent": {
+       "$bind": {
+        "ptr": "/5",
+        "step": "blocks1"
+       }
+      },
+      "VentAlong": {
+       "$bind": {
+        "ptr": "/6",
+        "step": "blocks1"
+       }
+      },
+      "VentDrop": {
+       "$bind": {
+        "ptr": "/7",
+        "step": "blocks1"
+       }
+      },
+      "VentDrop_Portal": {
+       "$bind": {
+        "ptr": "/10",
+        "step": "blocks1"
+       }
+      },
+      "WestCorridor": {
+       "$bind": {
+        "ptr": "/1",
+        "step": "blocks1"
+       }
+      },
+      "WestCorridor_Portal": {
+       "$bind": {
+        "ptr": "/8",
+        "step": "blocks1"
+       }
+      }
+     },
+     "spec": {
+      "defaults": {
+       "construction": "Carve",
+       "lights": "rooms",
+       "startsPerTeam": 4,
+       "thickness": 16
+      },
+      "environment": {
+       "ingredients": [
+        {
+         "in": "MercSpawn",
+         "kind": "ammo"
+        },
+        {
+         "in": "MercSpawn",
+         "kind": "infirmary"
+        },
+        {
+         "in": "SpySpawn",
+         "kind": "infirmary"
+        }
+       ]
+      },
+      "format": "scct.level-spec",
+      "gameplay": {
+       "deathmatch": {
+        "disableSecurity": true,
+        "mission": {
+         "id": "Deathmatch"
+        }
+       },
+       "diskhunt": {
+        "disks": {
+         "count": 6,
+         "in": [
+          "ObjectiveRoom",
+          "WestCorridor",
+          "EastCorridor"
+         ]
+        },
+        "mission": {
+         "description": "Collect the disks",
+         "descriptionDef": "Stop the spies collecting the disks",
+         "id": "DiskHunt"
+        },
+        "resetTime": 30
+       },
+       "modes": [
+        "story",
+        "diskhunt",
+        "deathmatch"
+       ],
+       "story": {
+        "mission": {
+         "description": "Complete the mission",
+         "descriptionDef": "Defend the server room",
+         "id": "Mission",
+         "name": "Mission"
+        },
+        "objectives": [
+         {
+          "at": {
+           "h": "floor+64",
+           "in": "ObjectiveRoom",
+           "v": 0.25
+          },
+          "description": "Neutralize the server",
+          "descriptionDef": "Protect the server",
+          "id": "ServerObjective",
+          "name": "Server",
+          "triggers": [
+           {
+            "at": {
+             "in": "ObjectiveRoom",
+             "v": -0.25
+            },
+            "dominationCaptureTime": 10,
+            "id": "ServerTerminal",
+            "kind": "terminal",
+            "triggerName": "Server"
+           }
+          ],
+          "visibilityZone": "ServerRoom"
+         }
+        ]
+       }
+      },
+      "geometry": {
+       "pieces": [
+        {
+         "at": [
+          0,
+          0
+         ],
+         "id": "ObjectiveRoom",
+         "kind": "Room",
+         "name": "Objective room",
+         "size": [
+          1024,
+          1024,
+          320
+         ],
+         "storey": "Ground"
+        },
+        {
+         "attach": {
+          "side": "west",
+          "to": "ObjectiveRoom"
+         },
+         "id": "WestCorridor",
+         "kind": "Corridor",
+         "name": "West corridor",
+         "size": [
+          192,
+          768,
+          256
+         ]
+        },
+        {
+         "attach": {
+          "side": "east",
+          "to": "ObjectiveRoom"
+         },
+         "id": "EastCorridor",
+         "kind": "Corridor",
+         "name": "East corridor",
+         "size": [
+          192,
+          768,
+          256
+         ]
+        },
+        {
+         "at": [
+          -1696,
+          0
+         ],
+         "id": "SpySpawn",
+         "kind": "Room",
+         "name": "Spy spawn",
+         "size": [
+          768,
+          768,
+          256
+         ],
+         "storey": "Ground"
+        },
+        {
+         "at": [
+          1696,
+          0
+         ],
+         "id": "MercSpawn",
+         "kind": "Room",
+         "name": "Merc spawn",
+         "size": [
+          768,
+          768,
+          256
+         ],
+         "storey": "Ground"
+        },
+        {
+         "attach": {
+          "offset": 192,
+          "side": "north",
+          "to": "SpySpawn"
+         },
+         "id": "SpyVent",
+         "kind": "Vent",
+         "name": "Vent from spy spawn",
+         "size": [
+          96,
+          512,
+          125
+         ]
+        },
+        {
+         "at": [
+          -880,
+          864
+         ],
+         "id": "VentAlong",
+         "kind": "Vent",
+         "name": "Vent along",
+         "size": [
+          96,
+          1344,
+          125
+         ],
+         "storey": "Ground",
+         "yaw": 90
+        },
+        {
+         "attach": {
+          "offset": -256,
+          "side": "north",
+          "to": "ObjectiveRoom"
+         },
+         "id": "VentDrop",
+         "kind": "Vent",
+         "name": "Vent into objective room",
+         "size": [
+          96,
+          384,
+          125
+         ]
+        }
+       ]
+      },
+      "level": {
+       "motionTracking": "standard"
+      },
+      "map": {
+       "file": "VersD",
+       "name": "VERSUS STARTER"
+      },
+      "profile": "release",
+      "provenance": {
+       "notes": "Spies spawn west, mercs east, the objective in the middle; a crouch-height vent runs from the spy spawn into the objective room.",
+       "source": "RE+ Map Design Versus Starter Layout (ElementPanel.inl), with the wiki's gaps filled: four starts a team, the terminal at floor+78, a three-camera CamNet loop, zones and all three modes."
+      },
+      "security": {
+       "alarms": [
+        {
+         "description": "Intruder in the west corridor",
+         "descriptionSpy": "You've been detected",
+         "duration": 30,
+         "id": "ServerAlarm",
+         "lockObjectives": [
+          "ServerTerminal"
+         ],
+         "name": "Server alarm",
+         "priority": 5
+        }
+       ],
+       "camnet": [
+        {
+         "at": {
+          "h": "ceiling-32",
+          "in": "ObjectiveRoom",
+          "u": -0.45,
+          "v": 0.45
+         },
+         "camName": "Server room",
+         "constraints": {
+          "pitch": [
+           -60,
+           10
+          ],
+          "yaw": [
+           -90,
+           90
+          ]
+         },
+         "first": true,
+         "id": "CamServer"
+        },
+        {
+         "at": {
+          "h": "ceiling-32",
+          "in": "WestCorridor",
+          "v": 0.4
+         },
+         "camName": "West corridor",
+         "id": "CamWest"
+        },
+        {
+         "at": {
+          "h": "ceiling-32",
+          "in": "EastCorridor",
+          "v": -0.4
+         },
+         "camName": "East corridor",
+         "id": "CamEast"
+        }
+       ],
+       "devices": [
+        {
+         "alarm": "ServerAlarm",
+         "at": {
+          "in": "WestCorridor",
+          "u": -0.5,
+          "v": -0.25
+         },
+         "detected": "spy",
+         "facing": 90,
+         "id": "CorridorLaser",
+         "kind": "laser",
+         "length": 184
+        }
+       ]
+      },
+      "settings": {
+       "briefMerc": "Hold the server room.",
+       "briefSpy": "Reach the server room and neutralize the server.",
+       "legend": "STARTER|A three-room Versus layout",
+       "legendInBrief": "1. Spy base|2. Server room|3. Merc base",
+       "mapName": "VERSUS STARTER",
+       "modes": [
+        {
+         "mode": "story",
+         "respawn": 10,
+         "sentriesLives": 0,
+         "spiesLives": 0,
+         "timeLimit": 10
+        },
+        {
+         "handicap": 6,
+         "mode": "diskhunt",
+         "numDisksMax": 6,
+         "respawn": 10,
+         "scoreLimit": 4,
+         "timeLimit": 10
+        },
+        {
+         "mode": "deathmatch",
+         "respawn": 10,
+         "timeLimit": 10
+        }
+       ]
+      },
+      "spawns": {
+       "merc": {
+        "count": 4,
+        "facing": {
+         "toward": "ObjectiveRoom"
+        },
+        "in": "MercSpawn"
+       },
+       "spy": {
+        "count": 4,
+        "facing": {
+         "toward": "ObjectiveRoom"
+        },
+        "in": "SpySpawn"
+       }
+      },
+      "storeys": [
+       {
+        "id": "Ground",
+        "name": "Ground floor",
+        "z": 0
+       }
+      ],
+      "units": {
+       "unit": "uu",
+       "uuPerMetre": 100
+      },
+      "version": 1,
+      "zones": [
+       {
+        "id": "SpyBase",
+        "locationName": "Spy base",
+        "spaces": [
+         "SpySpawn",
+         "WestCorridor",
+         "SpyVent",
+         "VentAlong",
+         "VentDrop"
+        ]
+       },
+       {
+        "id": "ServerRoom",
+        "locationName": "Server room",
+        "spaces": [
+         "ObjectiveRoom"
+        ]
+       },
+       {
+        "id": "MercBase",
+        "locationName": "Merc base",
+        "spaces": [
+         "MercSpawn",
+         "EastCorridor"
+        ]
+       }
+      ]
+     },
+     "version": 1
+    }
+   },
+   "id": "sidecar",
+   "op": "mcp.sidecar.set"
+  }
+ ]
+}

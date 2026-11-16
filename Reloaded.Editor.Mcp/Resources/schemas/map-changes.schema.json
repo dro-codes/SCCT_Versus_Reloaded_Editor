@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scct://schema/map-changes",
+  "title": "scct.map-changes versions 1-3",
+  "description": "An RE+ Map JSON change file (docs/MapAuthoring.md, scct://docs/map-authoring), applied by View > Import Map from JSON..., the bridge op authoring.apply, map_changes_apply and level_build. Version 1: create, component, update, link. Version 2 adds load, texture, save, surface, polygon brushes and map \"*\". Version 3 adds delete with allowDeletes. Unknown fields are rejected everywhere. Every property leaf is a string: numbers \"64\", bools \"True\"/\"False\", enums bare, text JSON-quoted (\"\\\"Door\\\"\"), structs complete, object references {\"$ref\": id} or an exported path. Map changes apply in one Undo step: deletes, creates, components, properties, links; package loads, imports and saves run first and cannot be undone. The editor's own checks (live class schema, exported before values, package rules) go further than this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "map", "operations"],
+  "properties": {
+    "format": {"const": "scct.map-changes"},
+    "version": {"enum": [1, 2, 3], "description": "3 is the latest; version 1 and 2 files keep working unchanged."},
+    "map": {"type": "string", "minLength": 1, "description": "The destination map exactly as exported (snapshot.map / authoring.mapid), or \"*\" for the map that is open (version 2 and later, not with deletes)."},
+    "description": {"type": "string"},
+    "expect": {
+      "type": "object",
+      "description": "Exported values of existing objects a link or component touches, keyed by exact object path; stale links and attachments are refused.",
+      "additionalProperties": {"$ref": "#/$defs/values"}
+    },
+    "allowDeletes": {"type": "boolean", "description": "Version 3 only: required (true) for a file that deletes actors."},
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "description": "At most 2,000 operations in version 1 and 20,000 in versions 2 and 3.",
+      "items": {"$ref": "#/$defs/operation"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"version": {"const": 1}}},
+      "then": {
+        "not": {"required": ["allowDeletes"]},
+        "properties": {
+          "map": {"not": {"const": "*"}},
+          "operations": {"maxItems": 2000, "items": {"properties": {"op": {"enum": ["create", "component", "update", "link"]}, "geometry": {"enum": ["point", "box"]}}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"version": {"const": 2}}},
+      "then": {
+        "not": {"required": ["allowDeletes"]},
+        "properties": {"operations": {"items": {"properties": {"op": {"not": {"const": "delete"}}}}}}
+      }
+    },
+    {
+      "if": {"required": ["operations"], "properties": {"operations": {"contains": {"type": "object", "properties": {"op": {"const": "delete"}}, "required": ["op"]}}}},
+      "then": {
+        "required": ["allowDeletes"],
+        "properties": {"version": {"const": 3}, "allowDeletes": {"const": true}, "map": {"not": {"const": "*"}}}
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "description": "A creation id: up to 63 letters, digits and underscores, not starting with a digit; unique in the file ignoring case. The new actor's Tag defaults to it."
+    },
+    "assetName": {"type": "string", "pattern": "^[A-Za-z0-9_]{1,63}$"},
+    "assetPath": {"type": "string", "pattern": "^[A-Za-z0-9_]{1,63}(\\.[A-Za-z0-9_]{1,63}){1,3}$", "description": "Package.Name or Package.Group.Name."},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "class"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "description": "Exported object path, such as MyLevel.Light12."},
+        "class": {"type": "string", "minLength": 1, "description": "Class path, such as Engine.Light."}
+      }
+    },
+    "value": {
+      "description": "A property value: a string leaf, a struct (object of values; every field), an array of values, or {\"$ref\": id-or-path}.",
+      "anyOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/value"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "values": {"type": "object", "additionalProperties": {"$ref": "#/$defs/value"}},
+    "point": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "number", "minimum": -1048576, "maximum": 1048576}
+    },
+    "polygon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vertices"],
+      "properties": {
+        "vertices": {"type": "array", "minItems": 3, "maxItems": 16, "items": {"$ref": "#/$defs/point"}, "description": "3-16 points local to the brush's Location, in the editor's brush-face winding; split larger faces."},
+        "texture": {"$ref": "#/$defs/assetPath"},
+        "flags": {"type": "integer", "minimum": 0, "maximum": 4294967295, "description": "PolyFlags, unsigned 32-bit."},
+        "origin": {"$ref": "#/$defs/point"},
+        "textureU": {"$ref": "#/$defs/point"},
+        "textureV": {"$ref": "#/$defs/point"},
+        "pan": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": -65536, "maximum": 65536}, "description": "[U, V]."}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["op"],
+      "properties": {"op": {"enum": ["create", "component", "update", "link", "load", "texture", "save", "surface", "delete"]}},
+      "oneOf": [
+        {"$ref": "#/$defs/create"},
+        {"$ref": "#/$defs/component"},
+        {"$ref": "#/$defs/update"},
+        {"$ref": "#/$defs/link"},
+        {"$ref": "#/$defs/load"},
+        {"$ref": "#/$defs/texture"},
+        {"$ref": "#/$defs/save"},
+        {"$ref": "#/$defs/surface"},
+        {"$ref": "#/$defs/delete"}
+      ]
+    },
+    "create": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "id", "class", "properties"],
+      "description": "Create an actor of a loaded class. Location is mandatory; omitted properties keep native class defaults. geometry point (default) for ordinary actors; box (always a 256 uu cube) or polygons (version 2) for brush classes.",
+      "properties": {
+        "op": {"const": "create"},
+        "id": {"$ref": "#/$defs/id"},
+        "class": {"type": "string", "minLength": 1},
+        "geometry": {"enum": ["point", "box", "polygons"]},
+        "polygons": {"type": "array", "minItems": 1, "maxItems": 16384, "items": {"$ref": "#/$defs/polygon"}},
+        "properties": {
+          "allOf": [{"$ref": "#/$defs/values"}],
+          "required": ["Location"],
+          "properties": {
+            "Location": {"type": "object", "additionalProperties": false, "required": ["X", "Y", "Z"], "properties": {"X": {"type": "string"}, "Y": {"type": "string"}, "Z": {"type": "string"}}},
+            "Rotation": {"type": "object", "additionalProperties": false, "required": ["Pitch", "Yaw", "Roll"], "properties": {"Pitch": {"type": "string"}, "Yaw": {"type": "string"}, "Roll": {"type": "string"}}, "description": "65536 units per turn."}
+          }
+        }
+      },
+      "if": {"required": ["geometry"], "properties": {"geometry": {"const": "polygons"}}},
+      "then": {"required": ["polygons"]},
+      "else": {"not": {"required": ["polygons"]}}
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "id", "class", "owner", "properties"],
+      "description": "A particle-emitter component appended to its owner's Emitters (do not also replace Emitters in the same file).",
+      "properties": {
+        "op": {"const": "component"},
+        "id": {"$ref": "#/$defs/id"},
+        "class": {"type": "string", "minLength": 1, "description": "Such as Engine.SpriteEmitter."},
+        "owner": {"type": "string", "minLength": 1, "description": "A creation id in this file or an existing emitter's exported path (add it to expect)."},
+        "properties": {"$ref": "#/$defs/values"}
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "actor", "before", "properties"],
+      "description": "Change an existing actor or component. before is its complete exported values; any change since export rejects the update. One update per object.",
+      "properties": {
+        "op": {"const": "update"},
+        "actor": {"$ref": "#/$defs/identity"},
+        "before": {"$ref": "#/$defs/values"},
+        "properties": {"$ref": "#/$defs/values"}
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "event", "target", "trigger"],
+      "description": "trigger true: set the target's Event to the SMagicEvent's Tag (the target triggers the event). trigger false: append an action aimed at the target's Tag to the event's group, after a delay.",
+      "properties": {
+        "op": {"const": "link"},
+        "event": {"type": "string", "minLength": 1, "description": "The SMagicEvent: creation id or exported path."},
+        "target": {"type": "string", "minLength": 1, "description": "Creation id or exported path."},
+        "trigger": {"type": "boolean"},
+        "group": {"type": "integer", "minimum": 0, "description": "Event group index (default 0); an event with no groups gets its first group."},
+        "delay": {"type": "string", "pattern": "^\\+?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$", "description": "Seconds, 0-86400, as a string. Actions only (not with trigger true)."}
+      },
+      "if": {"properties": {"trigger": {"const": true}}},
+      "then": {"not": {"required": ["delay"]}}
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "package"],
+      "description": "Version 2. Load a package by name: System\\<name>.u, then Packages\\Textures .utx, StaticMeshes .usx, Animations .ukx, Sounds .uax/.uas.",
+      "properties": {"op": {"const": "load"}, "package": {"$ref": "#/$defs/assetName"}}
+    },
+    "texture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "package", "name", "file"],
+      "description": "Version 2. Import a texture: sides powers of two up to 8192 (4096 practical); the path is Package.Group.Name or Package.Name. Importing over an existing texture is rejected.",
+      "properties": {
+        "op": {"const": "texture"},
+        "package": {"$ref": "#/$defs/assetName"},
+        "group": {"$ref": "#/$defs/assetName"},
+        "name": {"$ref": "#/$defs/assetName"},
+        "file": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\"\\r\\n]*\\.([bB][mM][pP]|[tT][gG][aA]|[pP][cC][xX]|[dD][dD][sS])$", "description": ".bmp, .tga, .pcx or .dds; relative paths are relative to the change file's folder (baseDirectory)."},
+        "format": {"enum": ["DXT1", "DXT3", "DXT5", "RGBA8"], "description": "Default DXT1; DXT5 for alpha. Omit for .dds, which keeps its own format and mips."},
+        "mips": {"type": "boolean", "description": "Default true: the whole mip chain."},
+        "masked": {"type": "boolean"},
+        "alphaTexture": {"type": "boolean"},
+        "lodSet": {"type": "integer", "minimum": 0, "maximum": 15}
+      },
+      "if": {"required": ["file"], "properties": {"file": {"pattern": "\\.[dD][dD][sS]$"}}},
+      "then": {"not": {"required": ["format"]}}
+    },
+    "save": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "package"],
+      "description": "Version 2. Save Packages\\Textures\\<package>.utx; only a package an earlier load or texture operation in this file names. overwrite replaces an existing file (backed up first).",
+      "properties": {"op": {"const": "save"}, "package": {"$ref": "#/$defs/assetName"}, "overwrite": {"type": "boolean"}}
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "surfaces", "texture"],
+      "description": "Version 2. Apply a material to BSP surfaces by index of the current BSP (rebuild geometry first).",
+      "properties": {
+        "op": {"const": "surface"},
+        "surfaces": {"type": "array", "minItems": 1, "maxItems": 2000000, "uniqueItems": true, "items": {"type": "integer", "minimum": 0, "maximum": 1999999}},
+        "texture": {"$ref": "#/$defs/assetPath"}
+      }
+    },
+    "delete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "actor", "before"],
+      "description": "Version 3. Delete one exported actor (at most 1,000 per file). before must equal its current values exactly. LevelInfo, the builder brush, cameras and particle components are never deleted; a deleted actor cannot be updated, linked, given a component or referenced in the same file.",
+      "properties": {
+        "op": {"const": "delete"},
+        "actor": {"allOf": [{"$ref": "#/$defs/identity"}], "properties": {"path": {"pattern": "\\."}}},
+        "before": {"allOf": [{"$ref": "#/$defs/values"}], "minProperties": 1}
+      }
+    }
+  }
+}

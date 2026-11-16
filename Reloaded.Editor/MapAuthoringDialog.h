@@ -3,6 +3,7 @@
 #include "WorkflowModel.h"
 #include <string>
 #include <vector>
+#include <filesystem>
 namespace MapAuthoringDialog
 {
     constexpr UINT Export=40934,Import=40935;
@@ -26,4 +27,11 @@ namespace MapAuthoringDialog
     bool Show(HWND owner,const Review& review,std::vector<size_t>* ticked=nullptr);
     // A list cell: UTF-8 to UTF-16, line breaks to spaces, long values shortened.
     std::wstring Cell(const std::string& text);
+    // The MCP bridge's approval: shows preview/document through Show() and returns
+    // true when the user chose Approve (preview: PreviewMapAuthoring's {rows, tally,
+    // note}; document: {map, description} at least). One at a time; CancelReview()
+    // closes an open one as Cancel, Reviewing() says whether one is open.
+    bool ReviewChange(HWND owner,const Workflow::Json& preview,const Workflow::Json& document);
+    void CancelReview();
+    bool Reviewing();
 }

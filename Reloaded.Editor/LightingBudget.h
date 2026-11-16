@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include "WorkflowModel.h"
 
 // Build > Lighting Budget...: in-game lights per zone, the worst BSP leaf and
 // the largest overlapping group, against the editor's own light-check limits
@@ -19,4 +20,8 @@ namespace LightingBudget
     // Runs on the UI thread before a stock build command. False cancels it.
     // Never prompts while Rebuild All Maps runs or when warnings are off.
     bool AllowBuild(UINT command);
+    // The budget as the window measures it, against the [LightingBudget]
+    // guideline, with the pre-build warning's verdict beside it (the bridge's
+    // lighting.budget). Lights are named by actor path. UI thread only.
+    Workflow::Json Measure();
 }
