@@ -40,7 +40,7 @@ namespace
     struct CheckFields
     {
         std::vector<std::string> classes;
-        int radius=-1,height=-1,collide=-1,block=-1;
+        int radius=-1,height=-1,collide=-1,block=-1,staticMesh=-1;
         unsigned collideMask=0,blockMask=0;
     };
     const CheckFields& FieldsOf(Address cls,std::map<Address,CheckFields>& cache)
@@ -57,10 +57,69 @@ namespace
             else if(name=="collisionheight")fields.height=offset;
             else if(name=="bcollideactors"){fields.collide=offset;fields.collideMask=Read<unsigned>(p+0x64);}
             else if(name=="bblockactors"){fields.block=offset;fields.blockMask=Read<unsigned>(p+0x64);}
+            else if(name=="staticmesh" && IsA(p,"ObjectProperty"))fields.staticMesh=offset;
         }
         return cache.emplace(cls,std::move(fields)).first->second;
     }
     bool EncroachFaultLogged=false;
+
+    // UStaticMesh collision (MapCheckModel.h, MeshCollision). These arrays are
+    // {data, count} pairs packed tighter than a TArray, so they are read here
+    // rather than with Array().
+    constexpr size_t kMeshPolyTriangles=0x104,kMeshPolyNodes=0x114,kMeshHullVertices=0x128,kMeshHullTriangles=0x148,kMeshHullNodes=0x150;
+    constexpr size_t kHullVertexStride=24,kHullTriangleStride=8,kCollisionNodeStride=12;
+    // The render index buffer count and RawTriangles' count, as Render Budget reads them.
+    constexpr size_t kCheckMeshIndexCount=0xc8,kMeshRawTriangleCount=0x194;
+    constexpr int kMeshArrayMost=4000000;
+
+    template<class T> std::vector<T> MeshBlock(Address mesh,size_t offset,size_t stride,int& count)
+    {
+        const Address data=Read<Address>(mesh+offset);
+        count=Read<int>(mesh+offset+4);
+        if(count<0 || count>kMeshArrayMost || (count && !data))throw std::runtime_error("A static mesh's collision data is invalid. Refresh to try again.");
+        std::vector<T> out;
+        if(count)
+        {
+            std::vector<unsigned char> bytes(static_cast<size_t>(count)*stride);
+            if(!CopyMemorySafe(bytes.data(),reinterpret_cast<void*>(data),bytes.size()))throw std::runtime_error("A static mesh's collision data could not be read. Refresh to try again.");
+            out.resize(static_cast<size_t>(count));
+            for(size_t i=0;i<out.size();++i)memcpy(&out[i],bytes.data()+i*stride,std::min(sizeof(T),stride));
+        }
+        return out;
+    }
+    int MeshArrayCount(Address mesh,size_t offset)
+    {
+        const int count=Read<int>(mesh+offset+4);
+        if(count<0 || count>kMeshArrayMost)throw std::runtime_error("A static mesh's collision data is invalid. Refresh to try again.");
+        return count;
+    }
+    // Distinct triangles a collision BSP's nodes hold (node: int16 triangle first).
+    int TrianglesInTree(Address mesh,size_t offset,int triangles,int& nodes)
+    {
+        const auto tree=MeshBlock<int16_t>(mesh,offset,kCollisionNodeStride,nodes);
+        std::vector<bool> held(static_cast<size_t>(std::max(0,triangles)));
+        int count=0;
+        for(auto t:tree)if(t>=0 && t<triangles && !held[static_cast<size_t>(t)]){held[static_cast<size_t>(t)]=true;++count;}
+        return count;
+    }
+    MapCheck::MeshCollision ReadMeshCollision(Address mesh)
+    {
+        MapCheck::MeshCollision out;
+        out.path=Path(mesh);out.name=NameOf(mesh);
+        const int indices=Read<int>(mesh+kCheckMeshIndexCount),raw=Read<int>(mesh+kMeshRawTriangleCount);
+        out.drawnTriangles=std::max(indices>0 && indices<30000000?indices/3:0,raw>0 && raw<10000000?raw:0);
+        out.polyTriangles=MeshArrayCount(mesh,kMeshPolyTriangles);
+        out.polyInTree=TrianglesInTree(mesh,kMeshPolyNodes,out.polyTriangles,out.polyNodes);
+        int vertexCount=0,triangleCount=0;
+        const auto vertices=MeshBlock<std::array<float,3>>(mesh,kMeshHullVertices,kHullVertexStride,vertexCount);
+        const auto triangles=MeshBlock<std::array<uint16_t,3>>(mesh,kMeshHullTriangles,kHullTriangleStride,triangleCount);
+        out.hullVertices.reserve(vertices.size());
+        for(const auto& v:vertices)out.hullVertices.push_back({v[0],v[1],v[2]});
+        out.hullTriangles.reserve(triangles.size());
+        for(const auto& t:triangles)out.hullTriangles.push_back({t[0],t[1],t[2]});
+        out.hullInTree=TrianglesInTree(mesh,kMeshHullNodes,static_cast<int>(out.hullTriangles.size()),out.hullNodes);
+        return out;
+    }
 }
 MapCheck::Scene MapCheckScene(const MapCheck::Settings& settings)
 {
@@ -157,6 +216,7 @@ MapCheck::Scene MapCheckScene(const MapCheck::Settings& settings)
     std::set<Address> brushesWithSurfaces;
     for(auto surface:surfaces){auto poly=Read<Address>(surface+0x20);if(auto actor=poly?Read<Address>(poly+0x14c):0)brushesWithSurfaces.insert(actor);}
     std::map<Address,CheckFields> cache;
+    std::map<Address,std::pair<std::vector<std::string>,bool>> meshUsers;   // mesh: its actors, whether one collides
     for(auto actor:live)
     {
         if(actor==builder || actor==levelInfo)continue;
@@ -200,8 +260,29 @@ MapCheck::Scene MapCheckScene(const MapCheck::Settings& settings)
                 else if(result && other && other!=actor && liveSet.count(other))item.encroachingActor=Path(other);
             }
         }
+        if(fields.staticMesh>=0)
+            if(auto mesh=Read<Address>(actor+fields.staticMesh))
+            {
+                auto& use=meshUsers[mesh];
+                use.first.push_back(item.path);
+                use.second=use.second || item.collideActors;
+            }
         scene.actors.push_back(std::move(item));
     }
+
+    // The collision of every static mesh the actors use.
+    for(const auto& [mesh,use]:meshUsers)
+    {
+        if(!IsA(mesh,"StaticMesh"))continue;
+        try
+        {
+            auto collision=ReadMeshCollision(mesh);
+            collision.actors=use.first;collision.colliding=use.second;
+            scene.meshes.push_back(std::move(collision));
+        }
+        catch(const std::exception& e){Logger::log("MapCheck: "+Path(mesh)+": "+e.what());}
+    }
+    std::sort(scene.meshes.begin(),scene.meshes.end(),[](const MapCheck::MeshCollision& a,const MapCheck::MeshCollision& b){return a.path<b.path;});
 
     // The stock Check Map for Errors: every actor's CheckForErrors, with its
     // entries taken from MapCheck_Add instead of the stock dialog.

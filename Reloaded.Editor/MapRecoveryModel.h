@@ -27,6 +27,7 @@ namespace MapRecoveryModel
         Merging,
         Materials,
         Assets,
+        Lights,
         Importing,
         BuildingGeometry,
         Lighting,
@@ -54,6 +55,7 @@ namespace MapRecoveryModel
             {"Merging fragmented geometry", 7},
             {"Restoring surface materials", 6},
             {"Preserving embedded assets", 2},
+            {"Recovering lost lights", 8},
             {"Importing the source map", 4},
             {"Building geometry", 28},
             {"Restoring lighting", 24},
@@ -116,6 +118,20 @@ namespace MapRecoveryModel
         std::size_t polygons = 0;       // polygons written for the editor (all brushes)
         std::size_t unifiedSurfaces = 0;
         std::size_t actors = 0;
+        // What a tolerant recovery left out or stood in for (all listed in
+        // the report's rows).
+        std::size_t cellsLeftOut = 0;      // open to the outside, degenerate, or slivers
+        std::size_t brushesLeftOut = 0;    // brushes the editor could not import
+        std::size_t unsurfacedWalls = 0;   // brushes with a wall the compiled map drew nothing on (invisible)
+        std::size_t undividedSurfaces = 0; // faces whose material divisions could not be kept
+        std::size_t spaceProbes = 0;       // solid/empty samples compared after the rebuild
+        std::size_t spaceMisses = 0;       // samples the rebuild left different
+        // Lights the cook stripped, brought back (all listed in the report).
+        std::size_t lightsKeptInFile = 0;       // still in the compiled file, outside the level
+        std::size_t lightsFromEditorCopy = 0;   // from the editor copy with this map's lightmaps
+        std::size_t lightsFromOlderCopy = 0;    // from an editor copy of another bake, checked against this one
+        std::size_t lightsFitted = 0;           // stand-ins fitted to the lightmaps
+        std::size_t lightsToReview = 0;         // of those, ones the lightmaps do not confirm
     };
 
     inline std::string Thousands(std::size_t value)
@@ -158,6 +174,41 @@ namespace MapRecoveryModel
         else
             text += "\r\nMerging was off (File > Merge Recovered Geometry): only cells sharing whole faces were joined, "
                     "as recovery always has; no brushes were grown and no surfaces combined.";
+        if (counts.cellsLeftOut || counts.brushesLeftOut || counts.unsurfacedWalls || counts.undividedSurfaces)
+        {
+            text += "\r\nStood in for:";
+            const char* separator = " ";
+            auto add = [&](std::size_t count, const char* what)
+            {
+                if (!count) return;
+                text += separator + Thousands(count) + what;
+                separator = ", ";
+            };
+            add(counts.cellsLeftOut, " cells left out");
+            add(counts.brushesLeftOut, " brushes left out");
+            add(counts.unsurfacedWalls, " brushes with a wall the compiled map drew nothing on (kept invisible)");
+            add(counts.undividedSurfaces, " faces given one material");
+            text += ".";
+        }
+        if (counts.lightsKeptInFile || counts.lightsFromEditorCopy || counts.lightsFromOlderCopy || counts.lightsFitted)
+        {
+            text += "\r\nLights the cook stripped:";
+            const char* separator = " ";
+            auto add = [&](std::size_t count, const char* what)
+            {
+                if (!count) return;
+                text += separator + Thousands(count) + what;
+                separator = ", ";
+            };
+            add(counts.lightsKeptInFile, " still in the compiled file");
+            add(counts.lightsFromEditorCopy, " from the map's editor copy");
+            add(counts.lightsFromOlderCopy, " from an editor copy of another bake");
+            add(counts.lightsFitted, " stand-ins fitted to the lightmaps");
+            text += counts.lightsToReview ? "; " + Thousands(counts.lightsToReview) + " to check." : ".";
+        }
+        if (counts.spaceMisses)
+            text += "\r\nSpace: " + Thousands(counts.spaceMisses) + " of " + Thousands(counts.spaceProbes)
+                + " solid/empty samples differ from the compiled map; the report lists where.";
         return text;
     }
 

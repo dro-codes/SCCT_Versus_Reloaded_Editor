@@ -270,13 +270,13 @@ namespace Mcp::Spec
                                      {"locationName", Str()}, {"priority", Num("LocationPriority.")}, {"props", Ref("props")}},
                                     {"id", "box"});
             const auto ingredient = Obj({{"id", Ref("id")}, {"kind", Enum({"ammo", "infirmary", "glass", "extinguisher", "projector", "sprinkler", "puddle", "balltrap"})},
-                                         {"in", Ref("id")}, {"at", Ref("position")}, {"yaw", Num()}, {"facing", Ref("facing")}, {"props", Ref("props")}},
+                                         {"in", Ref("id")}, {"at", Ref("position")}, {"yaw", Num()}, {"facing", Ref("facing")}, {"persistentLight", Bool()}, {"props", Ref("props")}},
                                         {"kind"});
             const auto object = Obj({{"id", Ref("id")}, {"mesh", Str()}, {"at", Ref("position")}, {"yaw", Num()}, {"damageable", Bool()}, {"hitPoints", Num()},
                                      {"props", Ref("props")}},
                                     {"id", "mesh", "at"});
             const auto vision = Obj({{"target", Ref("id")}, {"heatIntensity", Num()}, {"heatOpacity", Num()}, {"heatRadius", Num()}, {"emfIntensity", Num()},
-                                     {"emfOpacity", Num()}, {"properties", Ref("props")}},
+                                     {"emfOpacity", Num()}, {"hideInNormalVision", Bool()}, {"properties", Ref("props")}},
                                     {"target"});
             const auto environment = Obj({{"lights", Arr(light)}, {"sounds", Arr(sound)}, {"volumes", Arr(volume)}, {"ingredients", Arr(ingredient)},
                                           {"objects", Arr(object)}, {"vision", Arr(vision)}, {"props", Arr(Ref("generic"))}, {"fish", Arr(Ref("generic"))},

@@ -3,6 +3,7 @@
 #undef max
 #include "LightShadowMap.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "LightShadowModel.h"
 #include "MeasureModel.h"
 #include "WorkflowEditor.h"
@@ -48,6 +49,9 @@ struct State
     bool loaded = false;
     bool shown = false, planLayer = false;
     std::vector<Cell> cells;
+    // The in-game lights' shares at each patch, kept so the next sample works
+    // out only what an edit changed.
+    LightShadow::LightCache cache;
     bool truncated = false, sampled = false, attempted = false;
     unsigned generation = 0, revision = 0;
     // When the map last changed under the patches; they are sampled again
@@ -69,6 +73,8 @@ std::string IniPath()
 const struct { const char* key; int Settings::* field; } kKeys[] = {
     { "HiddenBelow", &Settings::hiddenBelow }, { "ExposedFrom", &Settings::exposedFrom },
     { "PatchSize", &Settings::cell }, { "ChestHeight", &Settings::chest } };
+const struct { const char* key; bool Settings::* field; } kSwitches[] = {
+    { "MeshShadows", &Settings::meshShadows }, { "MeshFloors", &Settings::meshFloors }, { "SpotCones", &Settings::spotCones } };
 
 // Written once with the defaults so the section can be found and edited.
 void Load()
@@ -84,6 +90,13 @@ void Load()
         if (!value[0]) WritePrivateProfileStringA(kSection, key.key, std::to_string(s.*key.field).c_str(), ini.c_str());
         else s.*key.field = GetPrivateProfileIntA(kSection, key.key, s.*key.field, ini.c_str());
     }
+    for (const auto& key : kSwitches)
+    {
+        char value[32] = {};
+        GetPrivateProfileStringA(kSection, key.key, "", value, sizeof(value), ini.c_str());
+        if (!value[0]) WritePrivateProfileStringA(kSection, key.key, s.*key.field ? "1" : "0", ini.c_str());
+        else s.*key.field = GetPrivateProfileIntA(kSection, key.key, 1, ini.c_str()) != 0;
+    }
     char value[32] = {};
     GetPrivateProfileStringA(kSection, "Source", "", value, sizeof(value), ini.c_str());
     if (!value[0]) WritePrivateProfileStringA(kSection, "Source", "0", ini.c_str());
@@ -95,6 +108,8 @@ void Save()
     const auto ini = IniPath();
     for (const auto& key : kKeys)
         WritePrivateProfileStringA(kSection, key.key, std::to_string(state.settings.*key.field).c_str(), ini.c_str());
+    for (const auto& key : kSwitches)
+        WritePrivateProfileStringA(kSection, key.key, state.settings.*key.field ? "1" : "0", ini.c_str());
     WritePrivateProfileStringA(kSection, "Source", std::to_string(static_cast<int>(state.settings.source)).c_str(), ini.c_str());
 }
 
@@ -126,32 +141,50 @@ std::string Parts(bool lights)
         + "/" + std::to_string(int(LightShadow::Percentile(cells, 0.9)));
 }
 // Samples the open map's floor. Throws with a plain message when it cannot.
-void Sample()
+// Starting afresh drops everything kept from the last sample (after a lighting
+// build, say); otherwise only what changed is worked out again.
+void Sample(bool afresh = false)
 {
     Load();
-    const auto started = std::chrono::steady_clock::now();
+    using Clock = std::chrono::steady_clock;
+    auto ms = [](Clock::time_point a, Clock::time_point b) { return std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count()); };
+    const auto started = Clock::now();
+    if (afresh)
+    {
+        Workflow::Editor::LightShadowForget();
+        state.cache = LightShadow::LightCache{};
+    }
     LightShadow::Scene scene;
-    Workflow::Editor::LightShadowScene(scene);
-    auto result = LightShadow::Sample(scene, state.settings);
+    const auto read = Workflow::Editor::LightShadowScene(scene, state.settings);
+    const auto readDone = Clock::now();
+    auto result = LightShadow::SampleCells(scene, state.settings);
+    const auto cellsDone = Clock::now();
+    LightShadow::RelightStats lit;
+    try { LightShadow::Relight(scene, result.cells, state.settings, state.cache, &lit); }
+    catch (...) { state.cache = LightShadow::LightCache{}; throw; }
+    const auto done = Clock::now();
     state.cells = std::move(result.cells);
     state.truncated = result.truncated;
     state.sampled = state.attempted = true;
     state.stale = false;
     state.generation = Workflow::Editor::MapGeneration();
     state.revision = Workflow::Editor::ContentRevision();
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
     const auto summary = LightShadow::Summarise(state.cells);
-    Logger::log("LightShadowMap: " + std::to_string(scene.floors.size()) + " floor triangles, " + std::to_string(scene.atlases.size())
-                + " lightmap atlases, " + std::to_string(scene.lights.size()) + " in-game lights -> " + std::to_string(summary.total)
-                + " patches (" + std::to_string(summary.bands[0]) + " hidden, " + std::to_string(summary.bands[1]) + " partly, "
-                + std::to_string(summary.bands[2]) + " exposed, " + std::to_string(summary.unbaked) + " without baked lighting) in "
-                + std::to_string(ms) + " ms; brightness at the 10th/50th/90th percentile "
+    Logger::log("LightShadowMap: " + std::to_string(read.bspFloors) + " BSP and " + std::to_string(read.meshFloors) + " static mesh floor triangles, "
+                + std::to_string(scene.atlases.size()) + " lightmap atlases, " + std::to_string(scene.instances.size()) + " static meshes ("
+                + std::to_string(scene.shapes.size()) + " shapes, " + std::to_string(read.meshTriangles) + " triangles), "
+                + std::to_string(scene.lights.size()) + " in-game lights -> " + std::to_string(summary.total) + " patches ("
+                + std::to_string(summary.mesh) + " on static meshes; " + std::to_string(summary.bands[0]) + " hidden, "
+                + std::to_string(summary.bands[1]) + " partly, " + std::to_string(summary.bands[2]) + " exposed, " + std::to_string(summary.unbaked)
+                + " without baked lighting) in " + ms(started, done) + " ms (read " + ms(started, readDone) + ", patches " + ms(readDone, cellsDone)
+                + ", lights " + ms(cellsDone, done) + (lit.full ? ", from nothing" : ", kept " + std::to_string(lit.reused) + " of " + std::to_string(lit.lights) + " lights")
+                + ", " + std::to_string(lit.tested) + " lines of sight); brightness at the 10th/50th/90th percentile "
                 + std::to_string(int(LightShadow::Percentile(state.cells, 0.1))) + "/" + std::to_string(int(LightShadow::Percentile(state.cells, 0.5)))
                 + "/" + std::to_string(int(LightShadow::Percentile(state.cells, 0.9))) + " (baked " + Parts(false) + ", lights " + Parts(true) + ")");
 }
-bool TrySample()
+bool TrySample(bool afresh = false)
 {
-    try { Sample(); SetStatus(""); return true; }
+    try { Sample(afresh); SetStatus(""); return true; }
     catch (const std::exception& e)
     {
         state.cells.clear();
@@ -218,7 +251,7 @@ void Show(bool on)
 {
     state.shown = on;
     // Turning it on samples afresh, which also picks up a lighting build.
-    if (on) TrySample();
+    if (on) TrySample(true);
     UpdateTimer();
     UpdateMenu();
     Redraw();
@@ -362,7 +395,8 @@ void LogFault() { Logger::log("LightShadowMap: overlay faulted and was skipped")
 
 // ---- Settings window ---------------------------------------------------------
 
-enum : int { kIntro = 100, kHiddenEdit, kExposedEdit, kPatchEdit, kChestEdit, kSourceCombo, kApply, kRefreshButton, kStatusText, kSummary, kShowCheck = 110 };
+enum : int { kIntro = 100, kHiddenEdit, kExposedEdit, kPatchEdit, kChestEdit, kSourceCombo, kApply, kRefreshButton, kStatusText, kSummary, kShowCheck = 110,
+             kMeshShadowsCheck, kMeshFloorsCheck, kSpotConesCheck };
 
 void SetStatus(const std::string& text)
 {
@@ -387,6 +421,9 @@ void FillWindow()
     SetDlgItemInt(state.window, kChestEdit, s.chest, FALSE);
     SendDlgItemMessageA(state.window, kSourceCombo, CB_SETCURSEL, static_cast<int>(s.source), 0);
     CheckDlgButton(state.window, kShowCheck, state.shown ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(state.window, kMeshShadowsCheck, s.meshShadows ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(state.window, kMeshFloorsCheck, s.meshFloors ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(state.window, kSpotConesCheck, s.spotCones ? BST_CHECKED : BST_UNCHECKED);
     SetDlgItemTextA(state.window, kSummary, SummaryText().c_str());
 }
 void Apply()
@@ -400,8 +437,12 @@ void Apply()
     number(kChestEdit, s.chest);
     const auto source = SendDlgItemMessageA(state.window, kSourceCombo, CB_GETCURSEL, 0, 0);
     if (source >= 0) s.source = static_cast<Source>(source);
+    s.meshShadows = IsDlgButtonChecked(state.window, kMeshShadowsCheck) == BST_CHECKED;
+    s.meshFloors = IsDlgButtonChecked(state.window, kMeshFloorsCheck) == BST_CHECKED;
+    s.spotCones = IsDlgButtonChecked(state.window, kSpotConesCheck) == BST_CHECKED;
     s = LightShadow::Clamp(s);
-    const bool resample = s.cell != state.settings.cell || s.chest != state.settings.chest;
+    const bool resample = s.cell != state.settings.cell || s.chest != state.settings.chest || s.meshShadows != state.settings.meshShadows
+        || s.meshFloors != state.settings.meshFloors || s.spotCones != state.settings.spotCones;
     state.settings = s;
     Save();
     if (resample || !state.sampled) TrySample();
@@ -421,11 +462,11 @@ HWND Control(HWND window, const char* type, const char* text, DWORD style, int i
 }
 
 const char kIntroText[] =
-    "Colours the walkable BSP floor by how lit it is, to show where a spy can hide: blue hidden, yellow partly visible, red exposed "
+    "Colours the walkable floor by how lit it is, to show where a spy can hide: blue hidden, yellow partly visible, red exposed "
     "(also told apart by the lines: a square, one diagonal, both). Brightness runs from 0 (black) to 255.\r\n\r\n"
-    "It is an estimate, not the game's own visibility formula. Baked is the floor's lightmap from Build Lighting. In-game lights "
-    "are the InGame and Dynamic lights reaching a point at the height set below, above the floor, falling off to their reach and blocked "
-    "by BSP only: static meshes, spotlight cones, projectors and flicker are ignored, and floors made of static meshes get no patches. "
+    "It is an estimate, not the game's own visibility formula. Baked is the floor's lightmap from Build Lighting (on a static mesh, "
+    "the static lights Build Lighting found reaching it). In-game lights are the InGame and Dynamic lights reaching a point at the "
+    "height set below, with the engine's falloff, blocked by BSP and static meshes. Projectors, movers and flicker are ignored. "
     "Playtest to confirm.";
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w, LPARAM l)
@@ -436,33 +477,46 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w, LPARAM l)
         {
         case WM_CREATE:
         {
-            Control(window, "STATIC", kIntroText, 0, kIntro, 12, 10, 456, 128);
-            Control(window, "BUTTON", "&Show in the viewports", BS_AUTOCHECKBOX | WS_TABSTOP, kShowCheck, 12, 146, 220, 22);
+            // The intro keeps all its lines in the larger modern font; everything below moves down.
+            auto intro = Control(window, "STATIC", kIntroText, 0, kIntro, 12, 10, 456, 128);
+            const int introHeight = Appearance::FitHeight(intro, 456, 128);
+            const int dy = introHeight - 128;
+            if (dy) MoveWindow(intro, 12, 10, 456, introHeight, FALSE);
+            Control(window, "BUTTON", "&Show in the viewports", BS_AUTOCHECKBOX | WS_TABSTOP, kShowCheck, 12, 146 + dy, 220, 22);
             const std::pair<int, const char*> fields[] = {
                 { kHiddenEdit, "Hidden below" }, { kExposedEdit, "Exposed from" },
                 { kPatchEdit, "Patch size (units)" }, { kChestEdit, "Lights measured at height" } };
             for (int i = 0; i < 4; ++i)
             {
-                const int x = 12 + (i % 2) * 236, y = 176 + (i / 2) * 28;
+                const int x = 12 + (i % 2) * 236, y = 176 + dy + (i / 2) * 28;
                 Control(window, "STATIC", fields[i].second, 0, 0, x, y + 3, 140, 20);
                 Control(window, "EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, fields[i].first, x + 144, y, 70, 22);
             }
-            Control(window, "STATIC", "Brightness from", 0, 0, 12, 235, 140, 20);
-            auto combo = Control(window, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, kSourceCombo, 156, 232, 312, 120);
+            Control(window, "STATIC", "Brightness from", 0, 0, 12, 235 + dy, 140, 20);
+            auto combo = Control(window, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, kSourceCombo, 156, 232 + dy, 312, 120);
             for (auto source : { Source::Combined, Source::Lights, Source::Baked })
                 SendMessageA(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(LightShadow::SourceName(source)));
-            Control(window, "STATIC", "", 0, kSummary, 12, 266, 456, 84);
-            Control(window, "STATIC", "", 0, kStatusText, 12, 352, 456, 34);
-            Control(window, "BUTTON", "&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, kApply, 12, 392, 90, 26);
-            Control(window, "BUTTON", "&Refresh", WS_TABSTOP, kRefreshButton, 110, 392, 90, 26);
-            Control(window, "BUTTON", "Close", WS_TABSTOP, IDCANCEL, 378, 392, 90, 26);
+            Control(window, "BUTTON", "Static &meshes block light", BS_AUTOCHECKBOX | WS_TABSTOP, kMeshShadowsCheck, 12, 262 + dy, 166, 22);
+            Control(window, "BUTTON", "Static mesh &floors", BS_AUTOCHECKBOX | WS_TABSTOP, kMeshFloorsCheck, 184, 262 + dy, 130, 22);
+            Control(window, "BUTTON", "Spotlight &cones", BS_AUTOCHECKBOX | WS_TABSTOP, kSpotConesCheck, 320, 262 + dy, 148, 22);
+            Control(window, "STATIC", "", 0, kSummary, 12, 292 + dy, 456, 84);
+            Control(window, "STATIC", "", 0, kStatusText, 12, 378 + dy, 456, 34);
+            Control(window, "BUTTON", "&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, kApply, 12, 418 + dy, 90, 26);
+            Control(window, "BUTTON", "&Refresh", WS_TABSTOP, kRefreshButton, 110, 418 + dy, 90, 26);
+            Control(window, "BUTTON", "Close", WS_TABSTOP, IDCANCEL, 378, 418 + dy, 90, 26);
+            if (dy)
+            {
+                RECT frame{};
+                GetWindowRect(window, &frame);
+                SetWindowPos(window, nullptr, 0, 0, frame.right - frame.left, frame.bottom - frame.top + dy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
             return 0;
         }
         case WM_COMMAND:
             switch (LOWORD(w))
             {
             case kApply: Apply(); return 0;
-            case kRefreshButton: if (TrySample()) SetStatus("Sampled again."); FillWindow(); Redraw(); return 0;
+            case kRefreshButton: if (TrySample(true)) SetStatus("Sampled again."); FillWindow(); Redraw(); return 0;
             case kShowCheck: Show(IsDlgButtonChecked(window, kShowCheck) == BST_CHECKED); FillWindow(); return 0;
             case IDCANCEL: DestroyWindow(window); return 0;
             }
@@ -493,7 +547,7 @@ void OpenSettings(HWND owner)
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
         RegisterClassA(&wc);
-        RECT rect{ 0, 0, 480, 430 };
+        RECT rect{ 0, 0, 480, 456 };
         const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
         AdjustWindowRectEx(&rect, style, FALSE, WS_EX_TOOLWINDOW);
         state.window = CreateWindowExA(WS_EX_TOOLWINDOW, wc.lpszClassName, kTitle, style, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -516,7 +570,7 @@ bool HandleCommand(UINT command)
         Load();
         if (command == kToggle) Show(!state.shown);
         else if (command == kSettings) OpenSettings(GetActiveWindow());
-        else { TrySample(); FillWindow(); Redraw(); }
+        else { TrySample(true); FillWindow(); Redraw(); }
         if (command != kSettings && !state.status.empty()) MessageBeep(MB_ICONWARNING);
     }
     catch (const std::exception& e)

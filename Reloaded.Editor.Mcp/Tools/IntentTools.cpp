@@ -506,9 +506,9 @@ namespace
                 "switchable, yaw, pitch}]\n"
                 "- sounds [{id, class, sound, at, radius, volume}]; zones [{id, locationName, spaces: [pieceIds], portals}]\n"
                 "- volumes [{id, class: Volume|SDamageVolume|ERainVolume|BlockingVolume, box: {min, max} | {in, height}, locationName, priority}]\n"
-                "- ingredients [{id, kind: ammo|infirmary|glass|extinguisher|projector|sprinkler|puddle|balltrap, in | at, yaw}]; objects [{id, mesh, at, yaw, "
+                "- ingredients [{id, kind: ammo|infirmary|glass|extinguisher|projector|sprinkler|puddle|balltrap, in | at, yaw, persistentLight (projector: keep its Echelon light on when unused)}]; objects [{id, mesh, at, yaw, "
                 "damageable, hitPoints}]; meshes [{id, mesh, at, yaw, scale, fit}]\n"
-                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, properties}] (by target)\n"
+                "- vision [{target, heatIntensity, heatOpacity, heatRadius, emfIntensity, emfOpacity, hideInNormalVision (shows only in Thermal/EMF; pair with bHidden + an event to reveal on a hack), properties}] (by target)\n"
                 "- props, fish, animated, tutorials: [{id, class, mesh, at, yaw, scale, properties}]; softbody the same, class ESBPatchActor, ESBStripDoorActor "
                 "(the wiki's ESBStripeDoorActor), ESBRopeActor or ESBChainActor, mesh only for ESBChainActor (its links); never copied";
             t.fields = {{"lights", {"environment", "lights"}, ""},

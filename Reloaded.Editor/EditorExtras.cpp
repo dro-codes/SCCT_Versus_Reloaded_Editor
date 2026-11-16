@@ -11,10 +11,12 @@
 #include "PropertyPaste.h"
 #include "SaveBackupModel.h"
 #include "SaveBackups.h"
+#include "CompareBackup.h"
 #include "UnsavedChangesModel.h"
 #include "LightmapFix.h"
 #include "McpBridge.h"
 #include "SelfUpdater.h"
+#include "CommandPalette.h"
 #include "Version.h"
 #include "logger.h"
 #include <commctrl.h>
@@ -106,6 +108,7 @@ namespace
 
     // The file a save wrote, in full: the engine opens a relative name from
     // the current directory (System), the frame's own map name from MapsEd.
+    // The engine's name is ANSI; the result is UTF-8, as Editor::MapFile's is.
     std::string SavedFile(const char* path)
     {
         namespace fs = std::filesystem;
@@ -117,7 +120,8 @@ namespace
             file = !error && fs::is_regular_file(here, error) ? here : Editor::Directory().parent_path().parent_path() / "Packages" / "MapsEd" / file;
         }
         const auto canonical = fs::weakly_canonical(file, error);
-        return (error ? file : canonical).string();
+        const auto text = (error ? file : canonical).u8string();
+        return std::string(text.begin(), text.end());
     }
     // After every save the engine finished (LightmapFix::SetSavedSink): a save
     // of the open map's own file makes it clean, whichever route it took.
@@ -258,6 +262,15 @@ namespace
             while (position < GetMenuItemCount(file) && GetMenuItemID(file, position) != EditorExtras::kOpenLatestAutosave) ++position;
             InsertMenuA(file, position + 1, MF_BYPOSITION | MF_STRING, EditorExtras::kOpenMapBackup, "Open Map &Backup...");
         }
+        if (file && GetMenuState(file, EditorExtras::kOpenMapBackup, MF_BYCOMMAND) != UINT(-1)
+            && GetMenuState(file, CompareBackup::kCompare, MF_BYCOMMAND) == UINT(-1))
+        {
+            changed = true;
+            // Right after Open Map Backup.
+            int position = 0;
+            while (position < GetMenuItemCount(file) && GetMenuItemID(file, position) != EditorExtras::kOpenMapBackup) ++position;
+            InsertMenuA(file, position + 1, MF_BYPOSITION | MF_STRING, CompareBackup::kCompare, "Compare &with Backup...");
+        }
         if (HMENU build = MenuWithCommand(bar, 40038); build && GetMenuState(build, EditorExtras::kPlayFromCameraSpy, MF_BYCOMMAND) == UINT(-1))
         {
             changed = true;
@@ -286,6 +299,7 @@ namespace
         return file && recentMenu && HasSubMenu(file, recentMenu)
             && GetMenuState(file, EditorExtras::kOpenLatestAutosave, MF_BYCOMMAND) != UINT(-1)
             && GetMenuState(file, EditorExtras::kOpenMapBackup, MF_BYCOMMAND) != UINT(-1)
+            && GetMenuState(file, CompareBackup::kCompare, MF_BYCOMMAND) != UINT(-1)
             && build && GetMenuState(build, EditorExtras::kPlayFromCameraSpy, MF_BYCOMMAND) != UINT(-1)
             && help && GetMenuState(help, EditorExtras::kShortcuts, MF_BYCOMMAND) != UINT(-1)
             && GetMenuState(help, SelfUpdater::kCheckNow, MF_BYCOMMAND) != UINT(-1);
@@ -306,6 +320,8 @@ namespace
             LevelSnapshot::Attach(frameWindow);
             installStep = "PlayLevelPlayers::Attach";
             PlayLevelPlayers::Attach(frameWindow); // retried on the tick if the bar is not there yet
+            installStep = "CommandPalette::Attach";
+            CommandPalette::Attach(frameWindow); // its key hook lives on this, the frame's, thread
             installStep = "SetWindowSubclass";
             if (!SetWindowSubclass(frameWindow, FrameProc, 1, 0)) { error = "SetWindowSubclass failed"; return false; }
             installStep = "SetTimer";
@@ -376,6 +392,7 @@ namespace
                "M in a viewport: measure from the last measured point to the mouse (in the 3D view, across the floor at its height).\r\n"
                "End in a viewport: drop the selection to the floor.   Shift+End: and turn meshes flat on the surface.   Ctrl+End: to the ceiling.\r\n"
                "F12: RE+ Options.   F7: disabled (the stock script compiler would crash).\r\n"
+               "Ctrl+Shift+P: Command Palette (Help > Command Palette): type part of any menu command's name, Enter runs it.\r\n"
                "1 to 9 in a viewport: jump to camera bookmark N.   Ctrl+1 to Ctrl+9: store the viewport cameras as bookmark N (RE+ Tools > Camera Bookmarks).\r\n"
                "\r\n"
                "PROPERTIES WINDOWS (F4 Actor Properties, F6 Level Properties)\r\n"
@@ -409,11 +426,15 @@ namespace
                "MENUS\r\n"
                "Edit: Undo History lists every undo step, oldest first, with redo steps greyed below the current one;\r\n"
                "double-click a step (or select it and press Enter) to undo or redo to it. Ctrl+Z / Ctrl+Y step there too.\r\n"
+               "View: Map Outliner lists every actor (search, group by class or Group, sort by a column); click selects, Ctrl/Shift add,\r\n"
+               "double-click / Enter / F frames, H hides, Delete deletes (asks first, one Undo step), Ctrl+A all, Left/Right fold a group.\r\n"
                "File: Optimise Map Assets makes a release copy carrying only the assets it uses from big packs.\r\n"
                "File: Open Recent lists the last ten maps. The editor's own autosave (View > Advanced Options,\r\n"
                "Editor.EditorEngine: AutoSave, AutoSaveTimeMinutes) writes Auto0 to Auto9.sdc into MapsEd;\r\n"
                "File: Open Latest Autosave opens the newest of them. After a crash, the next start offers that session's autosave.\r\n"
                "File: Open Map Backup opens one of the last saved versions RE+ keeps of each map (System\\ReloadedEditor\\Backups); Save As over the map to restore it.\r\n"
+               "File: Compare with Backup lists what differs from a backup, an autosave or any .sdc (actors added, deleted, moved,\r\n"
+               "changed); click a row to select the actor; tick rows and Bring Back Selected restores the backup's version in one Undo step.\r\n"
                "Build: Play From Camera as Spy / Merc starts a playtest at the perspective viewport's camera.\r\n"
                "Build: Set Level Snapshot from Viewport / Image File puts the picture the game shows in map selection\r\n"
                "into the map's <Map>-i package (Packages\\Textures), backing up the old one under ReloadedEditor.\r\n"
@@ -421,7 +442,9 @@ namespace
                "What's New in RE+ shows this version's release notes (also shown once after an update); Roll Back puts the version\r\n"
                "an update replaced back in place (and the newer one stays kept, to switch again); About RE+ shows the version.\r\n"
                "RE+ Tools: Map Design (its own Keys... window lists the plan's shortcuts), Brush Visibility, Placement,\r\n"
-               "Gameplay Connections, SMagicEvent Workbench, SCamNetwork Manager, Working Views, Assemblies, JSON.\r\n"
+               "Gameplay Connections, SMagicEvent Workbench, SCamNetwork Manager, Working Views, Assemblies,\r\n"
+               "Scatter Props (fill the builder brush or a circle round the last click with weighted static meshes,\r\n"
+               "previewed in the viewports, placed as one Undo step), JSON.\r\n"
                "RE+ Tools > MCP: Enable MCP server lets an AI agent (Claude Code, Claude Desktop) read and change the open map\r\n"
                "through Reloaded.Editor.Mcp.exe; Require approval shows each change first. Each call's map edits are one Undo step.\r\n";
     }

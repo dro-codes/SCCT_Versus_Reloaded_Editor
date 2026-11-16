@@ -235,6 +235,33 @@ std::string RemoveProperty(const std::string& text,const std::string& key)
     }
     return out;
 }
+std::string RemoveBakedLighting(const std::string& text,std::vector<std::string>* dropped)
+{
+    std::istringstream input(text);std::string line,out;
+    const std::string type="staticmeshinstance";
+    while(std::getline(input,line))
+    {
+        const auto l=Fold(Trim(line));
+        const auto equals=l.find('=');
+        // Key=StaticMeshInstance'Package.Name' and nothing else on the line: one object of that type, not a
+        // struct or a list. Some exports write a name's index after it, before the quote.
+        const auto after=equals==std::string::npos?std::string::npos:equals+1+type.size();
+        if(equals!=std::string::npos && l.compare(equals+1,type.size(),type)==0 && l.size()>after+1
+            && !(std::isalnum(static_cast<unsigned char>(l[after])) || l[after]=='_')
+            && l.back()=='\'' && l.find(',')==std::string::npos && l.find('\'',after)!=l.size()-1)
+        {
+            if(dropped)
+            {
+                const auto t=Trim(line);
+                const auto open=t.find('\'');
+                dropped->push_back(t.substr(open+1,t.size()-open-2));
+            }
+            continue;
+        }
+        out+=line+"\n";
+    }
+    return out;
+}
 std::string RenameObjects(const std::string& text,const std::string& prefix)
 {
     std::istringstream input(text); std::string line,out;

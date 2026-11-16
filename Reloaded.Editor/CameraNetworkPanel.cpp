@@ -246,7 +246,7 @@ LRESULT CALLBACK Proc(HWND w,UINT message,WPARAM wp,LPARAM lp)
 }
 void Open(HWND owner)
 {
-    if(panel){ShowWindow(panel,SW_RESTORE);SetForegroundWindow(panel);return;}
+    if(panel){ShowWindow(panel,IsIconic(panel)?SW_RESTORE:SW_SHOW);SetForegroundWindow(panel);return;}
     Editor::LevelIdentity();INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSA wc{};wc.lpfnWndProc=Proc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ReloadedCameraNetworks";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassA(&wc);
     auto state=new State;for(const auto& actor:Editor::SelectedIdentities())if(Editor::Compatible(actor.at("path"),"SBase.SCamNetwork")){state->path=actor.at("path");break;}

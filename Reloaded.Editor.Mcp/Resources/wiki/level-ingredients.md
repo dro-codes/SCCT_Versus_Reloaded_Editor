@@ -141,6 +141,15 @@ Probably not something a typical map uses. When an event activates it, it starts
 | `iVelocityMin` | Lowest velocity the projectile is thrown at. |
 | `ProjectileClass` | The type of projectile thrown. |
 
+## Creative uses (stealth-action)
+
+Most maps use these for atmosphere, but each is a usable mechanic, with no base-engine change:
+- **`SProjoFixe` searchlight** — a Mercenary sweeps the beam; its real-time Echelon shadows are timing cover for Spies. Persistent Light Mode (`HitPoints=1`) keeps it lit even when nobody is steering it, so it becomes a fixed light-and-shadow feature rather than an on-demand one.
+- **`SSprinkler` → `SFlaque`** — wire a hacked panel (`SInterrupteur` → `SMagicEvent`) to trigger a sprinkler: it hazes Mercenary vision for its `Duration` and lays puddles. A Spy who tases a puddle electrocutes anyone standing in it — a positional trap at chokepoints and ladders.
+- **`SExtincteur`** — a destructible smoke source at a fixed, learnable spot: shooting it briefly blinds Mercenaries, a map-placed flashbang.
+- **`SVitre`** — breaking glass opens a shot or a listening line at a noise cost; set `bSeeThroughInMotionVision` so Motion Tracking reads through it.
+- **`SBallTrap`** — an event-armed projectile gauntlet (e.g. frag grenades): hacking the wrong panel, or a Mercenary flipping a switch, turns a corridor into a timed hazard a Spy must out-run.
+
 ## How the MCP tools apply this
 
 **CamNet** (`security` `camnet[{id, camName, at, first, constraints}]`, spec `security.camnet`):
@@ -159,7 +168,7 @@ Probably not something a typical map uses. When an event activates it, it starts
 | `infirmary` | `SInfirmary` | `bBlockActors`/`bBlockPlayers` `True`, interaction 120 / 60, `bInteractInFront` |
 | `glass` | `SVitre` | |
 | `extinguisher` | `SExtincteur` | |
-| `projector` | `SProjoFixe` | none; pass `props: {"HitPoints": "1"}` for the Persistent Light Mode |
+| `projector` | `SProjoFixe` | `persistentLight: true` sets `HitPoints=1` (Persistent Light Mode); other props pass through |
 | `sprinkler` | `SSprinkler` | `bHidden` `True` |
 | `puddle` | `SFlaque` | |
 | `balltrap` | `SBallTrap` | |

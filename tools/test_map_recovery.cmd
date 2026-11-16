@@ -26,6 +26,14 @@ cl /nologo /std:c++20 /W4 /WX /EHsc /O2 tests\MapRecoveryModelTests.cpp /Fo"%TEM
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\MapRecoveryModelTests.exe"
 if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /O2 tests\RecoveredSurfaceMatchTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\RecoveredSurfaceMatchTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\RecoveredSurfaceMatchTests.exe"
+if not "%errorlevel%"=="0" goto failed
+cl /nologo /std:c++20 /W4 /WX /EHsc /O2 tests\RecoveredLightModelTests.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\RecoveredLightModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
+"%TEMP%\RecoveredLightModelTests.exe"
+if not "%errorlevel%"=="0" goto failed
 cl /nologo /std:c++17 /W4 /WX /EHsc /O2 tests\RecoveredActorImportTests.cpp Reloaded.Editor\RecoveredActorImport.cpp /Fo"%TEMP%\\" /Fe"%TEMP%\RecoveredActorImportTests.exe"
 if not "%errorlevel%"=="0" goto failed
 "%TEMP%\RecoveredActorImportTests.exe"

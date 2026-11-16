@@ -1300,7 +1300,7 @@ namespace
         const Json document{{"map", map}, {"description", "Requested over MCP: " + label + (label == call.op ? std::string() : " (" + call.op + ")")}};
         bool accepted = false;
         reviewing = true;
-        try { accepted = MapAuthoringDialog::Review(Frame(), preview, document); }
+        try { accepted = MapAuthoringDialog::ReviewChange(Frame(), preview, document); }
         catch (...)
         {
             reviewing = false;

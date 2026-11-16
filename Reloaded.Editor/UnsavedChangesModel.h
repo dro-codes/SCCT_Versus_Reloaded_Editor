@@ -79,13 +79,27 @@ namespace UnsavedChanges
         tracker.pending.reset();
     }
 
+    // A save waiting for a name counts once the open map is named after the
+    // file it wrote: the map was as that file has it at the save's revision.
+    inline void Named(Tracker& tracker, const std::string& mapFile)
+    {
+        if (tracker.pending && SameFile(tracker.pending->file, mapFile))
+        {
+            tracker.clean = tracker.pending->revision;
+            tracker.pending.reset();
+        }
+    }
+
     // A save wrote `saved` while the open map's own file (the one File > Save
     // writes) was `mapFile` and its content revision `revision`. True when
     // that made the open map clean; a save of another file waits to see
-    // whether the map takes that name.
+    // whether the map takes that name. A Save As named the map after its file
+    // once it was done, so a save since then (Play Level's runtime copy, a
+    // release copy) first settles the one that was waiting.
     inline bool Saved(Tracker& tracker, const Opened& opened, unsigned revision, const std::string& saved, const std::string& mapFile)
     {
         Follow(tracker, opened);
+        Named(tracker, mapFile);
         if (!SameFile(saved, mapFile))
         {
             if (!saved.empty()) tracker.pending = Tracker::Pending{saved, revision};
@@ -99,11 +113,7 @@ namespace UnsavedChanges
     inline bool Unsaved(Tracker& tracker, const Opened& opened, unsigned revision, const std::string& mapFile)
     {
         Follow(tracker, opened);
-        if (tracker.pending && SameFile(tracker.pending->file, mapFile))
-        {
-            tracker.clean = tracker.pending->revision;
-            tracker.pending.reset();
-        }
+        Named(tracker, mapFile);
         return !tracker.clean || *tracker.clean != revision;
     }
 }

@@ -31,6 +31,13 @@ int main()
         Check(Property(set,"Target")=="None","set top-level property");
         Check(set.find(" Target=Actor'MyLevel.B'")!=std::string::npos,"nested property preserved");
         Check(Property(SetProperty(set,"Location","(X=7,Y=8,Z=9)"),"Location")=="(X=7,Y=8,Z=9)","update existing property");
+        const std::string baked="Lighting=StaticMeshInstance'MyLevel.One'\n Begin Object Class=Object Name=Owned\n CustomCache=StaticMeshInstance'MyLevel.Two'\n End Object\nMessage=\"StaticMeshInstance'MyLevel.Keep'\"\nMesh=StaticMesh'Assets.RealMesh'\nReferences=(Cache=StaticMeshInstance'MyLevel.InStruct',Other=None)\n";
+        std::vector<std::string> dropped;
+        const auto clean=RemoveBakedLighting(baked,&dropped);
+        Check(dropped==std::vector<std::string>{"MyLevel.One","MyLevel.Two"},"baked lighting omitted under any field name and at nested object depth");
+        Check(clean.find("Lighting=")==std::string::npos && clean.find("CustomCache=")==std::string::npos,"assembly hotfix strips the complete lighting property lines");
+        Check(clean.find("Message=\"StaticMeshInstance'MyLevel.Keep'\"")!=std::string::npos && clean.find("StaticMesh'Assets.RealMesh'")!=std::string::npos,"assembly hotfix preserves authored strings and real mesh assets");
+        Check(clean.find("References=(Cache=StaticMeshInstance'MyLevel.InStruct',Other=None)")!=std::string::npos,"complex struct syntax is retained for runtime type filtering");
         Reject([]{ParseActors("Begin Actor Class=Engine.Actor Name=A\n");},"reject incomplete text");
         Reject([&]{ParseActors(text+actors[0].text);},"reject duplicate names");
         for(const Rotation r: {Rotation{0,16384,0},Rotation{7000,12000,5000},Rotation{16384,4000,0}})

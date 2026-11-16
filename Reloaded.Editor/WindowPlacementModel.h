@@ -10,6 +10,7 @@
 // "x,y,width,height,maximised" in screen pixels (the size and place it has
 // when not maximised). A place no longer on any monitor (one unplugged, or
 // a resolution change) is not used: the window opens where Windows puts it.
+// A window too large for the monitor it opens on is made to fit it.
 namespace WindowPlacement
 {
     struct Rect
@@ -80,20 +81,53 @@ namespace WindowPlacement
         return std::max(0, std::min(high, otherHigh) - std::max(low, otherLow));
     }
 
-    // Whether enough of the title bar is on one of these monitors (their
-    // work areas) to see and drag the window: kGripWidth across, kGripHeight
-    // down, on a single monitor.
-    inline bool Usable(const Placement& p, const std::vector<Rect>& monitors)
+    // The monitor (work area) with enough of the title bar on it to see and
+    // drag the window: kGripWidth across, kGripHeight down, on a single
+    // monitor. None when no monitor has.
+    inline const Rect* TitleMonitor(const Placement& p, const std::vector<Rect>& monitors)
     {
-        if (p.width <= 0 || p.height <= 0) return false;
+        if (p.width <= 0 || p.height <= 0) return nullptr;
         const long long right = static_cast<long long>(p.x) + p.width;
-        if (right > 1000000000LL || p.x < -1000000000 || p.y < -1000000000 || p.y > 1000000000) return false;
+        if (right > 1000000000LL || p.x < -1000000000 || p.y < -1000000000 || p.y > 1000000000) return nullptr;
         const int left = p.x + kTitleInset, top = p.y + kTitleInset;
         const int stripRight = static_cast<int>(right) - kTitleInset, stripBottom = top + kTitleHeight;
         for (const auto& m : monitors)
             if (Overlap(left, stripRight, m.left, m.right) >= std::min(kGripWidth, stripRight - left)
                 && Overlap(top, stripBottom, m.top, m.bottom) >= kGripHeight)
-                return true;
-        return false;
+                return &m;
+        return nullptr;
+    }
+
+    // Whether enough of the title bar is on one of these monitors to see and
+    // drag the window.
+    inline bool Usable(const Placement& p, const std::vector<Rect>& monitors)
+    {
+        return TitleMonitor(p, monitors) != nullptr;
+    }
+
+    // How far inside a monitor the window's far corner must be to count as
+    // on it: its resize border, and a few pixels over the taskbar, do not
+    // count as off the screen.
+    constexpr int kCornerInset = 24;
+
+    // A window whose far corner is off every monitor (the resolution dropped,
+    // or it opens on a smaller screen) is made no larger than the monitor its
+    // title bar is on, though never below minWidth x minHeight, and moved
+    // inside it, so its bottom and right edges can be reached. One reaching
+    // onto a second monitor is left as it is.
+    inline Placement Fit(Placement p, const std::vector<Rect>& monitors, int minWidth = kMinWidth, int minHeight = kMinHeight)
+    {
+        const Rect* m = TitleMonitor(p, monitors);
+        if (!m) return p;
+        const long long cornerX = static_cast<long long>(p.x) + p.width - 1 - kCornerInset;
+        const long long cornerY = static_cast<long long>(p.y) + p.height - 1 - kCornerInset;
+        for (const auto& other : monitors)
+            if (cornerX >= other.left && cornerX < other.right && cornerY >= other.top && cornerY < other.bottom) return p;
+        const int areaWidth = m->right - m->left, areaHeight = m->bottom - m->top;
+        p.width = std::min(p.width, std::max(areaWidth, minWidth));
+        p.height = std::min(p.height, std::max(areaHeight, minHeight));
+        p.x = std::clamp(p.x, m->left, std::max(m->left, m->right - p.width));
+        p.y = std::clamp(p.y, m->top, std::max(m->top, m->bottom - p.height));
+        return p;
     }
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 namespace StaticMeshBrowserFavorites
 {
@@ -12,4 +13,6 @@ namespace StaticMeshBrowserFavorites
     // Makes the mesh the current one as a click in the browser does (its
     // properties and preview follow); false without a browser.
     bool UseMesh(void* mesh);
+    // The saved favourite meshes' paths, in the order they were added.
+    std::vector<std::string> FavoritePaths();
 }

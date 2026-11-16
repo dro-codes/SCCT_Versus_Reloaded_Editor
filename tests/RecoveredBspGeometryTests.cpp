@@ -545,6 +545,27 @@ int main()
     nodes.clear();
     AddBox(nodes,room,true);
     MustFail(nodes,"extraction bounds",{},{{-5,-5,-5},{5,5,5}});
+
+    // Asked to, a cell that cannot become a brush is left out and counted.
+    {
+        Limits tolerant;
+        tolerant.skipUnusableCells = true;
+        Result open;
+        std::string error;
+        assert(Reconstruct({{{1,0,0},0,-1,-1,true,0}},false,workBounds,open,error,tolerant));
+        assert(open.brushes.empty() && open.unboundedCells == 1 && error.empty());
+        assert(Reconstruct(nodes,false,{{-5,-5,-5},{5,5,5}},open,error,tolerant));
+        assert(open.brushes.empty() && open.unboundedCells == 1);
+        // The room itself still comes back, and a wider sliver limit drops it.
+        assert(Reconstruct(nodes,false,workBounds,open,error,tolerant));
+        assert(open.brushes.size() == 1 && open.unboundedCells == 0 && open.sliverCells == 0);
+        tolerant.minimumCellWidth = MinimumWidth(open.brushes.front()) + 1;
+        assert(Reconstruct(nodes,false,workBounds,open,error,tolerant));
+        assert(open.brushes.empty() && open.sliverCells == 1);
+        tolerant.minimumCellWidth = 0.01;
+        assert(Reconstruct(nodes,false,workBounds,open,error,tolerant));
+        assert(open.brushes.size() == 1 && open.sliverCells == 0);
+    }
     MustFail(nodes,"nonzero",{},{{0,0,0},{0,1,1}});
 
     Limits limits;

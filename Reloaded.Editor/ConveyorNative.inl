@@ -15,12 +15,19 @@ namespace
         if(!p || !defaults || Read<int>(p+0x3c)+4>Read<int>(c+0xb4))return 0;
         return Read<int>(defaults+Read<int>(p+0x3c));
     }
-    bool ConveyorCurrent(Address c)
+    bool ConveyorFields(Address c)
     {
-        if(ConveyorClassVersion(c)!=Conveyor::Version)return false;
         for(const char* name:{"Length","Width","Speed","NextBelt","ItemSpacing","FadeDistance","ItemScale","bCarryPlayers","bShowItems","bShowRollers","bLeftWall","bRightWall","ItemMeshes","ItemOffsets"})
             if(!StructField(c,name))return false;
         return true;
+    }
+    bool ConveyorCurrent(Address c) { return ConveyorClassVersion(c)==Conveyor::Version && ConveyorFields(c); }
+    // Whether the sync timer may keep a map's belts in line: this version's class
+    // or an older one with the same settings. A newer RE+'s is left as it is.
+    bool ConveyorSyncable(Address c)
+    {
+        const int version=ConveyorClassVersion(c);
+        return version>=1 && version<=Conveyor::Version && ConveyorFields(c);
     }
     // A property of a belt's class or its parents. A class compiled in this session
     // has its floats and bools only in its field list, not the editor's cached
@@ -106,24 +113,51 @@ namespace
     }
     // The belt class and frame meshes of the open map for the sync timer: finding an
     // object by name reads every loaded object's name, too slow to do twice a second.
-    // Looked up again when the map changes, when one stops being what it was (an
-    // older version made again), or every few seconds while the map has none.
-    struct ConveyorCache { Address package=0,belt=0; std::array<Address,4> frames{}; DWORD at=0; };
+    // Looked up again when another map is opened or one stops being what it was (an
+    // older version made again). A map with no belt placed has nothing to sync: its
+    // placed actors' classes are looked at instead, which is quick.
+    struct ConveyorCache { Address level=0,package=0,belt=0; unsigned generation=0; bool syncable=false; std::array<Address,4> frames{}; };
     ConveyorCache conveyorCache;
     bool Still(Address object,const std::string& name,Address outer)
     {
         try{return object && NameOf(object)==name && Read<Address>(object+0x18)==outer;}catch(const std::exception&){return false;}
     }
+    // A frame mesh is in the map package's Conveyor group.
+    bool StillFrame(Address frame,const char* name,Address package)
+    {
+        try{return frame && Still(frame,name,Read<Address>(frame+0x18)) && Still(Read<Address>(frame+0x18),Conveyor::Group,package);}catch(const std::exception&){return false;}
+    }
+    // The map's own ConveyorBelt class, when a belt of it is placed.
+    Address PlacedBeltClass(Address package)
+    {
+        std::set<Address> classes;
+        for(auto a:LiveActors())
+        {
+            const auto c=Read<Address>(a+0x24);
+            if(c && classes.insert(c).second && Read<Address>(c+0x18)==package && NameOf(c)==Conveyor::BeltClass)return c;
+        }
+        return 0;
+    }
     const ConveyorCache& ConveyorObjects()
     {
         auto& cache=conveyorCache;
-        const auto package=Read<Address>(Level()+0x18);
-        bool valid=cache.package==package && Still(cache.belt,Conveyor::BeltClass,package);
-        for(int i=0;valid && i<4;++i)
-            valid=cache.frames[i]==0 || Still(cache.frames[i],Conveyor::FrameMeshName(i&1,i&2),Read<Address>(cache.frames[i]+0x18));
-        if(valid || (cache.package==package && !cache.belt && GetTickCount()-cache.at<5000))return cache;
-        cache=ConveyorCache{package,ConveyorBeltClass(),{},GetTickCount()};
-        if(cache.belt)for(int i=0;i<4;++i)cache.frames[i]=Find(ConveyorPath(Conveyor::FrameMeshName(i&1,i&2)));
+        const auto level=Level();const auto package=Read<Address>(level+0x18);const auto generation=MapGeneration();
+        bool valid=cache.level==level && cache.package==package && cache.generation==generation;
+        if(valid && cache.belt)
+        {
+            valid=Still(cache.belt,Conveyor::BeltClass,package);
+            for(int i=0;valid && i<4;++i)
+                valid=cache.frames[i]==0 || StillFrame(cache.frames[i],Conveyor::FrameMeshName(i&1,i&2),package);
+        }
+        if(valid && cache.belt)return cache;
+        const auto belt=PlacedBeltClass(package);
+        if(valid && !belt)return cache;
+        cache=ConveyorCache{level,package,belt,generation};
+        if(belt)
+        {
+            cache.syncable=ConveyorSyncable(belt);
+            for(int i=0;i<4;++i)cache.frames[i]=Find(ConveyorPath(Conveyor::FrameMeshName(i&1,i&2)));
+        }
         return cache;
     }
     // Brings a belt's frame and item offsets in line with its settings. Returns
@@ -169,7 +203,11 @@ Json ConveyorState()
 void PrepareConveyors()
 {
     const auto package=LevelPath();
-    const bool current=ConveyorCurrent(ConveyorBeltClass());
+    const auto existing=ConveyorBeltClass();
+    // Made again over a newer RE+'s classes, its belts would lose what that version added.
+    if(const int version=ConveyorClassVersion(existing);version>Conveyor::Version)
+        throw std::runtime_error("This map's conveyor belts were made by a newer version of RE+ (conveyor version "+std::to_string(version)+"). Update RE+ to add belts to it.");
+    const bool current=ConveyorCurrent(existing);
     if(!current || !Find(ConveyorPath(Conveyor::Texture)))ImportConveyorTexture(package);
     for(const auto& mesh:{Conveyor::Frame(),Conveyor::Frame(false,true),Conveyor::Frame(true,false),Conveyor::Frame(false,false),Conveyor::Roller()})
         if(!current || !Find(ConveyorPath(mesh.name.c_str())))ImportConveyorMesh(package,mesh);
@@ -178,21 +216,24 @@ void PrepareConveyors()
     CompileMapClass(Conveyor::ItemClass,Conveyor::ItemScript(),"Actor",compiled,!current);
     CompileMapClass(Conveyor::MotorClass,Conveyor::MotorScript(),"Info",compiled,!current);
     CompileMapClass(Conveyor::BeltClass,Conveyor::BeltScript(package),"Actor",ConveyorCurrent,!current);
+    conveyorCache=ConveyorCache{};
 }
 
 // The one selected actor when it is a conveyor belt, else null.
+// The selected actor's own class is looked at, not every loaded object: this runs on
+// every right-click in a viewport.
 Json SelectedConveyorBelt()
 {
-    auto c=Find(LevelPath()+"."+Conveyor::BeltClass);
-    if(!c)return nullptr;
     Address found=0;size_t selected=0;
     for(auto a:LiveActors())
         if(Read<unsigned>(a+0x2f4)&0x40)
         {
             if(++selected>1)return nullptr;
-            if(Read<Address>(a+0x24)==c)found=a;
+            found=a;
         }
-    return found?Identity(found):Json(nullptr);
+    if(!found)return nullptr;
+    const auto c=Read<Address>(found+0x24);
+    return c && Read<Address>(c+0x18)==Read<Address>(Level()+0x18) && NameOf(c)==Conveyor::BeltClass?Identity(found):Json(nullptr);
 }
 
 namespace
@@ -258,10 +299,11 @@ namespace
         else if(previous)Write(Field(actor,"Rotation"),RotationOf(previous));
         if(previous)
         {
-            // Its look, speed and options; the walls are the new belt's own.
-            for(const char* name:{"Width","Speed","ItemScale"})
+            // Its look, speed, options and items (a line's items are its first belt's,
+            // and in a loop that can be any of them); the walls are the new belt's own.
+            for(const char* name:{"Width","Speed","ItemScale","ItemSpacing","FadeDistance"})
                 Write(BeltField(actor,name),Read<float>(BeltField(previous,name)));
-            for(const char* name:{"bCarryPlayers","bShowRollers"})
+            for(const char* name:{"bCarryPlayers","bShowRollers","bShowItems"})
             {
                 auto p=BeltProperty(actor,name);const auto mask=Read<unsigned>(p+0x64);const auto at=actor+Read<int>(p+0x3c);
                 const bool on=(Read<unsigned>(previous+Read<int>(p+0x3c))&mask)!=0;
@@ -272,11 +314,20 @@ namespace
             Write(BeltField(previous,"NextBelt"),actor);
             Call(previous,0x44);
         }
-        // The stock cases and boxes until the properties say otherwise.
+        // The previous belt's items, or the stock cases and boxes, until the properties
+        // say otherwise.
         const auto meshes=BeltArray(actor,"ItemMeshes",4);
-        int slot=0;
-        for(const auto* path:Conveyor::DefaultItems)
-            if(auto mesh=LoadStockMesh(path);mesh && slot<Conveyor::ItemSlots)Write(meshes+4*slot++,mesh);
+        if(previous)
+        {
+            const auto from=BeltArray(previous,"ItemMeshes",4);
+            for(int i=0;i<Conveyor::ItemSlots;++i)Write(meshes+4*i,Read<Address>(from+4*i));
+        }
+        else
+        {
+            int slot=0;
+            for(const auto* path:Conveyor::DefaultItems)
+                if(auto mesh=LoadStockMesh(path);mesh && slot<Conveyor::ItemSlots)Write(meshes+4*slot++,mesh);
+        }
         for(auto it=properties.begin();it!=properties.end();++it)
         {
             const auto& key=it.key();const auto& value=it.value();
@@ -305,11 +356,28 @@ namespace
         Call(actor,0x44);
         return actor;
     }
+    // The belts of the line through this one: back along the belts leading onto it
+    // and on along NextBelt, each once (all of a closed loop's).
+    size_t ConveyorLineLength(Address belt)
+    {
+        const auto next=BeltField(belt,"NextBelt")-belt;
+        const auto belts=ActorsOf(Read<Address>(belt+0x24));
+        std::set<Address> line{belt};
+        for(Address b=Read<Address>(belt+next);b && line.insert(b).second;b=Read<Address>(b+next)){}
+        for(Address b=belt;;)
+        {
+            Address before=0;
+            for(auto a:belts)if(Read<Address>(a+next)==b){before=a;break;}
+            if(!before || !line.insert(before).second)break;
+            b=before;
+        }
+        return line.size();
+    }
 }
 
 // Places a belt. Without a location it starts where the viewport was last clicked,
 // standing on the floor when that was a floor. after (a belt's name or path) puts it
-// at that belt's end, turned as it is, with its width, speed and options, and links
+// at that belt's end, turned as it is, with its width, speed, options and items, and links
 // it in: the belt carries its items on onto the new one (and the new one onto the
 // belt that came next, if any). turn ("left" or "right") with after first adds a
 // level corner piece, a square of that belt's width beyond its end, open on the
@@ -323,15 +391,24 @@ Json AddConveyorBelt(const Json& spec)
     transaction->Commit();
     Select(Json::array({Identity(actor)}));
     Redraw();
-    return Identity(actor);
+    auto added=Identity(actor);
+    size_t belts=0;
+    try{belts=ConveyorLineLength(actor);}catch(const std::exception&){/* The belt is placed; only the warning is lost. */}
+    if(belts>static_cast<size_t>(Conveyor::MaxChain))
+        added["warning"]="This line now has "+std::to_string(belts)+" belts. Items ride at most "+std::to_string(Conveyor::MaxChain)
+            +" belts of one line: the belts after that carry none, and a closed loop this long may carry none at all. "
+             "Make it two lines: clear NextBelt on the belt where the first one should end.";
+    return added;
 }
 
 // Keeps every belt's frame sized to its Length and Width, its channels to its wall
 // options and its item offsets to its meshes as they are edited.
 size_t SyncConveyorBelts()
 {
+    // A load pumps messages while its level is only partly there (UObject::GObjBeginLoadCount).
+    if(Read<int>(0x11697B10)>0)return 0;
     const auto& cache=ConveyorObjects();
-    if(!cache.belt || !ConveyorCurrent(cache.belt))return 0;
+    if(!cache.belt || !cache.syncable)return 0;
     size_t changed=0;
     for(auto a:ActorsOf(cache.belt))if(SyncBelt(a,cache.frames)){Call(a,0x44);++changed;}
     if(changed)Redraw();
