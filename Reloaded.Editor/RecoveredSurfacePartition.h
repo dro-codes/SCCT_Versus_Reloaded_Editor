@@ -36,6 +36,12 @@ namespace RecoveredSurfacePartition
         // paint fragments can be absorbed by a neighbouring material.
         // Exact mode is the default.
         bool matchEditorPrecision = false;
+        // Partition only. The caller has already chosen the candidates that
+        // lie on the face's plane (RecoveredSurfaceMatch measures that at the
+        // face, with wider bands than planeTolerance and normalTolerance), so
+        // every candidate not perpendicular to the face is projected onto it
+        // and used.
+        bool candidatesPreselected = false;
     };
 
     // Candidates describe visible polygons. Float32 vertex welding

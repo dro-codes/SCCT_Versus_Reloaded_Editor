@@ -134,6 +134,10 @@ namespace Mcp::Bridge
             {"emitterlib.cache", P::Read, true}, {"emitterlib.problems", P::Read, true}, {"emitterlib.categories", P::Read, true},
             {"emitterlib.selected", P::Read, true}, {"emitterlib.capture", P::Read, true}, {"skins.settings", P::Read, true},
             {"objectiveplayers.state", P::Read, true}, {"conveyor.state", P::Read, true},
+            // Mover Workbench, linked prefabs and OBJ import reads (WorkflowTools.cpp, Lumbridge 2.9.x).
+            {"mover.selected", P::Read, true}, {"mover.state", P::Read, true}, {"mover.outline", P::Read, true},
+            {"mover.candidates", P::Read, true}, {"prefab.counts", P::Read, true}, {"prefab.instances", P::Read, true},
+            {"prefab.selectinstance", P::Read, true}, {"prefab.selectall", P::Read, true}, {"objimport.preview", P::Read, true},
             // Undoable map edits.
             {"authoring.apply", P::Undoable, true}, {"select", P::Undoable, true},
             {"design.block", P::Undoable, true}, {"design.blockbatch", P::Undoable, true}, {"design.align", P::Undoable, true},
@@ -157,12 +161,17 @@ namespace Mcp::Bridge
             {"brush.visibility.set", P::Undoable, true}, {"builder.fit", P::Undoable, true}, {"builder.fit.brush", P::Undoable, true},
             {"vertex.portal", P::Undoable, true}, {"vertex.snap", P::Undoable, true}, {"brush.snap", P::Undoable, true},
             {"stairs.smooth", P::Undoable, true}, {"stairs.remove", P::Undoable, true},
-            {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"surface.texture", P::Undoable, false},
+            {"settings.edit", P::Undoable, true}, {"ge.add", P::Undoable, true}, {"ge.delete", P::Undoable, true}, {"surface.texture", P::Undoable, false},
+            // Mover Workbench edits and linked-prefab map changes (WorkflowTools.cpp, Lumbridge 2.9.x).
+            {"mover.path", P::Undoable, true}, {"mover.settings", P::Undoable, true}, {"mover.wire", P::Undoable, true},
+            {"prefab.place", P::Undoable, true}, {"prefab.update", P::Undoable, true}, {"prefab.break", P::Undoable, true},
             // Files and packages.
             {"asset.texture", P::File, false}, {"asset.mesh", P::File, false}, {"package.save", P::File, false}, {"object.set", P::File, false},
             {"interface.texture", P::File, false}, {"minimap.apply", P::File, false}, {"uas.build", P::File, false},
             {"mapsettings.set", P::File, false}, {"optimise.release", P::File, false}, {"conveyor.prepare", P::File, false},
             {"emitterlib.save", P::File, false}, {"emitterlib.delete", P::File, false}, {"emitterlib.update", P::File, false},
+            // OBJ mesh import into the map package, and saving the selection as a prefab (WorkflowTools.cpp, Lumbridge 2.9.x).
+            {"objimport.import", P::File, false}, {"prefab.save", P::File, false},
             // Never over the pipe: they open windows or undo blindly. light.set
             // writes without the staleness check every other edit has.
             {"light.set", P::Blocked, false}, {"design.removestart", P::Blocked, false}, {"design.play", P::Blocked, false},
@@ -174,6 +183,8 @@ namespace Mcp::Bridge
             {"preview.camera", P::Blocked, false}, {"characters.open", P::Blocked, false}, {"characters.show", P::Blocked, false},
             {"characters.capture", P::Blocked, false}, {"characters.clear", P::Blocked, false}, {"characters.close", P::Blocked, false},
             {"characters.state", P::Blocked, false}, {"characters.camera", P::Blocked, false},
+            // Mover preview poses move the live actor outside the undo model (WorkflowTools.cpp, Lumbridge 2.9.x).
+            {"mover.preview", P::Blocked, false}, {"mover.restore", P::Blocked, false},
         };
         return table;
     }

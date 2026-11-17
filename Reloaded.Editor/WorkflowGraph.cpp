@@ -281,7 +281,7 @@ LRESULT CALLBACK WindowProc(HWND w,UINT message,WPARAM wp,LPARAM lp)
 }
 void Open(HWND owner)
 {
-    if(graphWindow && IsWindow(graphWindow)){ShowWindow(graphWindow,SW_RESTORE);SetForegroundWindow(graphWindow);return;}
+    if(graphWindow && IsWindow(graphWindow)){ShowWindow(graphWindow,IsIconic(graphWindow)?SW_RESTORE:SW_SHOW);SetForegroundWindow(graphWindow);return;}
     WNDCLASSA canvas{};canvas.lpfnWndProc=CanvasProc;canvas.hInstance=GetModuleHandle(nullptr);canvas.lpszClassName="ReloadedConnectionCanvas";canvas.style=CS_DBLCLKS;canvas.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&canvas);
     WNDCLASSA wc{};wc.lpfnWndProc=WindowProc;wc.hInstance=canvas.hInstance;wc.lpszClassName="ReloadedConnectionGraph";wc.hCursor=canvas.hCursor;wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassA(&wc);
     auto state=new State;graphWindow=CreateWindowExA(WS_EX_CONTROLPARENT,wc.lpszClassName,"Gameplay Connection Graph",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1200,800,owner,nullptr,wc.hInstance,state);

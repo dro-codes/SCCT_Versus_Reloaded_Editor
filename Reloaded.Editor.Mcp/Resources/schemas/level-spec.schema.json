@@ -355,6 +355,9 @@
                 ],
                 "type": "string"
               },
+              "persistentLight": {
+                "type": "boolean"
+              },
               "props": {
                 "$ref": "#/$defs/props"
               },
@@ -547,6 +550,9 @@
               },
               "heatRadius": {
                 "type": "number"
+              },
+              "hideInNormalVision": {
+                "type": "boolean"
               },
               "properties": {
                 "$ref": "#/$defs/props"

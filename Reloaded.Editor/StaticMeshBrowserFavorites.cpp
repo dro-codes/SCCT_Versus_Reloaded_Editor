@@ -6,6 +6,8 @@
 #include "MapUsagesWindow.h"
 #include "FavoritesWindow.h"
 #include "MemoryWriter.h"
+#include "ObjImportWindow.h"
+#include <stdexcept>
 #include <commctrl.h>
 #pragma comment(lib, "comctl32.lib")
 #include <algorithm>
@@ -48,6 +50,8 @@
 #define SM_BROWSER_VIEWPORT            0xC8
 
 #define STATIC_MESH_CONTEXT_MENU_ID    15159
+#define STATIC_MESH_MENU_BAR_ID        15158
+#define IDMN_SM_FILE_IMPORT            40470
 #define IDMN_SM_TOGGLE_FAVORITE        40909
 #define IDC_SM_FAVORITES_FILTER        40910
 #define IDC_SM_FAVORITES_PACKAGE       40914
@@ -1281,6 +1285,18 @@ static HMENU WINAPI SM_LoadMenuA_Hook(HINSTANCE instance, LPCSTR menuName)
     HMENU menu = g_PreviousLoadMenuA
         ? g_PreviousLoadMenuA(instance, menuName)
         : LoadMenuA(instance, menuName);
+    if (menu && (reinterpret_cast<ULONG_PTR>(menuName) >> 16) == 0 &&
+        LOWORD(reinterpret_cast<ULONG_PTR>(menuName)) == STATIC_MESH_MENU_BAR_ID)
+    {
+        // File: Open, Save, Import..., Export ASE. Import OBJ... after the stock Import.
+        HMENU file = GetSubMenu(menu, 0);
+        if (file && SM_MenuPosition(file, ObjImportWindow::Command) < 0)
+        {
+            const int at = SM_MenuPosition(file, IDMN_SM_FILE_IMPORT);
+            InsertMenuA(file, at >= 0 ? at + 1 : -1, MF_BYPOSITION | MF_STRING, ObjImportWindow::Command, "Import &OBJ...");
+        }
+        return menu;
+    }
     if (!menu || (reinterpret_cast<ULONG_PTR>(menuName) >> 16) != 0 ||
         LOWORD(reinterpret_cast<ULONG_PTR>(menuName)) !=
             STATIC_MESH_CONTEXT_MENU_ID)
@@ -1325,6 +1341,15 @@ static HMENU WINAPI SM_LoadMenuA_Hook(HINSTANCE instance, LPCSTR menuName)
 
 static bool SM_HandleCommand(WPARAM wParam)
 {
+    if (LOWORD(wParam) == ObjImportWindow::Command)
+    {
+        // The package last used (the map's own, MyLevel, at first), not the one the browser
+        // shows: a stock package changed by mistake would be saved for every map.
+        HWND owner = g_BrowserWindow ? GetAncestor(g_BrowserWindow, GA_ROOT) : GetActiveWindow();
+        try { ObjImportWindow::Open(owner); }
+        catch (const std::exception& e) { MessageBoxA(owner, e.what(), "Import OBJ", MB_OK | MB_ICONERROR); }
+        return true;
+    }
     if (LOWORD(wParam) == WorkflowTools::kFindMesh)
     {
         WorkflowTools::FindUsages(g_BrowserWindow, SM_GetCurrentMesh(), true);
@@ -1876,6 +1901,31 @@ bool StaticMeshBrowserFavorites::ShowFavorite(const std::string& path)
         break;
     }
     return true;
+}
+
+std::vector<std::string> StaticMeshBrowserFavorites::FavoritePaths()
+{
+    // Read straight from the ini, so the browser's own list is left alone.
+    const std::string ini = SM_GetIniPath();
+    std::vector<std::string> paths;
+    int count = GetPrivateProfileIntA(kFavoritesIniSection, "Count", 0, ini.c_str());
+    count = (std::max)(0, (std::min)(count, kMaxFavorites));
+    for (int i = 0; i < count; ++i)
+    {
+        char key[32] = {};
+        char value[1024] = {};
+        snprintf(key, sizeof(key), "Favorite%d", i);
+        GetPrivateProfileStringA(kFavoritesIniSection, key, "", value, static_cast<DWORD>(std::size(value)), ini.c_str());
+        if (!value[0])
+            continue;
+        const std::string path = SM_NormalizeLegacyPath(value);
+        bool seen = false;
+        for (const auto& p : paths)
+            seen = seen || SM_ToLower(p) == SM_ToLower(path);
+        if (!seen)
+            paths.push_back(path);
+    }
+    return paths;
 }
 
 bool StaticMeshBrowserFavorites::UseMesh(void* mesh)

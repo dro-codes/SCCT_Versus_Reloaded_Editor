@@ -68,6 +68,9 @@ namespace RecoveredBspGeometry
             std::size_t count = 0;
             std::string& error;
             bool exhausted = false;
+            // Set by Clip when the fault is this cell's shape (no closed cap,
+            // too many faces), not the input or the work budget.
+            bool degenerate = false;
 
             bool Spend(std::size_t amount)
             {
@@ -212,6 +215,7 @@ namespace RecoveredBspGeometry
             }
             if (uniqueCap.size() < 3)
             {
+                work.degenerate = true;
                 work.error = "A BSP split could not produce a closed cap. "
                             "The cooked geometry is degenerate at the reconstruction tolerance.";
                 return false;
@@ -235,12 +239,14 @@ namespace RecoveredBspGeometry
                 });
             if (!HasArea(uniqueCap, normal, epsilon))
             {
+                work.degenerate = true;
                 work.error = "A BSP split produced a zero-area or reversed cap.";
                 return false;
             }
             output.push_back({ { std::move(uniqueCap), normal, surfaceIndex }, false });
             if (output.size() > work.limits.maxFacesPerBrush)
             {
+                work.degenerate = true;
                 work.error = "A reconstructed BSP cell exceeded the brush-face limit.";
                 return false;
             }
@@ -1303,13 +1309,24 @@ namespace RecoveredBspGeometry
                 if (std::any_of(current.cell.begin(), current.cell.end(),
                     [](const CellFace& face) { return face.artificialBoundary; }))
                 {
+                    if (limits.skipUnusableCells)
+                    {
+                        ++reconstructed.unboundedCells;
+                        continue;
+                    }
                     error = "A recovered structural cell reaches the extraction bounds. "
                             "Its space is unbounded or the bounds do not enclose the map. "
                             "Expand the bounds or repair the source BSP; no artificial walls were created.";
                     return false;
                 }
                 if (!ValidateClosedCell(current.cell, work))
-                    return false;
+                {
+                    if (!limits.skipUnusableCells || work.exhausted)
+                        return false;
+                    error.clear();
+                    ++reconstructed.degenerateCells;
+                    continue;
+                }
                 if (reconstructed.brushes.size() >= limits.maxBrushes
                     || current.cell.size() > limits.maxTotalFaces
                     || totalFaces > limits.maxTotalFaces - current.cell.size())
@@ -1318,22 +1335,39 @@ namespace RecoveredBspGeometry
                             "This map needs a less fragmented source reconstruction.";
                     return false;
                 }
-                totalFaces += current.cell.size();
                 Brush brush;
                 brush.subtractive = !rootOutside;
                 brush.faces.reserve(current.cell.size());
                 for (CellFace& face : current.cell)
                     brush.faces.push_back(std::move(face.face));
+                if (limits.minimumCellWidth > 0 && MinimumWidth(brush) < limits.minimumCellWidth)
+                {
+                    ++reconstructed.sliverCells;
+                    continue;
+                }
+                totalFaces += brush.faces.size();
                 reconstructed.brushes.push_back(std::move(brush));
                 continue;
             }
 
             const Node& node = nodes[static_cast<std::size_t>(current.nodeIndex)];
             Cell front, back;
-            if (!Clip(current.cell, Scale(node.normal, -1), -node.distance,
-                      node.surfaceIndex, front, work)
-                || !Clip(current.cell, node.normal, node.distance,
-                         node.surfaceIndex, back, work))
+            // A side whose cap cannot be closed is left out when unusable
+            // cells are skipped; the other side is still followed.
+            auto clip = [&](const Vec3& normal, double distance, Cell& side)
+            {
+                work.degenerate = false;
+                if (Clip(current.cell, normal, distance, node.surfaceIndex, side, work))
+                    return true;
+                if (!limits.skipUnusableCells || !work.degenerate || work.exhausted)
+                    return false;
+                error.clear();
+                side.clear();
+                ++reconstructed.degenerateCells;
+                return true;
+            };
+            if (!clip(Scale(node.normal, -1), -node.distance, front)
+                || !clip(node.normal, node.distance, back))
                 return false;
             const std::size_t additional = (front.empty() ? 0u : 1u)
                                          + (back.empty() ? 0u : 1u);

@@ -434,7 +434,7 @@ void RunSteps()
         Check(previewSeen && !BoxContains("Map changed during preview") && std::fabs(now - brightness) < 0.01f && lightsAfter == lightsBefore, "json-import-after-row-click",
               "ms=" + Fixed(ms) + " brightness=" + Fixed(now) + " undo='" + after.current + "' boxes=" + std::to_string(boxes.size()) + " selected=" + std::to_string(light ? (Flags(light) & 0x40) != 0 : 0));
 
-        // ---- conveyor belts (the combined build): Add Conveyor Belt at the builder brush, then Undo.
+        // ---- conveyor belts (with map2, on the second map): Add Conveyor Belt at the viewport's last click, then Undo.
         if (Ini("conveyor") == "1")
         {
             const size_t actorsBefore = Actors().size();

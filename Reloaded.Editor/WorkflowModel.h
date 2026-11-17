@@ -51,6 +51,10 @@ namespace Workflow
     std::string Property(const std::string& text, const std::string& key);
     std::string SetProperty(std::string text, const std::string& key, const std::string& value);
     std::string RemoveProperty(const std::string& text, const std::string& key);
+    // Actor text without any property whose value is a StaticMeshInstance
+    // (a mesh actor's baked lighting in the map it was copied from), at any
+    // depth and under any property name. dropped receives the paths named.
+    std::string RemoveBakedLighting(const std::string& text, std::vector<std::string>* dropped = nullptr);
     std::string RenameObjects(const std::string& text, const std::string& prefix);
     // Names of the Begin Object / Begin Brush blocks nested in actor text: the
     // inline sub-objects (particle emitters, brush models) native copy exports.

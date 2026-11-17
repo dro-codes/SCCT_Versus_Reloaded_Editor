@@ -26,6 +26,8 @@ namespace MapRecovery
     bool HandleCommand(UINT command);
     // [MapRecovery] MergeGeometry in Reloaded_Editor.ini; on by default.
     bool MergeGeometryEnabled();
+    // [MapRecovery] RecoverLights in Reloaded_Editor.ini; on by default.
+    bool RecoverLightsEnabled();
     void SetMergeGeometry(bool enabled);
 
     struct RecoveryOptions
@@ -34,6 +36,11 @@ namespace MapRecovery
         // combine matching surface pieces. Off: only cells sharing whole
         // faces are joined (recovery's earlier behaviour).
         bool mergeGeometry = true;
+        // Bring back the static lights the cook stripped: from the editor
+        // copy with this map's lightmaps when one is found in an install
+        // nearby, else from an editor copy of another bake checked against
+        // this one, else stand-ins fitted to the lightmaps.
+        bool recoverLights = true;
         // Called at every checkpoint on the UI thread; false cancels while
         // MapRecoveryModel::CancelAllowed(stage). May be empty.
         std::function<bool(MapRecoveryModel::Stage, double)> progress;

@@ -54,6 +54,20 @@ void Summaries()
     Check(Has(Summary(counts), "3 grown brushes were split back"), "split-back note");
     counts.merged = false;
     counts.brushes = counts.joinedBrushes;
+    Check(!Has(Summary(counts), "Stood in for") && !Has(Summary(counts), "Space:"), "nothing stood in for: no extra lines");
+    counts.cellsLeftOut = 2;
+    counts.unsurfacedWalls = 1200;
+    counts.spaceProbes = 5000;
+    counts.spaceMisses = 3;
+    Check(Has(Summary(counts), "Stood in for: 2 cells left out, 1,200 brushes with a wall"), "what was stood in for");
+    Check(Has(Summary(counts), "Space: 3 of 5,000 solid/empty samples differ"), "samples left different");
+    counts.cellsLeftOut = counts.unsurfacedWalls = counts.spaceProbes = counts.spaceMisses = 0;
+    counts.lightsKeptInFile = 3;
+    counts.lightsFitted = 40;
+    counts.lightsToReview = 0;
+    Check(Has(Summary(counts), "Lights the cook stripped: 3 still in the compiled file, 40 stand-ins fitted to the lightmaps."),
+          "where the lights came from");
+    counts.lightsKeptInFile = counts.lightsFitted = 0;
     const auto off = Summary(counts);
     Check(Has(off, "Merging was off") && Has(off, "only cells sharing whole faces") && !Has(off, "brushes grown"),
           "merging off: only face joining described");

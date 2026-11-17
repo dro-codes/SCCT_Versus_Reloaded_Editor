@@ -4,6 +4,10 @@
 #include "MapRecoveryUi.h"
 #include "RecoveredBspGeometry.h"
 #include "RecoveredSurfacePartition.h"
+#include "RecoveredSurfaceMatch.h"
+#include "RecoveredLightModel.h"
+#include "RecoveredLightTwin.h"
+#include "RecoveredLightsNative.h"
 #include "RecoveredPolygonImport.h"
 #include "RecoveredActorImport.h"
 #include "RecoveredAssetPackage.h"
@@ -23,6 +27,7 @@
 #include <iomanip>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <system_error>
@@ -125,6 +130,12 @@ namespace
         uint32_t flags = 0;
         bool structural = true;
         void* embeddedMaterialClass = nullptr;
+        // The polygon's BSP node plane: dot(planeNormal, p) = planeDistance.
+        Vec3 planeNormal;
+        float planeDistance = 0.0f;
+        // One node polygon of a zone portal whose retained outline could not
+        // be used: the portal is rebuilt from these instead.
+        bool portalFragment = false;
     };
 
     template <typename T>
@@ -306,9 +317,94 @@ namespace
             textureV = { 0.0f, 1.0f, 0.0f };
     }
 
+    // The authored outline a zone portal's surface retains (the FPoly at
+    // surf+0x20). False, with the reason, when it cannot stand for the portal.
+    bool ReadPortalOutline(const RawArray& surfs, int surfIndex, const unsigned char* node,
+                           const Vec3& bspNormal, std::vector<Vec3>& outline, Vec3& outlineNormal,
+                           std::string& reason)
+    {
+        // Runtime portal visibility uses the retained FPoly at surf+20
+        // (111AA951), once per surface, not each clipped BSP fragment.
+        // Recover that authored outline intact. Using fragments makes
+        // the first imported fragment become the whole visibility gate.
+        const auto* poly = ReadRaw<const unsigned char*>(
+            surfs.data + static_cast<size_t>(surfIndex) * kSurfStride, 0x20);
+        const unsigned count = poly ? ReadRaw<unsigned short>(poly, 0x148) : 0;
+        if (count < 3 || count > 19)
+        { reason = "It has no valid retained outline."; return false; }
+        const Vec3 normal = ReadRaw<Vec3>(poly, 0x0C);
+        Vec3 normalizedPortalNormal = normal;
+        // Cooked surfaces can face the opposite direction from their
+        // retained authored FPoly (EDE64 surface 121). Both describe
+        // the same divider plane. Preserve the authored winding;
+        // vertex-to-node plane validation below still rejects offsets.
+        if (!IsFinite(normal) || !Normalize(normalizedPortalNormal)
+            || std::fabs(Dot(normalizedPortalNormal, bspNormal)) < 0.999f)
+        { reason = "Its retained outline disagrees with its BSP plane (normal " + std::to_string(normal.x)
+            + "," + std::to_string(normal.y) + "," + std::to_string(normal.z)
+            + ", BSP normal " + std::to_string(bspNormal.x) + ","
+            + std::to_string(bspNormal.y) + "," + std::to_string(bspNormal.z)
+            + ")."; return false; }
+        // A surface's texture origin need not lie on its geometry:
+        // OffsD's water uses Z=-480 for a portal at Z=-448. Validate
+        // against the node's actual plane equation instead.
+        const Vec3 planeNormal = ReadRaw<Vec3>(node, 0);
+        const float planeDistance = ReadRaw<float>(node, 0x0C);
+        const double planeNormalLength = std::sqrt(
+            static_cast<double>(planeNormal.x) * planeNormal.x
+            + static_cast<double>(planeNormal.y) * planeNormal.y
+            + static_cast<double>(planeNormal.z) * planeNormal.z);
+        if (!IsFinite(planeNormal) || !std::isfinite(planeDistance)
+            || !std::isfinite(planeNormalLength) || planeNormalLength < 0.000001)
+        { reason = "It has an invalid BSP plane."; return false; }
+        // FPoly::SplitWithPlane accepts a 0.25-unit coplanar band
+        // (0x110BFFF7). Retained authored outlines can differ from
+        // the cooked splitter within that band (Sub18: 0.074219).
+        // Preserve the outline rather than projecting its vertices.
+        constexpr double portalPlaneTolerance = 0.25;
+        // Authored portal sheets need not be exactly planar: PyroD's
+        // surface 3089 has one corner 0.415 units off the plane the
+        // BSP was split on. A corner within one unit of that plane is
+        // moved onto it along the plane normal (the opening it gates
+        // is unchanged to well under a unit); anything further off is
+        // a broken outline.
+        constexpr double portalPlaneRepair = 1.0;
+        outline.clear();
+        for (unsigned i = 0; i < count; ++i)
+        {
+            Vec3 point = ReadRaw<Vec3>(poly, 0x18 + i * sizeof(Vec3));
+            const double distance = (static_cast<double>(planeNormal.x) * point.x
+                + static_cast<double>(planeNormal.y) * point.y
+                + static_cast<double>(planeNormal.z) * point.z - planeDistance)
+                / planeNormalLength;
+            if (!IsFinite(point) || !std::isfinite(distance)
+                || std::fabs(distance) > portalPlaneRepair)
+            { reason = "Its retained outline has invalid vertices (vertex " + std::to_string(i)
+                + ", plane distance " + std::to_string(distance) + ")."; return false; }
+            if (std::fabs(distance) > portalPlaneTolerance)
+            {
+                const double shift = distance / planeNormalLength;
+                point = {static_cast<float>(point.x - shift * planeNormal.x),
+                         static_cast<float>(point.y - shift * planeNormal.y),
+                         static_cast<float>(point.z - shift * planeNormal.z)};
+                Logger::log("MapRecovery: moved retained portal outline vertex " + std::to_string(i)
+                    + " of surface " + std::to_string(surfIndex) + " onto its BSP plane ("
+                    + std::to_string(distance) + " units off)");
+            }
+            outline.push_back(point);
+        }
+        outlineNormal = normal;
+        return true;
+    }
+
+    // Reads every node polygon with its surface. Nothing one polygon, material
+    // or portal outline gets wrong stops the recovery: the polygon is left out
+    // (skipped), the material stood in for, the portal rebuilt from its
+    // polygons, each with a row for the report.
     bool ExtractRecoveredFaces(void* level, std::vector<RecoveredFace>& faces,
                                size_t& skipped, std::string& error,
-                               const char* embeddedPackage = nullptr)
+                               const char* embeddedPackage = nullptr,
+                               std::vector<MapRecoveryModel::ReportRow>* rows = nullptr)
     {
         skipped = 0;
         if (!level)
@@ -346,6 +442,8 @@ namespace
         faces.clear();
         faces.reserve(static_cast<size_t>(nodes.count));
         std::unordered_set<int> capturedPortals;
+        std::unordered_set<int> brokenPortals;
+        std::unordered_set<int> unreadableMaterials;
         for (int nodeIndex = 0; nodeIndex < nodes.count; ++nodeIndex)
         {
             const unsigned char* node =
@@ -359,8 +457,8 @@ namespace
             if (vertexCount == 0) continue;
             if (surfIndex < 0 || surfIndex >= surfs.count)
             {
-                error = "A cooked BSP polygon references a missing surface.";
-                return false;
+                ++skipped;
+                continue;
             }
             if (vertexCount < 3 || vertPool < 0
                 || vertexCount > static_cast<unsigned int>(verts.count)
@@ -373,6 +471,8 @@ namespace
             RecoveredFace face;
             face.surfaceIndex = surfIndex;
             face.structural = (ReadRaw<unsigned char>(node, kNodeFlagsOffset) & 0x21) == 0;
+            face.planeNormal = ReadRaw<Vec3>(node, 0);
+            face.planeDistance = ReadRaw<float>(node, 0x0C);
             face.vertices.reserve(vertexCount);
             bool valid = true;
             for (unsigned int vertexIndex = 0;
@@ -400,6 +500,20 @@ namespace
             if (!face.vertices.empty()
                 && NearlySamePoint(face.vertices.front(), face.vertices.back()))
                 face.vertices.pop_back();
+            if (valid && face.vertices.size() >= 3)
+            {
+                // Some cooked polygons fold back on themselves along an edge:
+                // the spike has no area, and its backward edge would be read
+                // as a wall facing the wrong way.
+                std::vector<RecoveredBspGeometry::Vec3> outline;
+                outline.reserve(face.vertices.size());
+                for (const Vec3& point : face.vertices) outline.push_back({point.x, point.y, point.z});
+                outline = RecoveredSurfaceMatch::Unfold(std::move(outline));
+                face.vertices.clear();
+                for (const auto& point : outline)
+                    face.vertices.push_back({static_cast<float>(point.x), static_cast<float>(point.y),
+                                             static_cast<float>(point.z)});
+            }
             if (!valid || face.vertices.size() < 3)
             {
                 ++skipped;
@@ -440,11 +554,9 @@ namespace
                         static_cast<char*>(material) + kObjectClassOffset);
                 }
                 else if (material)
-                {
-                    error = "A BSP material is embedded in the map or has an invalid asset reference. "
-                            "Move that material to an external package before source recovery.";
-                    return false;
-                }
+                    // Left without a path: stood in for by the map's first
+                    // readable material below.
+                    unreadableMaterials.insert(surfIndex);
 
                 Vec3 cookedNormal = ReadVector(vectors, normalIndex);
                 if (IsFinite(cookedNormal) && Normalize(cookedNormal))
@@ -474,64 +586,34 @@ namespace
 
             if (face.flags & kSurfZonePortal)
             {
-                if (!capturedPortals.insert(surfIndex).second) continue;
-                // Runtime portal visibility uses the retained FPoly at surf+20
-                // (111AA951), once per surface, not each clipped BSP fragment.
-                // Recover that authored outline intact. Using fragments makes
-                // the first imported fragment become the whole visibility gate.
-                const auto* poly = ReadRaw<const unsigned char*>(
-                    surfs.data + static_cast<size_t>(surfIndex) * kSurfStride, 0x20);
-                const unsigned count = poly ? ReadRaw<unsigned short>(poly, 0x148) : 0;
-                if (count < 3 || count > 19)
-                { error = "A cooked zone portal has no valid retained outline."; return false; }
-                const Vec3 normal = ReadRaw<Vec3>(poly, 0x0C);
-                Vec3 normalizedPortalNormal = normal;
-                // Cooked surfaces can face the opposite direction from their
-                // retained authored FPoly (EDE64 surface 121). Both describe
-                // the same divider plane. Preserve the authored winding;
-                // vertex-to-node plane validation below still rejects offsets.
-                if (!IsFinite(normal) || !Normalize(normalizedPortalNormal)
-                    || std::fabs(Dot(normalizedPortalNormal, face.normal)) < 0.999f)
-                { error = "A retained portal outline disagrees with its BSP plane (surface "
-                    + std::to_string(surfIndex) + ", normal " + std::to_string(normal.x)
-                    + "," + std::to_string(normal.y) + "," + std::to_string(normal.z)
-                    + ", BSP normal " + std::to_string(face.normal.x) + ","
-                    + std::to_string(face.normal.y) + "," + std::to_string(face.normal.z)
-                    + ")."; return false; }
-                // A surface's texture origin need not lie on its geometry:
-                // OffsD's water uses Z=-480 for a portal at Z=-448. Validate
-                // against the node's actual plane equation instead.
-                const Vec3 planeNormal = ReadRaw<Vec3>(node, 0);
-                const float planeDistance = ReadRaw<float>(node, 0x0C);
-                const double planeNormalLength = std::sqrt(
-                    static_cast<double>(planeNormal.x) * planeNormal.x
-                    + static_cast<double>(planeNormal.y) * planeNormal.y
-                    + static_cast<double>(planeNormal.z) * planeNormal.z);
-                if (!IsFinite(planeNormal) || !std::isfinite(planeDistance)
-                    || !std::isfinite(planeNormalLength) || planeNormalLength < 0.000001)
-                { error = "A retained portal has an invalid BSP plane."; return false; }
-                // FPoly::SplitWithPlane accepts a 0.25-unit coplanar band
-                // (0x110BFFF7). Retained authored outlines can differ from
-                // the cooked splitter within that band (Sub18: 0.074219).
-                // Preserve the outline rather than projecting its vertices.
-                constexpr double portalPlaneTolerance = 0.25;
-                face.vertices.clear();
-                for (unsigned i = 0; i < count; ++i)
-                {
-                    const Vec3 point = ReadRaw<Vec3>(poly, 0x18 + i * sizeof(Vec3));
-                    const double distance = (static_cast<double>(planeNormal.x) * point.x
-                        + static_cast<double>(planeNormal.y) * point.y
-                        + static_cast<double>(planeNormal.z) * point.z - planeDistance)
-                        / planeNormalLength;
-                    if (!IsFinite(point) || !std::isfinite(distance)
-                        || std::fabs(distance) > portalPlaneTolerance)
-                    { error = "A retained portal outline has invalid vertices (surface "
-                        + std::to_string(surfIndex) + ", vertex " + std::to_string(i)
-                        + ", plane distance " + std::to_string(distance) + ")."; return false; }
-                    face.vertices.push_back(point);
-                }
-                face.normal = normal;
                 face.structural = false;
+                if (brokenPortals.count(surfIndex))
+                    face.portalFragment = true;
+                else
+                {
+                    if (!capturedPortals.insert(surfIndex).second) continue;
+                    std::string reason;
+                    std::vector<Vec3> outline;
+                    Vec3 outlineNormal;
+                    if (ReadPortalOutline(surfs, surfIndex, node, face.normal, outline, outlineNormal, reason))
+                    {
+                        face.vertices = std::move(outline);
+                        face.normal = outlineNormal;
+                    }
+                    else
+                    {
+                        // The portal comes back from the polygons the compiled
+                        // map drew for it, this one and the ones that follow.
+                        brokenPortals.insert(surfIndex);
+                        face.portalFragment = true;
+                        Logger::log("MapRecovery: zone portal surface " + std::to_string(surfIndex)
+                            + " is rebuilt from its polygons. " + reason);
+                        if (rows)
+                            rows->push_back({"Zone portal rebuilt from its polygons", "Surface " + std::to_string(surfIndex),
+                                reason + " The portal was rebuilt from the polygons the compiled map drew for it; "
+                                         "check that it still closes its doorway.", MapRecoveryModel::Target::None});
+                    }
+                }
             }
             faces.push_back(std::move(face));
             if (faces.size() > kMaxRecoveredFaces)
@@ -567,6 +649,15 @@ namespace
         {
             if (face.materialPath.empty())
                 face.materialPath = fallbackMaterial;
+        }
+        if (!unreadableMaterials.empty())
+        {
+            Logger::log("MapRecovery: " + std::to_string(unreadableMaterials.size())
+                + " surfaces use a material that could not be read; they use " + fallbackMaterial);
+            if (rows)
+                rows->push_back({"Material stood in for", std::to_string(unreadableMaterials.size()) + " surfaces",
+                    "Their material is embedded in the map in a way that could not be read, or is a broken reference; "
+                    "they use " + fallbackMaterial + " instead.", MapRecoveryModel::Target::None});
         }
         return true;
     }
@@ -632,8 +723,11 @@ namespace
         return true;
     }
 
+    // allowOthers: some portals were rebuilt from their polygons (their
+    // retained outline was unusable), so rebuilt portal surfaces that match
+    // none of the expected outlines are theirs.
     bool VerifyPortalOutlines(void* model, const std::vector<RecoveredFace>& expected,
-                              std::string& error)
+                              std::string& error, bool allowOthers = false)
     {
         const RawArray surfaces = model ? ReadRawArray(model, kModelSurfsOffset) : RawArray{};
         if (!model || !IsValidArray(surfaces))
@@ -669,7 +763,7 @@ namespace
                         if (equal) { found[candidate] = true; matched = candidateMatched = true; }
                     }
                 }
-            if (!matched)
+            if (!matched && !allowOthers)
             { error = "A rebuilt zone portal lost its original visibility outline (surface "
                 + std::to_string(i) + ")."; return false; }
         }
@@ -710,10 +804,31 @@ namespace
         RecoveredBspGeometry::Result joined;
         std::vector<RecoveredBspGeometry::Brush> current;
         std::vector<std::vector<size_t>> members;
+        // The compiled node tree: still answers solid/empty questions after
+        // the compiled map has been unloaded.
+        RecoveredSurfaceMatch::Tree tree;
     };
+
+    std::string Near(const RecoveredBspGeometry::Brush& brush)
+    {
+        RecoveredBspGeometry::Vec3 sum;
+        size_t count = 0;
+        for (const auto& face : brush.faces)
+            for (const auto& vertex : face.vertices)
+            {
+                sum.x += vertex.x; sum.y += vertex.y; sum.z += vertex.z;
+                ++count;
+            }
+        if (!count) return "A brush with no geometry";
+        std::ostringstream text;
+        text << std::fixed << std::setprecision(0) << "Near " << sum.x / count << ", " << sum.y / count
+             << ", " << sum.z / count;
+        return text.str();
+    }
 
     bool ReconstructSourceBrushes(void* level, SourceBrushes& source,
                                   bool merge, MapRecoveryModel::Counts& counts,
+                                  std::vector<MapRecoveryModel::ReportRow>& rows,
                                   const StepFunction& step, std::string& error)
     {
         using namespace RecoveredBspGeometry;
@@ -766,8 +881,37 @@ namespace
         bounds.maximum.x += margin; bounds.maximum.y += margin; bounds.maximum.z += margin;
         const bool rootOutside = *reinterpret_cast<int*>(
             static_cast<char*>(model) + kModelRootOutsideOffset) != 0;
+        source.tree.nodes = nodes;
+        source.tree.rootOutside = rootOutside;
         RecoveredBspGeometry::Result cells;
-        if (!Reconstruct(nodes, rootOutside, bounds, cells, error)) return false;
+        // A cell that cannot become a brush is left out and reported; it no
+        // longer stops the recovery.
+        RecoveredBspGeometry::Limits cellLimits;
+        cellLimits.skipUnusableCells = true;
+        cellLimits.minimumCellWidth = RecoveredSurfaceMatch::kSliverWidth;
+        if (!Reconstruct(nodes, rootOutside, bounds, cells, error, cellLimits)) return false;
+        if (cells.brushes.empty())
+        {
+            error = "The compiled BSP has no closed space to rebuild brushes from.";
+            return false;
+        }
+        counts.cellsLeftOut = cells.unboundedCells + cells.degenerateCells + cells.sliverCells;
+        if (cells.unboundedCells)
+            rows.push_back({"Cells left out", std::to_string(cells.unboundedCells) + " open to the outside",
+                "The compiled BSP leaves this space open to the outside of the map, so it has no walls to make a brush "
+                "from. It is solid in the recovered map.", MapRecoveryModel::Target::None});
+        if (cells.degenerateCells)
+            rows.push_back({"Cells left out", std::to_string(cells.degenerateCells) + " degenerate",
+                "Too small or flat to close at the reconstruction tolerance (a millionth of a unit).",
+                MapRecoveryModel::Target::None});
+        if (cells.sliverCells)
+            rows.push_back({"Cells left out", std::to_string(cells.sliverCells) + " slivers",
+                "Thinner than a hundredth of a unit: the editor's BSP builder cannot tell their two sides apart.",
+                MapRecoveryModel::Target::None});
+        if (counts.cellsLeftOut)
+            Logger::log("MapRecovery: left out " + std::to_string(cells.unboundedCells) + " cells open to the outside, "
+                + std::to_string(cells.degenerateCells) + " degenerate and " + std::to_string(cells.sliverCells)
+                + " slivers");
         counts.cells = cells.brushes.size();
         counts.cellFaces = 0;
         for (const auto& brush : cells.brushes) counts.cellFaces += brush.faces.size();
@@ -821,10 +965,12 @@ namespace
 
     // One attempt's brushes: shared corners resolved in reconstruction order,
     // native-precision bevels removed, then ordered larger volumes first.
-    // origin[i] is result.brushes[i]'s index in source.current.
+    // A grown brush the editor cannot import goes back to the joined brushes it
+    // replaced; a joined brush it cannot import is left out, with a row.
     bool PrepareAttemptBrushes(const SourceBrushes& source, RecoveredBspGeometry::Result& result,
-                               std::vector<size_t>& origin, RecoveredPolygonImport::VertexPool& sourcePoints,
-                               MapRecoveryModel::Counts& counts, std::string& error)
+                               RecoveredPolygonImport::VertexPool& sourcePoints,
+                               MapRecoveryModel::Counts& counts,
+                               std::vector<MapRecoveryModel::ReportRow>& rows, std::string& error)
     {
         std::vector<RecoveredBspGeometry::Brush> brushes = source.current;
         for (const auto& brush : brushes)
@@ -834,27 +980,49 @@ namespace
                     RecoveredBspGeometry::Vec3 canonical;
                     if (!sourcePoints.Resolve(vertex, canonical, error)) return false;
                 }
+        std::unordered_set<size_t> present;
+        for (const auto& list : source.members)
+            if (list.size() == 1) present.insert(list.front());
         std::vector<std::pair<double, size_t>> order;
+        counts.brushesLeftOut = 0;
+        // Brushes appended below (a grown brush's parts) are prepared in turn.
+        const size_t grownCount = brushes.size();
         for (size_t index = 0; index < brushes.size(); ++index)
         {
-            if (!RecoveredSurfacePartition::CanonicalizeBrushForEditor(brushes[index], error)) return false;
-            const double volume = RecoveredBspGeometry::Volume(brushes[index]);
-            if (!std::isfinite(volume) || volume <= 0)
+            std::string fault;
+            double volume = 0;
+            if (RecoveredSurfacePartition::CanonicalizeBrushForEditor(brushes[index], fault))
             {
-                error = "A recovered brush has invalid volume for rebuild ordering.";
-                return false;
+                volume = RecoveredBspGeometry::Volume(brushes[index]);
+                if (!std::isfinite(volume) || volume <= 0) fault = "It has no volume at the editor's precision.";
             }
-            order.emplace_back(volume, index);
+            if (fault.empty())
+            {
+                order.emplace_back(volume, index);
+                continue;
+            }
+            if (index < grownCount && index < source.members.size() && source.members[index].size() > 1)
+            {
+                for (size_t member : source.members[index])
+                    if (member < source.joined.brushes.size() && present.insert(member).second)
+                        brushes.push_back(source.joined.brushes[member]);
+                continue;
+            }
+            ++counts.brushesLeftOut;
+            rows.push_back({"Brush left out", Near(brushes[index]),
+                "The editor cannot import it: " + fault + " Its space is solid in the recovered map.",
+                MapRecoveryModel::Target::None});
+        }
+        if (order.empty())
+        {
+            error = "None of the reconstructed brushes can be imported by the editor.";
+            return false;
         }
         // Build larger volumes before smaller details (OrderForRebuild).
         std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
         result = {};
-        origin.clear();
         for (const auto& entry : order)
-        {
             result.brushes.push_back(std::move(brushes[entry.second]));
-            origin.push_back(entry.second);
-        }
         counts.brushes = result.brushes.size();
         counts.brushFaces = 0;
         for (const auto& brush : result.brushes) counts.brushFaces += brush.faces.size();
@@ -1000,15 +1168,38 @@ namespace
         output << "]}\n";
     }
 
+    // Writes the brushes as T3D. brushNames[i] is the actor made for
+    // geometry.brushes[i], empty when that brush was left out.
+    //
+    // Each brush face takes its materials from the compiled polygons that
+    // cover it (RecoveredSurfaceMatch chooses them). The surface covering the
+    // most of a face owns what the others leave; a wall the compiled map drew
+    // nothing on stays invisible. A fault in one face or brush does not stop
+    // the recovery: the face takes one material, or the brush is left out,
+    // and rows says so. Only cancelling, the polygon budget and a material
+    // path the text format cannot hold fail.
     bool WriteSourceBrushes(const RecoveredBspGeometry::Result& geometry,
                             const std::vector<RecoveredFace>& surfaces,
+                            const RecoveredSurfaceMatch::Tree& tree,
                             RecoveredPolygonImport::VertexPool& sourcePoints,
                             std::string& text, std::string& error,
                             const std::filesystem::path& failurePath,
                             bool unifyMappings, MapRecoveryModel::Counts& counts,
+                            std::vector<MapRecoveryModel::ReportRow>& rows,
+                            std::vector<std::string>& brushNames,
                             const StepFunction& step)
     {
         namespace Surface = RecoveredSurfacePartition;
+        namespace Match = RecoveredSurfaceMatch;
+        using MapRecoveryModel::Target;
+        brushNames.assign(geometry.brushes.size(), std::string());
+        counts.unsurfacedWalls = 0;
+        counts.undividedSurfaces = 0;
+        if (surfaces.empty())
+        {
+            error = "The compiled map has no surfaces to take materials from.";
+            return false;
+        }
         std::unordered_map<int, int> bySurface;
         // Structural surfaces with the same material, flags and texture
         // mapping on one plane look identical; letting them share one
@@ -1040,8 +1231,12 @@ namespace
             for (size_t index = 0; index < mappingOf.size(); ++index)
                 if (mappings[index].structural && mappingOf[index] != static_cast<int>(index)) ++counts.unifiedSurfaces;
         }
-        std::unordered_map<int64_t, std::vector<size_t>> byPlaneDistance;
+        // The compiled structural polygons, findable by plane, and the
+        // surface each stands for (candidate.materialIndex).
+        Match::Index coplanarIndex;
         std::vector<Surface::Surface> candidates;
+        size_t notSolidMissing = 0;
+        std::unordered_set<int> notSolidSeen;
         for (size_t index = 0; index < surfaces.size(); ++index)
         {
             const auto& surface = surfaces[index];
@@ -1049,12 +1244,11 @@ namespace
             // even when the cooked surface lacks PF_NotSolid (EDE64).
             // Original solid space is reconstructed separately from node
             // flags and verified by the solid/empty probes after rebuilding.
-            if (!surface.structural && !(surface.flags & (8u | kSurfZonePortal)))
-            {
-                error = "A non-structural BSP surface has unsupported collision flags ("
-                    + std::to_string(surface.flags) + "). No finished source map was saved.";
-                return false;
-            }
+            // Any other polygon on a non-CSG node comes back as a non-solid
+            // sheet too, whatever its flags say.
+            if (!surface.structural && !(surface.flags & (8u | kSurfZonePortal))
+                && notSolidSeen.insert(surface.surfaceIndex).second)
+                ++notSolidMissing;
             bySurface.emplace(surface.surfaceIndex, static_cast<int>(index));
             Surface::Surface candidate;
             candidate.normal = {surface.normal.x, surface.normal.y, surface.normal.z};
@@ -1065,19 +1259,39 @@ namespace
                 candidate.materialIndex = mappingOf[static_cast<size_t>(candidate.materialIndex)];
             for (const auto& point : surface.vertices)
                 candidate.vertices.push_back({point.x, point.y, point.z});
-            int64_t bucket = 0;
-            if (!Surface::PlaneBucket(candidate.normal, candidate.vertices.front(), bucket))
-            {
-                error = "A recovered surface plane is outside the supported coordinate range.";
-                return false;
-            }
-            if (surface.structural) byPlaneDistance[bucket].push_back(index);
+            if (surface.structural)
+                coplanarIndex.Add(index, candidate.vertices, candidate.normal,
+                    {surface.planeNormal.x, surface.planeNormal.y, surface.planeNormal.z}, surface.planeDistance);
             candidates.push_back(std::move(candidate));
+        }
+        if (notSolidMissing)
+            rows.push_back({"Sheets made non-solid", std::to_string(notSolidMissing) + " surfaces",
+                "They are on non-CSG BSP nodes but lack the Non-Solid flag; they came back as non-solid sheets.",
+                Target::None});
+        // A surface a bare face may take: structural, drawn, not a portal.
+        auto usable = [&](int index) {
+            return index >= 0 && index < static_cast<int>(surfaces.size())
+                && surfaces[static_cast<size_t>(index)].structural
+                && !(surfaces[static_cast<size_t>(index)].flags & (kSurfZonePortal | 0x08u | 0x01u));
+        };
+        // The surface the most structural polygons have, for faces nothing
+        // else stands in for.
+        int commonSurface = 0;
+        {
+            std::map<int, size_t> uses;
+            for (size_t index = 0; index < surfaces.size(); ++index)
+                if (usable(candidates[index].materialIndex) && surfaces[index].structural)
+                    ++uses[candidates[index].materialIndex];
+            size_t most = 0;
+            for (const auto& use : uses)
+                if (use.second > most) { most = use.second; commonSurface = use.first; }
         }
         std::ostringstream output;
         output << "Begin Map\n";
         size_t polygonCount = 0;
-        auto emit = [&](const std::vector<Surface::Vec3>& polygon,
+        // Set when emit fails for a reason no simpler face would get past.
+        bool hardFailure = false;
+        auto emit = [&](std::ostream& target, const std::vector<Surface::Vec3>& polygon,
                         const Surface::Vec3& normal, const RecoveredFace& material,
                         bool prepared = false, bool shareCorners = false) {
             std::vector<std::vector<Surface::Vec3>> parts;
@@ -1089,7 +1303,7 @@ namespace
                     for (auto& vertex : vertices)
                     {
                         Surface::Vec3 canonical;
-                        if (!sourcePoints.Resolve(vertex,canonical,error)) return false;
+                        if (!sourcePoints.Resolve(vertex,canonical,error)) { hardFailure = true; return false; }
                         vertex=canonical;
                     }
                 // Native T3D import ignores Normal and cleans every polygon.
@@ -1098,39 +1312,39 @@ namespace
                 const auto native = RecoveredPolygonImport::Prepare(vertices);
                 if (!native.accepted())
                 {
-                    error = "The editor would discard a reconstructed surface during import. "
-                        "Recovery stopped before creating an incomplete brush.";
+                    error = "The editor would discard a reconstructed surface during import.";
                     return false;
                 }
                 if (!RecoveredPolygonImport::PreservesOutline(vertices, native))
                 {
-                    error = "The editor's polygon cleanup would change a reconstructed surface boundary. "
-                        "Recovery stopped before creating an incomplete brush.";
+                    error = "The editor's polygon cleanup would change a reconstructed surface boundary.";
                     return false;
                 }
                 if (++polygonCount > 200000)
                 {
                     error = "Surface reconstruction exceeded the editor's safe polygon budget.";
+                    hardFailure = true;
                     return false;
                 }
                 if (material.materialPath.find_first_of("\"\r\n") != std::string::npos)
                 {
                     error = "A BSP material path cannot be represented in the editor's text format: "
                         + material.materialPath;
+                    hardFailure = true;
                     return false;
                 }
-                output << "          Begin Polygon Texture=\"" << material.materialPath
+                target << "          Begin Polygon Texture=\"" << material.materialPath
                        << "\" Flags=" << material.flags << "\n";
-                output << "             Origin   "; WriteVector(output, material.origin);
-                output << "\n             Normal   "; WriteVector(output, ToEditorVector(normal));
-                output << "\n             TextureU "; WriteVector(output, material.textureU);
-                output << "\n             TextureV "; WriteVector(output, material.textureV);
-                output << '\n';
+                target << "             Origin   "; WriteVector(target, material.origin);
+                target << "\n             Normal   "; WriteVector(target, ToEditorVector(normal));
+                target << "\n             TextureU "; WriteVector(target, material.textureU);
+                target << "\n             TextureV "; WriteVector(target, material.textureV);
+                target << '\n';
                 for (const auto& vertex : vertices)
                 {
-                    output << "             Vertex   "; WriteVector(output, ToEditorVector(vertex)); output << '\n';
+                    target << "             Vertex   "; WriteVector(target, ToEditorVector(vertex)); target << '\n';
                 }
-                output << "          End Polygon\n";
+                target << "          End Polygon\n";
             }
             return true;
         };
@@ -1151,83 +1365,258 @@ namespace
             output << "       End PolyList\n    End Brush\n    Brush=Model'MyLevel.RecoveredModel"
                    << brushIndex << "'\nEnd Actor\n";
         };
-        for (const auto& brush : geometry.brushes)
+
+        // The part of the face no compiled polygon covers is marked with
+        // this in place of a surface while candidates are being gathered.
+        constexpr int kBare = -2;
+        struct Tier { double distance; double normal; };
+        static constexpr Tier kTiers[] = {
+            {Match::kPlaneTolerance, Match::kNormalTolerance},
+            {Match::kCoplanarBand, Match::kNormalTolerance},
+            {Match::kLooseTolerance, Match::kLooseNormalTolerance}};
+        Surface::Limits partitionLimits;
+        partitionLimits.matchEditorPrecision = true;
+        partitionLimits.candidatesPreselected = true;
+        struct FaceNotes
         {
-            const size_t done = static_cast<size_t>(&brush - geometry.brushes.data());
-            if (done % 16 == 0 && !step(Stage::Materials, double(done) / double(geometry.brushes.size())))
+            double unsurfacedArea = 0;
+            size_t undivided = 0;
+            std::string undividedReason;
+        };
+        // Writes one brush face's polygons to target. False when not even the
+        // whole face with one material can be imported (fault says why).
+        auto writeFace = [&](const RecoveredBspGeometry::Face& face, int facing, std::ostream& target,
+                             std::string& fault, FaceNotes& notes) {
+            const double faceArea = Match::Area(face.vertices, face.normal);
+            const double bareLimit = (std::max)(Match::kBareArea, 1e-6 * faceArea);
+            std::vector<Surface::Surface> chosen;
+            std::unordered_set<size_t> used;
+            std::vector<Surface::Piece> pieces;
+            auto areaOf = [&](const Surface::Piece& piece) { return Match::Area(piece.vertices, face.normal); };
+            auto covered = [&]() {
+                return std::any_of(pieces.begin(), pieces.end(),
+                    [&](const Surface::Piece& piece) { return piece.materialIndex != kBare; });
+            };
+            // One candidate the partition cannot use (a boundary that crosses
+            // itself) must not cost the face its other materials: keep the
+            // ones that work.
+            auto partition = [&](std::vector<Surface::Surface>& list, int fallback) {
+                if (Surface::Partition(face, list, fallback, pieces, fault, partitionLimits)) return true;
+                if (list.size() > 256) return false;
+                std::vector<Surface::Surface> kept;
+                for (const auto& candidate : list)
+                {
+                    kept.push_back(candidate);
+                    std::vector<Surface::Piece> trial;
+                    std::string ignored;
+                    if (!Surface::Partition(face, kept, fallback, trial, ignored, partitionLimits)) kept.pop_back();
+                }
+                if (kept.size() == list.size()
+                    || !Surface::Partition(face, kept, fallback, pieces, fault, partitionLimits)) return false;
+                list = std::move(kept);
+                fault.clear();
+                return true;
+            };
+            // Widen the plane tolerance while part of the face stays bare.
+            auto look = [&](bool thorough) {
+                for (int tier = 0; tier < (thorough ? 3 : 2); ++tier)
+                {
+                    bool added = false;
+                    for (size_t id : coplanarIndex.Find(face.vertices, face.normal, facing,
+                             kTiers[tier].distance, kTiers[tier].normal, thorough))
+                        if (used.insert(id).second)
+                        {
+                            chosen.push_back(candidates[id]);
+                            added = true;
+                        }
+                    if (!added) continue;
+                    if (!partition(chosen, kBare)) return false;
+                    double bare = 0;
+                    for (const auto& piece : pieces)
+                        if (piece.materialIndex == kBare) bare += areaOf(piece);
+                    if (bare <= bareLimit) break;
+                }
+                return true;
+            };
+            // What stands in when the face has nothing of its own: the
+            // surface whose plane made it, else the map's most common one.
+            int stand = commonSurface;
             {
-                error = kCancelledError;
-                return false;
+                const auto splitter = bySurface.find(face.surfaceIndex);
+                if (splitter != bySurface.end())
+                {
+                    int index = splitter->second;
+                    if (!mappingOf.empty() && surfaces[static_cast<size_t>(index)].structural)
+                        index = mappingOf[static_cast<size_t>(index)];
+                    if (usable(index)) stand = index;
+                }
             }
-            std::vector<bool> collapsedFaces;
-            if (!Surface::ValidateEditorBrush(brush, collapsedFaces, error))
+            bool whole = false;   // write the face as one polygon set with one material
+            bool hidden = false;  // a wall the compiled map drew nothing on
+            bool failed = false;  // the divisions were lost to a fault, not to the map
+            if (!look(false)) whole = failed = true;
+            else if (!covered())
             {
-                DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                return false;
+                // A wall none of the polygons on its plane covers: look at
+                // every polygon, ending with ones a little further off and
+                // tilted (its split plane may not be its polygon's).
+                const bool wall = tree.Between(face.vertices, face.normal);
+                if (wall && !look(true)) whole = failed = true;
+                else if (!covered())
+                {
+                    whole = true;
+                    hidden = wall;
+                }
             }
-            beginBrush(brush.subtractive, false);
-            for (size_t faceIndex = 0; faceIndex < brush.faces.size(); ++faceIndex)
+            if (!whole)
             {
-                if (collapsedFaces[faceIndex]) continue;
-                const auto& face = brush.faces[faceIndex];
-                const auto found = bySurface.find(face.surfaceIndex);
-                int fallback = found == bySurface.end() ? 0 : found->second;
-                if (!mappingOf.empty() && surfaces[static_cast<size_t>(fallback)].structural)
-                    fallback = mappingOf[static_cast<size_t>(fallback)];
-                int64_t bucket = 0;
-                if (face.vertices.empty() || !Surface::PlaneBucket(face.normal, face.vertices.front(), bucket))
+                // The surface covering the most of the face is the face's
+                // own: it takes what the others leave bare.
+                std::map<int, double> areas;
+                bool bare = false;
+                for (const auto& piece : pieces)
+                    if (piece.materialIndex == kBare) bare = true;
+                    else areas[piece.materialIndex] += areaOf(piece);
+                double most = -1;
+                for (const auto& area : areas)
+                    if (area.second > most) { most = area.second; stand = area.first; }
+                if (bare)
                 {
-                    error = "A reconstructed brush face has an invalid plane.";
-                    return false;
+                    std::vector<Surface::Surface> others;
+                    for (const auto& candidate : chosen)
+                        if (candidate.materialIndex != stand) others.push_back(candidate);
+                    if (!partition(others, stand)) whole = failed = true;
                 }
-                std::vector<Surface::Surface> coplanar;
-                for (int offset = -1; offset <= 1; ++offset)
-                {
-                    const auto group = byPlaneDistance.find(bucket + offset);
-                    if (group != byPlaneDistance.end())
-                        for (size_t index : group->second) coplanar.push_back(candidates[index]);
-                }
-                std::vector<Surface::Piece> pieces;
-                Surface::Limits partitionLimits;
-                partitionLimits.matchEditorPrecision = true;
-                if (!Surface::Partition(face, coplanar, fallback, pieces, error, partitionLimits))
-                {
-                    DumpSurfaceCase(failurePath, face, coplanar);
-                    DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                    error += " (material partition; details: " + failurePath.string() + ")";
-                    return false;
-                }
+            }
+            auto encode = [&](const std::vector<Surface::Piece>& parts, std::ostream& out) {
                 std::vector<Surface::Piece> prepared;
-                if (!Surface::PrepareForEditor(face, pieces, 16, prepared, error))
-                {
-                    DumpSurfaceCase(failurePath, face, coplanar);
-                    DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                    error += " (editor surface preparation; details: " + failurePath.string() + ")";
-                    return false;
-                }
+                if (!Surface::PrepareForEditor(face, parts, 16, prepared, fault)) return false;
                 for (const auto& piece : prepared)
                 {
                     // A generated closing face may inherit its fallback
                     // material from a portal splitter. It is not itself an
                     // authored visibility portal or antiportal.
-                    auto material = surfaces[piece.materialIndex];
+                    auto material = surfaces[static_cast<size_t>(piece.materialIndex)];
                     // A material donor may be a non-solid sheet or semisolid
                     // surface. Its CSG flags must not turn a closing wall of
                     // this reconstructed structural volume into an opening.
                     material.flags &= ~(kSurfEditorPolyFlags | 0x08u | 0x20u);
-                    if (!emit(piece.vertices, face.normal, material, true, true))
-                    {
-                        auto failedFace = face;
-                        failedFace.vertices = piece.vertices;
-                        DumpSurfaceCase(failurePath, failedFace, {});
-                        DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                        error += " (source polygon; details: " + failurePath.string() + ")";
-                        return false;
-                    }
+                    if (hidden) material.flags |= 0x01u;
+                    if (!emit(out, piece.vertices, face.normal, material, true, true)) return false;
+                }
+                return true;
+            };
+            const size_t polygonsBefore = polygonCount;
+            if (!whole)
+            {
+                std::ostringstream divided;
+                if (encode(pieces, divided))
+                {
+                    target << divided.str();
+                    return true;
+                }
+                if (hardFailure) return false;
+                polygonCount = polygonsBefore;
+                failed = true;
+            }
+            const std::string reason = fault;
+            std::ostringstream plain;
+            Surface::Piece all;
+            all.vertices = face.vertices;
+            all.materialIndex = stand;
+            if (!encode({all}, plain))
+            {
+                polygonCount = polygonsBefore;
+                return false;
+            }
+            target << plain.str();
+            fault.clear();
+            error.clear();
+            if (hidden && faceArea > 1e-3) notes.unsurfacedArea += faceArea;
+            if (failed)
+            {
+                ++notes.undivided;
+                if (notes.undividedReason.empty()) notes.undividedReason = reason;
+            }
+            return true;
+        };
+
+        constexpr size_t kMostRowsOfAKind = 200;
+        size_t unsurfacedRows = 0, undividedRows = 0, leftOutRows = 0, sheetRows = 0;
+        for (size_t brushAt = 0; brushAt < geometry.brushes.size(); ++brushAt)
+        {
+            const auto& brush = geometry.brushes[brushAt];
+            if (brushAt % 16 == 0 && !step(Stage::Materials, double(brushAt) / double(geometry.brushes.size())))
+            {
+                error = kCancelledError;
+                return false;
+            }
+            std::string fault;
+            std::vector<bool> collapsedFaces;
+            std::ostringstream body;
+            FaceNotes notes;
+            const size_t polygonsBefore = polygonCount;
+            bool sound = Surface::ValidateEditorBrush(brush, collapsedFaces, fault);
+            const int facing = brush.subtractive ? -1 : 1;
+            for (size_t faceIndex = 0; sound && faceIndex < brush.faces.size(); ++faceIndex)
+            {
+                if (collapsedFaces[faceIndex]) continue;
+                sound = writeFace(brush.faces[faceIndex], facing, body, fault, notes);
+                if (!sound && hardFailure)
+                {
+                    DumpSurfaceCase(failurePath, brush.faces[faceIndex], {});
+                    DumpSurfaceBatch(failurePath.parent_path() / "SurfaceBatch.json", geometry, surfaces);
+                    error = fault.empty() ? error : fault;
+                    error += " (details: " + failurePath.string() + ")";
+                    return false;
                 }
             }
+            if (!sound || polygonCount == polygonsBefore)
+            {
+                // Its space stays solid; the solid/empty samples taken after
+                // the rebuild decide whether that matters.
+                polygonCount = polygonsBefore;
+                error.clear();
+                ++counts.brushesLeftOut;
+                Logger::log("MapRecovery: left out a brush the editor cannot import. " + Near(brush) + ". " + fault);
+                if (leftOutRows++ < kMostRowsOfAKind)
+                    rows.push_back({"Brush left out", Near(brush),
+                        "The editor cannot import it: " + (fault.empty() ? std::string("it has no faces left.") : fault)
+                            + " Its space is solid in the recovered map.", Target::None});
+                continue;
+            }
+            beginBrush(brush.subtractive, false);
+            output << body.str();
             endBrush();
+            const std::string name = "RecoveredVolume" + std::to_string(brushIndex);
+            brushNames[brushAt] = name;
+            if (notes.unsurfacedArea > 0)
+            {
+                ++counts.unsurfacedWalls;
+                if (unsurfacedRows++ < kMostRowsOfAKind)
+                {
+                    std::ostringstream detail;
+                    detail << std::fixed << std::setprecision(0) << notes.unsurfacedArea
+                           << " square units of wall the compiled map drew nothing on. Kept invisible, as in the original.";
+                    rows.push_back({"Wall with no surface", name, detail.str(), Target::Actor, name});
+                }
+            }
+            if (notes.undivided)
+            {
+                counts.undividedSurfaces += notes.undivided;
+                if (undividedRows++ < kMostRowsOfAKind)
+                    rows.push_back({"Face given one material", name,
+                        std::to_string(notes.undivided) + " of its faces could not keep the compiled map's material "
+                            "divisions and took the material covering most of them. " + notes.undividedReason,
+                        Target::Actor, name});
+            }
         }
+        if (!brushIndex)
+        {
+            error = "None of the reconstructed brushes can be imported by the editor.";
+            return false;
+        }
+        const size_t structuralWritten = brushIndex;
         // Cooked BSP cuts an authored sheet into many fragments. Keep each
         // original surface in one ordinary non-solid brush, retaining every
         // fragment and its exact triangulation instead of creating an actor
@@ -1245,104 +1634,154 @@ namespace
         for (const auto& group : sheetGroups)
         {
             const bool zoneDivider = (surfaces[group.front()].flags & kSurfZonePortal) != 0;
-            if (zoneDivider) ++hiddenZoneDividers;
-            beginBrush(false, true, zoneDivider);
+            const size_t polygonsBefore = polygonCount;
+            std::ostringstream body;
+            size_t lost = 0;
+            // One polygon of the sheet: left out when the editor would not
+            // import it as it is.
+            auto emitPart = [&](const std::vector<Surface::Vec3>& polygon, const Surface::Vec3& normal,
+                                const RecoveredFace& material, bool prepared) {
+                std::ostringstream one;
+                const size_t before = polygonCount;
+                if (emit(one, polygon, normal, material, prepared))
+                {
+                    body << one.str();
+                    return true;
+                }
+                if (hardFailure) return false;
+                polygonCount = before;
+                error.clear();
+                ++lost;
+                return true;
+            };
             if (zoneDivider)
             {
                 // The retained FPoly is already an authored native polygon.
                 // Generic sheet preparation triangulates slightly nonplanar
                 // quads; native BSP then retains just one triangle as the
                 // surface's visibility aperture. Keep the complete outline.
+                // A portal with no usable outline is its node polygons.
                 for (size_t index : group)
-                    if (!emit(candidates[index].vertices, candidates[index].normal,
-                              surfaces[index], true)) return false;
-                endBrush();
+                {
+                    if (surfaces[index].portalFragment)
+                    {
+                        if (!emitPart(candidates[index].vertices, candidates[index].normal, surfaces[index], false))
+                            return false;
+                    }
+                    else if (!emit(body, candidates[index].vertices, candidates[index].normal,
+                                   surfaces[index], true)) return false;
+                }
+            }
+            else
+            {
+                struct SheetPlane
+                {
+                    Surface::Vec3 normal;
+                    Surface::Vec3 origin;
+                    std::vector<Surface::Piece> pieces;
+                };
+                std::vector<SheetPlane> sheetPlanes;
+                const Surface::Limits sheetLimits;
+                for (size_t index : group)
+                {
+                    std::vector<Surface::Surface> sheetParts;
+                    if (!Surface::PrepareSheetForEditor(candidates[index], sheetParts, error))
+                    {
+                        error.clear();
+                        ++lost;
+                        continue;
+                    }
+                    for (auto& part : sheetParts)
+                    {
+                        auto plane = std::find_if(sheetPlanes.begin(), sheetPlanes.end(),
+                            [&](const SheetPlane& existing) {
+                                const double alignment = existing.normal.x * part.normal.x
+                                    + existing.normal.y * part.normal.y + existing.normal.z * part.normal.z;
+                                if (alignment < 1.0 - sheetLimits.normalTolerance) return false;
+                                return std::all_of(part.vertices.begin(), part.vertices.end(),
+                                    [&](const Surface::Vec3& point) {
+                                        const double distance = existing.normal.x * (point.x - existing.origin.x)
+                                            + existing.normal.y * (point.y - existing.origin.y)
+                                            + existing.normal.z * (point.z - existing.origin.z);
+                                        return std::fabs(distance) <= sheetLimits.epsilon;
+                                    });
+                            });
+                        if (plane == sheetPlanes.end())
+                        {
+                            sheetPlanes.push_back({part.normal, part.vertices.front(), {}});
+                            plane = std::prev(sheetPlanes.end());
+                        }
+                        plane->pieces.push_back({std::move(part.vertices), part.materialIndex});
+                    }
+                }
+                for (const auto& plane : sheetPlanes)
+                {
+                    std::vector<Surface::Piece> coalesced;
+                    if (!Surface::CoalesceCoplanarPieces(plane.pieces, plane.normal, coalesced, error))
+                    {
+                        // The fragments as the compiled map has them.
+                        coalesced = plane.pieces;
+                        error.clear();
+                    }
+                    for (const auto& piece : coalesced)
+                    {
+                        const Surface::Surface sheet{piece.vertices, plane.normal, piece.materialIndex};
+                        std::vector<Surface::Surface> finalParts;
+                        if (!Surface::PrepareSheetForEditor(sheet, finalParts, error))
+                        {
+                            error.clear();
+                            ++lost;
+                            continue;
+                        }
+                        for (const auto& part : finalParts)
+                            if (!emitPart(part.vertices, part.normal,
+                                          surfaces[static_cast<size_t>(piece.materialIndex)], true)) return false;
+                    }
+                }
+            }
+            const std::string surfaceText = "Surface " + std::to_string(surfaces[group.front()].surfaceIndex);
+            if (polygonCount == polygonsBefore)
+            {
+                if (sheetRows++ < kMostRowsOfAKind)
+                    rows.push_back({zoneDivider ? "Zone portal left out" : "Sheet left out", surfaceText,
+                        "None of its polygons can be imported by the editor.", Target::None});
                 continue;
             }
-            struct SheetPlane
-            {
-                Surface::Vec3 normal;
-                Surface::Vec3 origin;
-                std::vector<Surface::Piece> pieces;
-            };
-            std::vector<SheetPlane> sheetPlanes;
-            const Surface::Limits sheetLimits;
-            for (size_t index : group)
-            {
-                std::vector<Surface::Surface> sheetParts;
-                if (!Surface::PrepareSheetForEditor(candidates[index], sheetParts, error))
-                {
-                    RecoveredBspGeometry::Face failedFace{candidates[index].vertices,
-                        candidates[index].normal, surfaces[index].surfaceIndex};
-                    DumpSurfaceCase(failurePath, failedFace, {});
-                    DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                    error += " (non-solid sheet " + std::to_string(index) + ", surface "
-                        + std::to_string(surfaces[index].surfaceIndex) + "; details: "
-                        + failurePath.string() + ")";
-                    return false;
-                }
-                for (auto& part : sheetParts)
-                {
-                    auto plane = std::find_if(sheetPlanes.begin(), sheetPlanes.end(),
-                        [&](const SheetPlane& existing) {
-                            const double alignment = existing.normal.x * part.normal.x
-                                + existing.normal.y * part.normal.y + existing.normal.z * part.normal.z;
-                            if (alignment < 1.0 - sheetLimits.normalTolerance) return false;
-                            return std::all_of(part.vertices.begin(), part.vertices.end(),
-                                [&](const Surface::Vec3& point) {
-                                    const double distance = existing.normal.x * (point.x - existing.origin.x)
-                                        + existing.normal.y * (point.y - existing.origin.y)
-                                        + existing.normal.z * (point.z - existing.origin.z);
-                                    return std::fabs(distance) <= sheetLimits.epsilon;
-                                });
-                        });
-                    if (plane == sheetPlanes.end())
-                    {
-                        sheetPlanes.push_back({part.normal, part.vertices.front(), {}});
-                        plane = std::prev(sheetPlanes.end());
-                    }
-                    plane->pieces.push_back({std::move(part.vertices), part.materialIndex});
-                }
-            }
-            for (const auto& plane : sheetPlanes)
-            {
-                std::vector<Surface::Piece> coalesced;
-                if (!Surface::CoalesceCoplanarPieces(plane.pieces, plane.normal, coalesced, error))
-                {
-                    DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                    error += " (non-solid surface " + std::to_string(surfaces[group.front()].surfaceIndex)
-                        + " coalescing)";
-                    return false;
-                }
-                for (const auto& piece : coalesced)
-                {
-                    const Surface::Surface sheet{piece.vertices, plane.normal, piece.materialIndex};
-                    std::vector<Surface::Surface> finalParts;
-                    if (!Surface::PrepareSheetForEditor(sheet, finalParts, error)) return false;
-                    for (const auto& part : finalParts)
-                        if (!emit(part.vertices, part.normal, surfaces[piece.materialIndex], true))
-                        {
-                            RecoveredBspGeometry::Face failedFace{part.vertices, part.normal,
-                                surfaces[piece.materialIndex].surfaceIndex};
-                            DumpSurfaceCase(failurePath, failedFace, {});
-                            DumpSurfaceBatch(failurePath.parent_path()/"SurfaceBatch.json",geometry,surfaces);
-                            error += " (non-solid sheet emission; details: " + failurePath.string() + ")";
-                            return false;
-                        }
-                }
-            }
+            if (zoneDivider) ++hiddenZoneDividers;
+            beginBrush(false, true, zoneDivider);
+            output << body.str();
             endBrush();
+            if (lost && sheetRows++ < kMostRowsOfAKind)
+            {
+                const std::string name = "RecoveredVolume" + std::to_string(brushIndex);
+                rows.push_back({"Sheet polygons left out", name,
+                    std::to_string(lost) + " polygons of " + surfaceText + " cannot be imported by the editor.",
+                    Target::Actor, name});
+            }
         }
         output << "End Map\n";
-        Logger::log("MapRecovery: emitted " + std::to_string(geometry.brushes.size())
-            + " structural brushes, " + std::to_string(sheetGroups.size())
+        const size_t sheetsWritten = brushIndex - structuralWritten;
+        Logger::log("MapRecovery: emitted " + std::to_string(structuralWritten)
+            + " structural brushes, " + std::to_string(sheetsWritten)
             + " non-solid sheet brushes and " + std::to_string(polygonCount) + " polygons");
         Logger::log("MapRecovery: retained " + std::to_string(hiddenZoneDividers)
             + " zone-divider brushes, hidden by default; retained ZoneInfo settings");
+        if (counts.unsurfacedWalls || counts.undividedSurfaces || counts.brushesLeftOut)
+            Logger::log("MapRecovery: " + std::to_string(counts.unsurfacedWalls) + " brushes have walls the compiled map drew nothing on (kept invisible), "
+                + std::to_string(counts.undividedSurfaces) + " faces took one material, "
+                + std::to_string(counts.brushesLeftOut) + " brushes were left out");
         if (unifyMappings)
             Logger::log("MapRecovery: " + std::to_string(counts.unifiedSurfaces)
                 + " surfaces share another surface's identical texture mapping");
-        counts.sheetBrushes = sheetGroups.size();
+        for (const auto& kind : {std::make_pair(unsurfacedRows, "Wall with no surface"),
+                                 std::make_pair(undividedRows, "Face given one material"),
+                                 std::make_pair(leftOutRows, "Brush left out"),
+                                 std::make_pair(sheetRows, "Sheet polygons left out")})
+            if (kind.first > kMostRowsOfAKind)
+                rows.push_back({kind.second, "More",
+                    std::to_string(kind.first - kMostRowsOfAKind) + " further ones are not listed.", Target::None});
+        counts.brushes = structuralWritten;
+        counts.sheetBrushes = sheetsWritten;
         counts.polygons = polygonCount;
         text = output.str();
         return true;
@@ -2856,6 +3295,159 @@ namespace
         return true;
     }
 
+    // Lights the cook took out of the level's actor lists but still wrote to
+    // the file, because a kept object refers to them (an IgnoredEchelonLights
+    // or ObjectLights list). They are the author's lights, whole: loaded with
+    // the map, of its package and its LevelInfo, with a light type, not
+    // deleted, in none of the level's lists.
+    std::vector<void*> FindLightsOutsideLevel(void* level)
+    {
+        std::vector<void*> lights;
+        if (!level) return lights;
+        std::unordered_set<void*> listedActors;
+        void* levelInfo = nullptr;
+        for (size_t offset : {size_t(0x2C), size_t(0x3C), size_t(0x4C)})
+        {
+            const RawArray actors = ReadRawArray(level, offset);
+            if (actors.count < 0 || actors.count > kMaxCookedArrayElements || (actors.count && !actors.data)) return lights;
+            void* const* data = reinterpret_cast<void* const*>(actors.data);
+            if (offset == 0x2C && actors.count) levelInfo = data[0];
+            for (int index = 0; index < actors.count; ++index)
+                if (data[index]) listedActors.insert(data[index]);
+        }
+        void** objects = *reinterpret_cast<void***>(0x11697B70);
+        const int count = *reinterpret_cast<int*>(0x11697B74);
+        if (!objects || count < 0 || count > 10000000 || !levelInfo) return lights;
+        std::unordered_map<void*, bool> lightClasses;
+        for (int index = 0; index < count; ++index)
+        {
+            void* object = objects[index];
+            if (!object || listedActors.count(object)) continue;
+            void* type = *reinterpret_cast<void**>(static_cast<char*>(object) + kObjectClassOffset);
+            auto found = lightClasses.find(type);
+            if (found == lightClasses.end())
+            {
+                bool light = false;
+                void* parent = type;
+                for (int depth = 0; parent && depth < 64; ++depth)
+                {
+                    char name[128]{};
+                    if (CopyObjectName(parent, name, sizeof(name)) && _stricmp(name, "Light") == 0)
+                    {
+                        light = true;
+                        break;
+                    }
+                    parent = *reinterpret_cast<void**>(static_cast<char*>(parent) + kClassSuperOffset);
+                }
+                found = lightClasses.emplace(type, light).first;
+            }
+            if (!found->second) continue;
+            const auto* actor = static_cast<const char*>(object);
+            // bDeleteMe is bit 0x8000 at +0x2E8, Level at +0x1A0 and
+            // LightType at +0x2D1 in this editor.
+            if ((*reinterpret_cast<const uint32_t*>(actor + 0x2E8) & 0x8000u)
+                || *reinterpret_cast<void* const*>(actor + 0x1A0) != levelInfo
+                || !*reinterpret_cast<const unsigned char*>(actor + 0x2D1)) continue;
+            char path[512]{};
+            if (FormatExternalObjectPath(object, path, sizeof(path), "MyLevel") && _strnicmp(path, "MyLevel.", 8) == 0)
+                lights.push_back(object);
+        }
+        return lights;
+    }
+
+    // Puts actors at the end of the level's actor list for as long as it
+    // lives, so the map's text export writes them with the level's own. The
+    // list goes back to its length afterwards: these actors were never
+    // registered with the level, and nothing else may walk over them.
+    struct ListedForExport
+    {
+        void* level;
+        int original = -1;
+        ListedForExport(void* owner, const std::vector<void*>& actors) : level(owner)
+        {
+            if (!level || actors.empty()) return;
+            auto* list = static_cast<unsigned char*>(level) + kLevelActorsDataOffset;
+            const int count = ReadRaw<int>(list, sizeof(void*));
+            using AddFn = int(__thiscall*)(void*, int, int);
+            const int first = reinterpret_cast<AddFn>(kFArrayAdd)(list, static_cast<int>(actors.size()), sizeof(void*));
+            void** data = ReadRaw<void**>(list, 0);
+            if (first != count || !data) { *reinterpret_cast<int*>(list + sizeof(void*)) = count; return; }
+            for (size_t index = 0; index < actors.size(); ++index) data[count + static_cast<int>(index)] = actors[index];
+            original = count;
+        }
+        ListedForExport(const ListedForExport&) = delete;
+        ListedForExport& operator=(const ListedForExport&) = delete;
+        bool Listed() const { return original >= 0; }
+        ~ListedForExport()
+        {
+            if (original >= 0)
+                *reinterpret_cast<int*>(static_cast<unsigned char*>(level) + kLevelActorsDataOffset + sizeof(void*)) = original;
+        }
+    };
+
+    // What one slot of a level's actor list holds: 0 a live actor, 1 one
+    // marked deleted (name receives its name when that reads), 2 a pointer
+    // whose object or class cannot be read. POD-only, so SEH can contain it.
+    int ProbeActorSlot(void* actor, char* name, size_t nameSize)
+    {
+        if (name && nameSize) name[0] = '\0';
+        __try
+        {
+            const auto* bytes = static_cast<const unsigned char*>(actor);
+            const uint32_t flags = *reinterpret_cast<const uint32_t*>(bytes + 0x2E8);
+            const auto* type = *reinterpret_cast<const unsigned char* const*>(bytes + kObjectClassOffset);
+            const auto* outer = *reinterpret_cast<const unsigned char* const*>(bytes + kObjectOuterOffset);
+            if (!type || !outer) return 2;
+            volatile unsigned char touched = static_cast<unsigned char>(type[kObjectNameOffset] ^ outer[kObjectNameOffset]);
+            (void)touched;
+            if (!(flags & 0x8000u)) return 0;
+            CopyObjectName(actor, name, nameSize);
+            return 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 2;
+        }
+    }
+
+    // The editor's save compacts the level's actor lists and names every
+    // deleted actor it drops (ULevel::CompactActors, 0x110BB4C0: the main list
+    // at +0x2C from its first dynamic actor, and the side lists at +0x5C to
+    // +0xDC whose bit is set at +0x138; 0x110BB3F0 calls GetFullName on each
+    // entry with bDeleteMe). The level object is reused from map to map, and
+    // an entry whose actor is gone crashes the save there. Deleted and
+    // unreadable entries of every list are cleared first, which is all the
+    // compaction would have done with them, and each is logged. The LevelInfo
+    // and the builder brush at the head of the main list are left alone.
+    size_t ClearDestroyedActors(void* level)
+    {
+        if (!level) return 0;
+        size_t cleared = 0;
+        for (size_t offset = kLevelActorsDataOffset; offset <= 0xDC; offset += 0x10)
+        {
+            const RawArray actors = ReadRawArray(level, offset);
+            if (!actors.data || actors.count <= 0 || actors.count > kMaxCookedArrayElements) continue;
+            void** data = reinterpret_cast<void**>(const_cast<unsigned char*>(actors.data));
+            for (int index = offset == kLevelActorsDataOffset ? 2 : 0; index < actors.count; ++index)
+            {
+                if (!data[index]) continue;
+                char name[256]{};
+                const int state = ProbeActorSlot(data[index], name, sizeof(name));
+                if (!state) continue;
+                char where[32];
+                snprintf(where, sizeof(where), "+0x%X", static_cast<unsigned>(offset));
+                Logger::log(std::string("MapRecovery: actor list ") + where + " slot " + std::to_string(index) + " of "
+                    + std::to_string(actors.count)
+                    + (state == 1 ? std::string(" holds a deleted actor (") + (name[0] ? name : "name unreadable") + ")"
+                                  : std::string(" holds a pointer that cannot be read"))
+                    + "; cleared before saving");
+                data[index] = nullptr;
+                ++cleared;
+            }
+        }
+        return cleared;
+    }
+
     void* FindEmbeddedAssetClass(const std::string& externalPath, const std::string& alias)
     {
         void** objects = *reinterpret_cast<void***>(0x11697B70);
@@ -2909,8 +3501,22 @@ namespace
         const bool patch = _stricmp(typePath, "SoftBody.ESBPatchActor") == 0;
         const auto* body = ReadRaw<unsigned char*>(actor, 0x2F8);
         if (!body) return fail("simulation missing");
-        if (ReadRaw<void*>(body, kObjectOuterOffset) != level || ReadRaw<void*>(body, 0x54) != actor)
-            return fail("simulation ownership differs from its actor");
+        if (ReadRaw<void*>(body, kObjectOuterOffset) != level)
+            return fail("simulation is not owned by the level");
+        // A patch copied in the editor can keep pointing at the simulation
+        // its source actor owns (PyroD's ESBPatchActor14426). The recovered
+        // actor regenerates its own simulation from its own settings, and
+        // the import check below still requires that regenerated shape to
+        // equal this one point for point, so the shared owner loses nothing.
+        if (ReadRaw<void*>(body, 0x54) != actor)
+        {
+            char owner[512]{};
+            const auto* other = ReadRaw<void*>(body, 0x54);
+            if (!other || !FormatExternalObjectPath(const_cast<void*>(other), owner, sizeof(owner), "MyLevel"))
+                return fail("simulation ownership differs from its actor");
+            Logger::log("MapRecovery: " + actorName + " shares the soft-body simulation owned by "
+                + std::string(owner) + "; its own is regenerated and checked against it");
+        }
         if (!FormatExternalObjectPath(ReadRaw<void*>(body, kObjectClassOffset), typePath, sizeof(typePath))
             || _stricmp(typePath, patch ? "SoftBody.ESBPatch" : "SoftBody.ESBStripDoor") != 0) return fail("unexpected simulation class " + std::string(typePath));
         const auto points = ReadRawArray(body, 0x70), springs = ReadRawArray(body, 0x7C);
@@ -3118,6 +3724,19 @@ namespace
                     error = "The original BSP tree failed a solid/empty space probe.";
                     return false;
                 }
+                // A probe half a unit off a face lands exactly on the far face
+                // of a half-unit sliver (ClarD's 0.5-unit floor slab at Z -408).
+                // On a plane the answer is only the tree's tie-break, which a
+                // rebuild may order differently. Such a probe checks nothing:
+                // keep only probes whose space is the same just either side.
+                bool nearer = false, further = false;
+                if (!IsOutside(model, Add(centre, Scale(face.normal, side * 0.9f)), nearer)
+                    || !IsOutside(model, Add(centre, Scale(face.normal, side * 1.1f)), further))
+                {
+                    error = "The original BSP tree failed a solid/empty space probe.";
+                    return false;
+                }
+                if (nearer != probe.outside || further != probe.outside) continue;
                 probes.push_back(probe);
             }
         }
@@ -3198,6 +3817,7 @@ namespace
         std::string error;
         MapRecovery::RecoveryOptions options;
         options.mergeGeometry = merge;
+        options.recoverLights = MapRecovery::RecoverLightsEnabled();
         MapRecovery::RecoveryOutcome outcome;
         bool success = false;
         {
@@ -3228,7 +3848,7 @@ namespace
         }
         SetWindowTextA(owner, (RE_PLUS_WINDOW_TITLE " - [" + destination.stem().string() + "]").c_str());
         MapRecoveryUi::Report report;
-        report.summary = "Created and verified " + destination.filename().string()
+        report.summary = (outcome.counts.spaceMisses ? "Created " : "Created and verified ") + destination.filename().string()
             + ". Open it later with File > Open; its brushes can be edited and rebuilt.\r\n"
             + MapRecoveryModel::Summary(outcome.counts);
         const auto assetPath = packages / "StaticMeshes" / (RecoveryAssetName(destination) + ".usx");
@@ -3266,6 +3886,534 @@ namespace
             return !cancelled;
         }
     };
+
+    // ---- the lights the cook stripped ---------------------------------------------------------------------------
+
+    namespace Twin = RecoveredLightTwin;
+
+    // The lightmap atlases of a map file, as its bake's fingerprint. The
+    // package is decompressed to `temporary` (removed again) and searched.
+    bool FingerprintMapFile(const std::filesystem::path& map, const std::filesystem::path& temporary,
+                            Twin::Fingerprint& print)
+    {
+        print.clear();
+        std::error_code code;
+        std::filesystem::remove(temporary, code);
+        std::string error;
+        if (!RecoveredAssetPackage::Write(map, temporary, error)) return false;
+        bool read = false;
+        const HANDLE file = CreateFileW(temporary.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            LARGE_INTEGER size{};
+            if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart < 0x60000000)
+                if (const HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr))
+                {
+                    if (const void* view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0))
+                    {
+                        print = Twin::FingerprintOf(Twin::FindAtlases(static_cast<const unsigned char*>(view),
+                                                                      static_cast<size_t>(size.QuadPart)));
+                        read = true;
+                        UnmapViewOfFile(view);
+                    }
+                    CloseHandle(mapping);
+                }
+            CloseHandle(file);
+        }
+        std::filesystem::remove(temporary, code);
+        return read;
+    }
+
+    // Where editor copies are looked for: Packages\MapsEd of this install, of
+    // the installs beside it (its siblings and their children, as a folder of
+    // installs keeps them), and the folders in RELOADED_TWIN_FOLDERS.
+    std::vector<std::filesystem::path> TwinFolders()
+    {
+        std::vector<std::filesystem::path> folders;
+        std::error_code code;
+        auto add = [&](const std::filesystem::path& folder)
+        {
+            if (!std::filesystem::is_directory(folder, code)) return;
+            for (const auto& known : folders)
+                if (std::filesystem::equivalent(known, folder, code)) return;
+            folders.push_back(folder);
+        };
+        auto mapsEd = [](const std::filesystem::path& install) { return install / "Packages" / "MapsEd"; };
+        const auto install = ExecutableDirectory().parent_path();
+        add(mapsEd(install));
+        const auto options = std::filesystem::directory_options::skip_permission_denied;
+        for (std::filesystem::directory_iterator sibling(install.parent_path(), options, code), end; !code && sibling != end;
+             sibling.increment(code))
+        {
+            if (!sibling->is_directory(code)) continue;
+            if (std::filesystem::is_directory(mapsEd(sibling->path()), code)) { add(mapsEd(sibling->path())); continue; }
+            std::error_code inner;
+            for (std::filesystem::directory_iterator child(sibling->path(), options, inner); !inner && child != end;
+                 child.increment(inner))
+                if (child->is_directory(inner)) add(mapsEd(child->path()));
+        }
+        char more[4096]{};
+        if (GetEnvironmentVariableA("RELOADED_TWIN_FOLDERS", more, sizeof(more)) > 0)
+        {
+            std::istringstream list(more);
+            std::string folder;
+            while (std::getline(list, folder, ';'))
+            {
+                if (folder.empty()) continue;
+                add(std::filesystem::is_directory(mapsEd(folder), code) ? mapsEd(folder) : std::filesystem::path(folder));
+            }
+        }
+        return folders;
+    }
+
+    // Fingerprints every editor copy the folders hold. Files seen before
+    // (same size and write time) come from the cache beside the editor. Maps
+    // rebuilt by recovery (*_Recovered*) are never a reference and are left
+    // out. step(fraction) false cancels.
+    bool ScanTwins(const std::filesystem::path& temporary, std::vector<Twin::Entry>& entries,
+                   const std::function<bool(double)>& step)
+    {
+        entries.clear();
+        const auto cachePath = ExecutableDirectory() / "RecoveredLightTwins.txt";
+        std::unordered_map<std::string, Twin::Entry> cached;
+        {
+            std::string text, ignored;
+            if (std::filesystem::exists(cachePath) && ReadTextFile(cachePath, text, ignored))
+                for (auto& entry : Twin::ReadCache(text)) cached.emplace(Twin::Lower(entry.path), std::move(entry));
+        }
+        std::vector<std::filesystem::path> files;
+        std::error_code code;
+        for (const auto& folder : TwinFolders())
+            for (std::filesystem::directory_iterator file(folder, std::filesystem::directory_options::skip_permission_denied, code), end;
+                 !code && file != end; file.increment(code))
+            {
+                if (!file->is_regular_file(code) || !HasSdcExtension(file->path())) continue;
+                if (Twin::Lower(file->path().filename().string()).find("_recovered") != std::string::npos) continue;
+                files.push_back(file->path());
+            }
+        size_t read = 0;
+        for (size_t index = 0; index < files.size(); ++index)
+        {
+            Twin::Entry entry;
+            entry.path = files[index].string();
+            entry.package = files[index].stem().string();
+            entry.size = std::filesystem::file_size(files[index], code);
+            if (code) continue;
+            const auto written = std::filesystem::last_write_time(files[index], code);
+            if (code) continue;
+            entry.modified = static_cast<std::int64_t>(written.time_since_epoch().count());
+            const auto known = cached.find(Twin::Lower(entry.path));
+            if (known != cached.end() && known->second.size == entry.size && known->second.modified == entry.modified)
+                entry.fingerprint = known->second.fingerprint;
+            else
+            {
+                if (!step(double(index) / double(files.size()))) return false;
+                // A file that does not read keeps an empty fingerprint, so it
+                // is not read again until it changes.
+                FingerprintMapFile(files[index], temporary, entry.fingerprint);
+                ++read;
+            }
+            cached[Twin::Lower(entry.path)] = entry;
+            entries.push_back(std::move(entry));
+        }
+        if (read)
+        {
+            // This scan's files, and earlier ones from folders it did not search.
+            std::vector<Twin::Entry> all;
+            for (auto& item : cached)
+                if (std::filesystem::exists(item.second.path, code)) all.push_back(item.second);
+            std::sort(all.begin(), all.end(), [](const Twin::Entry& a, const Twin::Entry& b) { return a.path < b.path; });
+            std::string ignored;
+            WriteTextFile(cachePath, Twin::WriteCache(all), ignored);
+            Logger::log("MapRecovery: light recovery fingerprinted " + std::to_string(read) + " editor copies (kept in "
+                + cachePath.string() + ")");
+        }
+        return true;
+    }
+
+    // An editor copy loaded for its lights.
+    struct TwinMap
+    {
+        Twin::Entry entry;
+        bool exact = false;                                     // its lightmaps are the compiled map's
+        std::vector<RecoveredLightsNative::LevelLight> lights;
+        std::vector<Twin::ActorBlock> actors;                   // its Light actors, prepared for import
+        std::string levelInfoName;
+    };
+
+    // The actor's text with a property line added after its header.
+    std::string WithProperty(const std::string& actor, const std::string& line)
+    {
+        const size_t end = actor.find('\n');
+        if (end == std::string::npos) return actor;
+        return actor.substr(0, end + 1) + "    " + line + "\n" + actor.substr(end + 1);
+    }
+
+    // Brings back the lights the cook stripped (RecoveredLightModel.h), best
+    // source first: the editor copy with this map's lightmaps, an editor copy
+    // of another bake checked light by light against this one, then stand-ins
+    // fitted to what the lightmaps hold beyond the lights the map still has.
+    // The lights are added to the prepared actors. Nothing here stops the
+    // recovery except Cancel: a failure leaves the map as it was, with a row.
+    bool RecoverLostLights(void* level, RecoveredActorImport::PreparedMap& actors, const std::vector<TwinMap>& twins,
+                           const std::vector<void*>& lightsOutsideLevel,
+                           size_t twinsSearched, MapRecoveryModel::Counts& counts,
+                           std::vector<MapRecoveryModel::ReportRow>& rows, std::string& reportText,
+                           const StepFunction& step, std::string& error)
+    {
+        namespace Lights = RecoveredLights;
+        using MapRecoveryModel::Target;
+        using Lights::Light;
+        auto note = [&](const std::string& text)
+        {
+            Logger::log("MapRecovery: light recovery: " + text);
+            reportText += text + "\n";
+        };
+        auto cancelled = [&](double fraction)
+        {
+            if (step(Stage::Lights, fraction)) return false;
+            error = kCancelledError;
+            return true;
+        };
+        auto number = [](double value, int digits = 2)
+        {
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(digits) << value;
+            return text.str();
+        };
+        std::string fault;
+        std::vector<RecoveredLightsNative::LevelLight> cookedLights;
+        std::vector<std::string> cookedActorNames;
+        if (!RecoveredLightsNative::ReadLights(level, cookedLights, cookedActorNames, fault, lightsOutsideLevel))
+        {
+            rows.push_back({"Lights not recovered", "The compiled map", "Its lights could not be read: " + fault, Target::None});
+            return true;
+        }
+        std::unordered_set<std::string> cookedNames;
+        std::vector<std::string> usedNames;
+        for (const auto& name : cookedActorNames)
+        {
+            cookedNames.insert(Twin::Lower(name));
+            usedNames.push_back(Twin::Lower(name));
+        }
+        std::vector<Twin::ActorBlock> prepared = Twin::Actors(actors.actorsT3d);
+        std::unordered_map<std::string, size_t> preparedByName;
+        for (size_t index = 0; index < prepared.size(); ++index)
+        {
+            preparedByName.emplace(Twin::Lower(prepared[index].name), index);
+            usedNames.push_back(Twin::Lower(prepared[index].name));
+        }
+        if (cancelled(0)) return false;
+        const Lights::FitSettings settings;
+        auto scene = RecoveredLightsNative::Capture(level, settings.thin, fault);
+        if (!scene) note("the compiled lightmaps could not be read (" + fault + "), so no light could be checked or fitted");
+        const double levelBrightness = scene ? scene->levelBrightness : 1.0;
+
+        // The lights the map still has.
+        std::vector<Light> known;
+        for (const auto& entry : cookedLights)
+        {
+            Light light = entry.light;
+            light.levelBrightness = levelBrightness;
+            const auto found = preparedByName.find(Twin::Lower(light.name));
+            light.storesRadius = found == preparedByName.end() || Twin::SetsProperty(prepared[found->second], "LightRadius");
+            if (entry.outsideLevel)
+            {
+                // Never registered with the level: its zone is where it stands.
+                if (scene && scene->zoneAt) light.zone = scene->zoneAt(light.location);
+                if (found != preparedByName.end()) ++counts.lightsKeptInFile;
+            }
+            known.push_back(std::move(light));
+        }
+        if (counts.lightsKeptInFile)
+        {
+            note(std::to_string(counts.lightsKeptInFile) + " lights the cook took out of the level are still in the file (another "
+                "object refers to them): they are the author's and bake as they did");
+            rows.push_back({"Lights kept in the file", std::to_string(counts.lightsKeptInFile) + " lights",
+                "The cook took them out of the level but still wrote them, because another object refers to them. They are "
+                "back in the map as the author made them.", Target::None});
+        }
+
+        // A copy's lights the cook dropped that the compiled map does not hold.
+        struct Lost
+        {
+            Light light;
+            std::string text;
+            double support = -1;
+            bool review = false;
+        };
+        auto lostOf = [&](const TwinMap& twin)
+        {
+            std::vector<Lost> lost;
+            for (const auto& entry : twin.lights)
+            {
+                if (!entry.lightClass || !entry.light.CookDrops() || cookedNames.count(Twin::Lower(entry.light.name))) continue;
+                const auto block = std::find_if(twin.actors.begin(), twin.actors.end(), [&](const Twin::ActorBlock& actor)
+                    { return Twin::Lower(actor.name) == Twin::Lower(entry.light.name); });
+                if (block == twin.actors.end()) continue;
+                Lost item;
+                item.light = entry.light;
+                item.light.levelBrightness = levelBrightness;
+                if (scene && scene->zoneAt) item.light.zone = scene->zoneAt(item.light.location);
+                item.light.storesRadius = Twin::SetsProperty(*block, "LightRadius");
+                item.text = Twin::ReplaceName(block->text, twin.levelInfoName, actors.levelInfoName);
+                lost.push_back(std::move(item));
+            }
+            return lost;
+        };
+        const TwinMap* exact = nullptr;
+        std::vector<Lost> chosen;
+        for (const auto& twin : twins)
+        {
+            if (!twin.exact) continue;
+            auto lost = lostOf(twin);
+            if (!exact || lost.size() > chosen.size()) { exact = &twin; chosen = std::move(lost); }
+        }
+        const TwinMap* stale = nullptr;
+        std::vector<Lights::FittedLight> fitted;
+        double defaultRadius = 0;
+        bool checked = false, gated = false;
+        Lights::BakeError before, after;
+        std::string fitText;
+
+        if (scene && scene->samples.Count() >= 100)
+        {
+            checked = true;
+            const Lights::Samples& samples = scene->samples;
+            auto lightsOf = [](const std::vector<Lost>& lost)
+            {
+                std::vector<Light> lights;
+                for (const auto& item : lost) lights.push_back(item.light);
+                return lights;
+            };
+            auto withLost = [&](const std::vector<Lost>& lost)
+            {
+                std::vector<Light> all = known;
+                for (const auto& item : lost) all.push_back(item.light);
+                return all;
+            };
+            // The class default of LightRadius differs between the editors
+            // that baked the stock maps (64 or 32): measure which this bake had.
+            size_t lacking = 0;
+            for (const auto& light : withLost(exact ? chosen : std::vector<Lost>{}))
+                if (light.Baked() && !light.storesRadius) ++lacking;
+            if (lacking)
+            {
+                const auto all = withLost(exact ? chosen : std::vector<Lost>{});
+                const auto at64 = Lights::Compare(samples, Lights::BakeAt(*scene, all, 64));
+                if (cancelled(0.08)) return false;
+                const auto at32 = Lights::Compare(samples, Lights::BakeAt(*scene, all, 32));
+                note(std::to_string(lacking) + " lights store no LightRadius: baked as 64 (the class default) they are "
+                    + number(at64.mae) + " bytes from the lightmaps, as 32 " + number(at32.mae));
+                defaultRadius = at32.mae < at64.mae ? 32 : 64;
+            }
+            if (cancelled(0.15)) return false;
+            const auto knownBake = Lights::BakeAt(*scene, known, defaultRadius);
+            before = Lights::Compare(samples, knownBake);
+            std::vector<float> residual = Lights::Residual(samples, knownBake);
+            const Lights::SampleGrid grid(samples.position, 256);
+            auto support = [&](std::vector<Lost>& lost)
+            {
+                double held = 0, predicted = 0;
+                for (auto& item : lost)
+                {
+                    Light light = item.light;
+                    if (!light.storesRadius && defaultRadius > 0) light.lightRadius = defaultRadius;
+                    item.support = Lights::Support(*scene, grid, residual, light, held, predicted);
+                }
+                return predicted > 0 ? held / predicted : 0.0;
+            };
+            if (cancelled(0.2)) return false;
+            if (exact)
+            {
+                // Even a byte-identical copy can hold lights added or moved
+                // after its last light build (the save keeps the old atlases).
+                support(chosen);
+                for (auto& item : chosen) item.review = item.support >= 0 && item.support < Lights::kReviewSupport;
+            }
+            else
+            {
+                double bestSupport = 0;
+                size_t tried = 0;
+                for (const auto& twin : twins)
+                {
+                    if (twin.exact || tried >= 3) continue;
+                    auto lost = lostOf(twin);
+                    if (lost.empty()) continue;
+                    ++tried;
+                    const double overall = support(lost);
+                    note("editor copy " + twin.entry.path + " is not this map's bake: the lightmaps hold " + number(overall)
+                        + " of its " + std::to_string(lost.size()) + " lights' predicted light");
+                    if (overall >= Lights::kStaleTwinSupport && overall > bestSupport)
+                    {
+                        bestSupport = overall;
+                        stale = &twin;
+                        chosen = std::move(lost);
+                    }
+                    if (cancelled(0.25)) return false;
+                }
+                if (stale)
+                {
+                    // Lights the bake holds little of are left out; ones it
+                    // cannot check (too few lightmap texels) come back to be checked.
+                    const size_t all = chosen.size();
+                    chosen.erase(std::remove_if(chosen.begin(), chosen.end(), [](const Lost& item)
+                        { return item.support >= 0 && item.support < Lights::kReviewSupport; }), chosen.end());
+                    for (auto& item : chosen) item.review = item.support < 0;
+                    note(std::to_string(chosen.size()) + " lights came from it (" + std::to_string(all - chosen.size())
+                        + " left out: the lightmaps hold less than " + number(Lights::kReviewSupport, 1) + " of their light)");
+                    // The fit works on what the older copy leaves unexplained.
+                    residual = Lights::Residual(samples, Lights::BakeAt(*scene, withLost(chosen), defaultRadius));
+                }
+                if (cancelled(0.3)) return false;
+                // Stand-ins for the light no remaining or recovered light explains.
+                std::vector<float> knownLight(residual.size());
+                for (size_t i = 0; i < samples.Count(); ++i)
+                {
+                    const Lights::Vec3 ambient = scene->ambient ? scene->ambient(samples.zone[i]) : Lights::Vec3{};
+                    knownLight[3 * i] = samples.atlas[3 * i] - static_cast<float>(ambient.x) - residual[3 * i];
+                    knownLight[3 * i + 1] = samples.atlas[3 * i + 1] - static_cast<float>(ambient.y) - residual[3 * i + 1];
+                    knownLight[3 * i + 2] = samples.atlas[3 * i + 2] - static_cast<float>(ambient.z) - residual[3 * i + 2];
+                }
+                Lights::LightFitter fitter(*scene, residual, settings);
+                double measured = -1, share = 0, excess = 0;
+                const double floor = fitter.NoiseFloor(knownLight, measured);
+                fitter.Structure(floor, share, excess);
+                fitText = "the remaining lights rebake " + number(before.mae) + " bytes from the compiled lightmaps and "
+                    + number(share * 100, 1) + "% of the lightmap samples hold unexplained light above the noise floor ("
+                    + number(floor, 1) + " bytes)";
+                if (before.mae < Lights::kFitGateError || share < Lights::kFitGateShare)
+                {
+                    gated = true;
+                    note("no stand-ins were fitted: " + fitText + "; a fit needs at least " + number(Lights::kFitGateError, 1)
+                        + " bytes and " + number(Lights::kFitGateShare * 100, 0)
+                        + "% of the samples, so what is left is mostly model error and a fit would place noise lights");
+                }
+                else
+                {
+                    bool stopped = false;
+                    fitted = fitter.Run(floor, [&](size_t placed, double)
+                    {
+                        if (step(Stage::Lights, 0.3 + 0.65 * (std::min)(1.0, double(placed) / settings.softLimit))) return true;
+                        stopped = true;
+                        return false;
+                    });
+                    if (stopped) { error = kCancelledError; return false; }
+                }
+            }
+        }
+        else if (scene)
+            note("the compiled map has too few lightmap texels (" + std::to_string(scene->samples.Count())
+                + " samples) to check or fit lights against");
+
+        // Into the map: the copy's lights as it wrote them, then the stand-ins.
+        std::string added;
+        size_t addedCount = 0;
+        std::vector<Light> recovered;
+        constexpr size_t kMostRows = 50;
+        size_t reviewRows = 0;
+        for (auto& item : chosen)
+        {
+            std::string text = item.text;
+            if (defaultRadius == 32 && !item.light.storesRadius) text = WithProperty(text, "LightRadius=32.000000");
+            added += text;
+            ++addedCount;
+            usedNames.push_back(Twin::Lower(item.light.name));
+            recovered.push_back(item.light);
+            if (exact) ++counts.lightsFromEditorCopy; else ++counts.lightsFromOlderCopy;
+            if (!item.review) continue;
+            ++counts.lightsToReview;
+            if (reviewRows++ < kMostRows)
+                rows.push_back({"Light to check", item.light.name, item.support < 0
+                    ? "Taken from an editor copy that is not this map's bake, and it lights too few lightmap texels for the "
+                      "compiled lightmaps to confirm it."
+                    : "The compiled lightmaps hold only " + number(item.support * 100, 0) + "% of its light: it may have been "
+                      "added, moved or changed after the map's last light build.", Target::Actor, item.light.name});
+        }
+        if (reviewRows > kMostRows)
+            rows.push_back({"Light to check", "More lights", std::to_string(reviewRows - kMostRows) + " further lights are not listed.",
+                Target::None});
+        for (size_t index = 0; index < fitted.size(); ++index)
+        {
+            const std::string name = Twin::UniqueName("RecoveredLight" + std::to_string(index), usedNames);
+            added += Lights::StandInActor(fitted[index], levelBrightness, name);
+            ++addedCount;
+            ++counts.lightsFitted;
+            Light light;
+            light.name = name;
+            light.location = fitted[index].location;
+            light.lightRadius = (std::max)(1.0, fitted[index].radius / 25 - 1);
+            Lights::ColourOf(fitted[index].amplitude, levelBrightness, light.brightness, light.hue, light.saturation);
+            light.levelBrightness = levelBrightness;
+            if (scene && scene->zoneAt) light.zone = scene->zoneAt(light.location);
+            recovered.push_back(std::move(light));
+        }
+        // Lights that stored no LightRadius baked at 32: say so in the map,
+        // so a relight in this editor (whose default is 64) matches the bake.
+        if (defaultRadius == 32)
+            for (const auto& light : known)
+            {
+                const auto found = preparedByName.find(Twin::Lower(light.name));
+                if (found != preparedByName.end() && !light.storesRadius && light.Baked())
+                    prepared[found->second].text = WithProperty(prepared[found->second].text, "LightRadius=32.000000");
+            }
+        if (addedCount || defaultRadius == 32)
+        {
+            std::string text = "Begin Map\n";
+            for (const auto& actor : prepared) text += actor.text;
+            actors.actorsT3d = text + added + "End Map\n";
+            actors.actorCount += addedCount;
+        }
+        if (checked && addedCount)
+        {
+            std::vector<Light> all = known;
+            all.insert(all.end(), recovered.begin(), recovered.end());
+            after = Lights::Compare(scene->samples, Lights::BakeAt(*scene, all, defaultRadius));
+        }
+
+        // The report.
+        const size_t stripped = counts.lightsKeptInFile + counts.lightsFromEditorCopy + counts.lightsFromOlderCopy
+            + counts.lightsFitted;
+        if (exact)
+        {
+            note(std::to_string(chosen.size()) + " lights the cook dropped came back from the editor copy " + exact->entry.path
+                + ", whose lightmaps are this map's byte for byte");
+            rows.push_back({"Editor copy found", std::filesystem::path(exact->entry.path).filename().string(),
+                exact->entry.path + " has this map's lightmaps byte for byte: it is the map's own editor copy, with the "
+                "author's brushes and lights. " + std::to_string(chosen.size()) + " lights the cook stripped were taken from it. "
+                "Open that file instead if you want the original brushes.", Target::None});
+        }
+        else if (stale)
+            rows.push_back({"Lights from another bake", std::filesystem::path(stale->entry.path).filename().string(),
+                std::to_string(counts.lightsFromOlderCopy) + " lights came from " + stale->entry.path
+                + ", an editor copy of this map that is not this bake (older or newer). They are kept because the compiled "
+                  "lightmaps hold their light, but may not be the lights this bake had.", Target::None});
+        if (!fitted.empty())
+        {
+            note(std::to_string(fitted.size()) + " stand-in lights were fitted to the bake (" + fitText
+                + "); they restore the look, not the author's lights (about two in five sit where a lost light was)");
+            rows.push_back({"Stand-in lights", std::to_string(fitted.size()) + " lights",
+                "No editor copy of this bake was found among " + std::to_string(twinsSearched) + " searched, so these lights "
+                "were fitted to the compiled lightmaps (RecoveredLight0 onwards, group RecoveredLights). They restore the "
+                "look where a relight would otherwise come out darker; they are not the author's lights.", Target::None});
+        }
+        if (!stripped)
+            rows.push_back({"Lights not recovered", "Lights the cook stripped",
+                std::string(exact ? "The editor copy with this map's lightmaps holds no light the compiled map lacks."
+                    : !checked ? "The compiled lightmaps could not be read, and no editor copy of this bake was found."
+                    : gated ? "No editor copy of this bake was found among " + std::to_string(twinsSearched)
+                        + " searched, and what the lightmaps hold beyond the map's own lights is too little to fit lights to."
+                    : "No editor copy of this bake was found among " + std::to_string(twinsSearched)
+                        + " searched, and no stand-in light explains what the lightmaps hold.")
+                + (exact ? "" : " A relight will come out darker than the original; the compiled lighting is kept until you relight."),
+                Target::None});
+        if (checked)
+            note("a rebake differs from the compiled lightmaps by " + number(before.mae) + " bytes on average with the lights the map kept"
+                + (addedCount ? ", " + number(after.mae) + " with the recovered lights" : "")
+                + (defaultRadius > 0 ? "; lights without a LightRadius bake as " + number(defaultRadius, 0) : ""));
+        return !cancelled(1);
+    }
 
     bool RecoverToSourceImpl(const std::filesystem::path& source,
                              const std::filesystem::path& destination,
@@ -3387,6 +4535,70 @@ namespace
         EndRecoveryMode();
         std::string blankText;
         if (!exportMap(blankPath, blankText)) return false;
+        // The editor copy this map was cooked from still has the lights the
+        // cook stripped. It is found by its lightmaps and read before the
+        // compiled map is loaded; one that fails to load or read is skipped.
+        std::vector<TwinMap> twins;
+        size_t twinsSearched = 0;
+        if (options.recoverLights)
+        {
+            const auto temporary = scratch / "EditorCopyScan.tmp";
+            created.files.push_back(temporary);
+            created.files.push_back(scratch / "EditorCopy.t3d");
+            Twin::Fingerprint cookedPrint;
+            std::vector<Twin::Entry> library;
+            if (FingerprintMapFile(staged, temporary, cookedPrint) && !cookedPrint.empty())
+            {
+                Logger::log("MapRecovery: light recovery: looking for the editor copy the map was cooked from");
+                if (!ScanTwins(temporary, library, [&](double fraction) { return step(Stage::Preparing, fraction); }))
+                    return cancel();
+            }
+            twinsSearched = library.size();
+            std::vector<std::pair<Twin::Entry, bool>> wanted;
+            for (const auto& entry : Twin::FindExact(library, cookedPrint, source.stem().string()))
+                if (wanted.size() < 2) wanted.emplace_back(entry, true);
+            const bool anyExact = !wanted.empty();
+            for (const auto& entry : Twin::FindStale(library, cookedPrint, source.stem().string()))
+                if (wanted.size() < (anyExact ? 2u : 3u) && !anyExact) wanted.emplace_back(entry, false);
+            for (const auto& candidate : wanted)
+            {
+                if (!step(Stage::Preparing, 1)) return cancel();
+                // Once an exact copy has given lights, nothing else is needed.
+                if (std::any_of(twins.begin(), twins.end(), [](const TwinMap& twin) {
+                        return twin.exact && std::any_of(twin.lights.begin(), twin.lights.end(), [](const auto& light) {
+                            return light.lightClass && light.light.CookDrops(); }); })) break;
+                Logger::log("MapRecovery: light recovery: reading the lights of " + candidate.first.path);
+                TwinMap twin;
+                twin.entry = candidate.first;
+                twin.exact = candidate.second;
+                std::string fault, twinText;
+                std::vector<std::string> twinNames;
+                RecoveredActorImport::PreparedMap twinPrepared;
+                if (!exec("MAP LOAD FILE=\"" + candidate.first.path + "\"")
+                    || !RecoveredLightsNative::ReadLights(
+                           *reinterpret_cast<void**>(static_cast<char*>(editor) + kEditorLevelOffset), twin.lights, twinNames, fault)
+                    || !exportMap(scratch / "EditorCopy.t3d", twinText)
+                    || !RecoveredActorImport::Prepare(twinText, twinPrepared, fault))
+                {
+                    Logger::log("MapRecovery: light recovery: " + candidate.first.path + " was not used. " + error + " " + fault);
+                    error.clear();
+                    continue;
+                }
+                twin.levelInfoName = twinPrepared.levelInfoName;
+                std::unordered_set<std::string> lightNames;
+                for (const auto& light : twin.lights)
+                    if (light.lightClass) lightNames.insert(Twin::Lower(light.light.name));
+                for (auto& actor : Twin::Actors(twinPrepared.actorsT3d))
+                    if (lightNames.count(Twin::Lower(actor.name))) twin.actors.push_back(std::move(actor));
+                twins.push_back(std::move(twin));
+            }
+            if (!wanted.empty())
+            {
+                if (!exec("MAP NEW")) return false;
+                SetCurrentMapFilename("");
+                EndRecoveryMode();
+            }
+        }
         if (!step(Stage::Loading, 0)) return cancel();
         if (!ExecuteRecoveryLoad("MAP LOAD FILE=\"" + staged.string() + "\""))
         {
@@ -3399,20 +4611,39 @@ namespace
         std::vector<RecoveredFace> faces;
         size_t skipped = 0;
         Logger::log("MapRecovery: extracting cooked surfaces");
-        if (!ExtractRecoveredFaces(g_recoveredLevel, faces, skipped, error, assetPackageName.c_str())) return false;
+        if (!ExtractRecoveredFaces(g_recoveredLevel, faces, skipped, error, assetPackageName.c_str(), &outcome.rows))
+            return false;
+        // Portals rebuilt from their polygons have no outline to compare.
         std::vector<RecoveredFace> originalPortals;
+        bool portalsFromPolygons = false;
         for (const auto& face : faces)
-            if (face.flags & kSurfZonePortal) originalPortals.push_back(face);
+            if (face.portalFragment) portalsFromPolygons = true;
+            else if (face.flags & kSurfZonePortal) originalPortals.push_back(face);
         if (skipped)
         {
-            error = "The compiled BSP contains " + std::to_string(skipped)
-                + " invalid polygons. Source recovery cannot safely discard them.";
-            return false;
+            // Solid and empty space come from the node tree, not from these:
+            // a polygon with no area or a bad vertex only draws nothing.
+            Logger::log("MapRecovery: left out " + std::to_string(skipped) + " invalid cooked polygons");
+            outcome.rows.push_back({"Polygons left out", std::to_string(skipped) + " polygons",
+                "The compiled BSP has them with a vertex out of range, fewer than three distinct corners or no area. "
+                "They draw nothing and give no surface its material.", MapRecoveryModel::Target::None});
         }
         // Validate transferable objects before the more expensive brush and
         // material reconstruction. Keep this export even if geometry fails.
         std::string actorText;
-        if (!exportMap(actorsPath, actorText)) return false;
+        // Lights the cook took out of the level but still wrote to the file
+        // are exported with the level's actors, so they come back as the
+        // author made them and what refers to them still finds them.
+        std::vector<void*> lightsOutsideLevel;
+        if (options.recoverLights) lightsOutsideLevel = FindLightsOutsideLevel(g_recoveredLevel);
+        {
+            const ListedForExport listed(g_recoveredLevel, lightsOutsideLevel);
+            if (!listed.Listed()) lightsOutsideLevel.clear();
+            if (!exportMap(actorsPath, actorText)) return false;
+        }
+        if (!lightsOutsideLevel.empty())
+            Logger::log("MapRecovery: " + std::to_string(lightsOutsideLevel.size())
+                + " lights are in the compiled file outside the level; they were exported with its actors");
         if (!step(Stage::Reading, 0.5)) return cancel();
         RecoveredLighting originalLighting;
         if (!CaptureMeshLighting(g_recoveredLevel, assetPackageName.c_str(), originalLighting, error)) return false;
@@ -3469,7 +4700,8 @@ namespace
         Logger::log("MapRecovery: reconstructing structural volumes");
         // Pass the checkpoint by reference: its cancelled flag must be the one read below.
         const StepFunction stepRef = [&step](Stage stage, double fraction) { return step(stage, fraction); };
-        if (!ReconstructSourceBrushes(g_recoveredLevel, sourceBrushes, options.mergeGeometry, counts, stepRef, error))
+        if (!ReconstructSourceBrushes(g_recoveredLevel, sourceBrushes, options.mergeGeometry, counts, outcome.rows,
+                                      stepRef, error))
             return step.cancelled ? cancel() : false;
         // The cooked model is still loaded: sample its solid and empty space.
         std::vector<SpaceProbe> probes;
@@ -3508,6 +4740,28 @@ namespace
         // The native editor is 32-bit. Release interchange copies before its
         // importer and BSP builder allocate their own complete map models.
         std::string{}.swap(actorText);
+        // The compiled map is still loaded: its lightmaps say which lights it lost.
+        std::string lightReport;
+        if (options.recoverLights)
+        {
+            if (!step(Stage::Lights, 0)) return cancel();
+            Logger::log("MapRecovery: recovering the lights the cook stripped");
+            try
+            {
+                if (!RecoverLostLights(g_recoveredLevel, actors, twins, lightsOutsideLevel, twinsSearched, counts, outcome.rows, lightReport,
+                                       stepRef, error))
+                    return step.cancelled ? cancel() : false;
+            }
+            catch (const std::exception& exception)
+            {
+                // The map recovers without them.
+                Logger::log(std::string("MapRecovery: light recovery failed: ") + exception.what());
+                outcome.rows.push_back({"Lights not recovered", "Lights the cook stripped",
+                    std::string("The light recovery failed (") + exception.what() + "); the map was recovered without them.",
+                    MapRecoveryModel::Target::None});
+            }
+            std::vector<TwinMap>{}.swap(twins);
+        }
 
         auto verifyActors = [&](const char* stage) {
             std::string actual;
@@ -3565,6 +4819,25 @@ namespace
         std::optional<BspCollisionFix::RecoveryScope> collisionRecovery;
         RecoveredBspGeometry::Result geometry;
         bool built = false;
+        // What the attempt in the editor reported and named: replaced by
+        // every attempt, added to the report after the last.
+        std::vector<MapRecoveryModel::ReportRow> attemptRows;
+        std::vector<std::string> brushNames;
+        // The attempt with the fewest samples differing, then the fewest
+        // brushes. A difference splitting back does not remove is the BSP
+        // builder's, not the merge's: the merges stay, and when the last
+        // attempt is not the best one, the best is built once more.
+        struct BestAttempt
+        {
+            bool valid = false;
+            std::vector<RecoveredBspGeometry::Brush> current;
+            std::vector<std::vector<size_t>> members;
+            size_t misses = 0;
+            size_t brushes = 0;
+            size_t splitBack = 0;
+        } best;
+        bool rebuildingBest = false;
+        std::vector<Vec3> acceptedMisses;
         // Overlapping grown brushes describe exactly the original space, but
         // the editor's BSP builder resolves their coplanar faces with its own
         // tolerances. When the rebuilt BSP misses any solid/empty sample, the
@@ -3574,16 +4847,16 @@ namespace
         for (int attempt = 0;; ++attempt)
         {
             auto stageFor = [&](Stage stage) { return attempt ? Stage::BuildingGeometry : stage; };
-            std::vector<size_t> origin;
             RecoveredPolygonImport::VertexPool sourcePoints;
-            if (!PrepareAttemptBrushes(sourceBrushes, geometry, origin, sourcePoints, counts, error)) return false;
+            attemptRows.clear();
+            if (!PrepareAttemptBrushes(sourceBrushes, geometry, sourcePoints, counts, attemptRows, error)) return false;
             Logger::log("MapRecovery: reconstructed " + std::to_string(geometry.brushes.size()) + " closed brushes");
             if (!step(stageFor(Stage::Materials), 0)) return cancel();
             std::string geometryText;
             Logger::log("MapRecovery: restoring surface materials and texture coordinates");
             counts.unifiedSurfaces = 0;
-            if (!WriteSourceBrushes(geometry, faces, sourcePoints, geometryText, error, scratch / "SurfaceFailure.json",
-                                    options.mergeGeometry, counts,
+            if (!WriteSourceBrushes(geometry, faces, sourceBrushes.tree, sourcePoints, geometryText, error,
+                                    scratch / "SurfaceFailure.json", options.mergeGeometry, counts, attemptRows, brushNames,
                                     attempt ? StepFunction([&](Stage, double) { return step(Stage::BuildingGeometry, 0); }) : stepRef))
                 return step.cancelled ? cancel() : false;
             if (!WriteTextFile(geometryPath, geometryText, error)) return false;
@@ -3703,43 +4976,113 @@ namespace
             if (!built) break;
             std::vector<Vec3> misses;
             if (VerifySpaceProbes(probes, error, &misses)) break;
+            if (misses.empty())
+            {
+                // The rebuilt tree itself could not be walked.
+                built = false;
+                break;
+            }
+            const bool isBest = !best.valid || misses.size() < best.misses
+                || (misses.size() == best.misses && geometry.brushes.size() < best.brushes);
+            if (isBest && !rebuildingBest)
+                best = {true, sourceBrushes.current, sourceBrushes.members, misses.size(), geometry.brushes.size(),
+                        counts.splitBack};
             const bool anyGrown = std::any_of(sourceBrushes.members.begin(), sourceBrushes.members.end(),
                 [](const auto& list) { return list.size() > 1; });
-            if (attempt + 1 >= kMostAttempts || !anyGrown || misses.empty())
+            size_t split = 0;
+            if (!rebuildingBest && attempt + 1 < kMostAttempts && anyGrown)
             {
-                built = false;
+                // Split the grown brushes around the misses; if none are close,
+                // every grown brush goes back to its joined brushes.
+                split = SplitGrownBrushes(sourceBrushes, misses, 1.0);
+                if (!split) split = SplitGrownBrushes(sourceBrushes, misses, 64.0);
+                if (!split || attempt + 2 >= kMostAttempts) split += SplitGrownBrushes(sourceBrushes, misses, 1e12);
+            }
+            if (split)
+            {
+                counts.splitBack += split;
+                Logger::log("MapRecovery: the rebuilt BSP missed " + std::to_string(misses.size())
+                    + " samples; split " + std::to_string(split) + " grown brushes back and building again");
+            }
+            else if (!isBest && !rebuildingBest)
+            {
+                // Nothing more to split back, and an earlier attempt came
+                // closer: build that one again and keep it.
+                sourceBrushes.current = best.current;
+                sourceBrushes.members = best.members;
+                counts.splitBack = best.splitBack;
+                rebuildingBest = true;
+                Logger::log("MapRecovery: the rebuilt BSP missed " + std::to_string(misses.size())
+                    + " samples; an earlier attempt missed " + std::to_string(best.misses) + ", building that one again");
+            }
+            else
+            {
+                // The differences left are the BSP builder's. A few are kept
+                // and reported; a rebuild that differs widely has failed.
+                if (!RecoveredSurfaceMatch::AcceptableMisses(misses.size(), probes.size()))
+                {
+                    built = false;
+                    break;
+                }
+                Logger::log("MapRecovery: keeping the rebuild with " + std::to_string(misses.size()) + " of "
+                    + std::to_string(probes.size()) + " solid/empty samples different; the report lists them");
+                acceptedMisses = std::move(misses);
+                error.clear();
                 break;
             }
-            // Split the grown brushes around the misses; if none are close,
-            // every grown brush goes back to its joined brushes.
-            size_t split = SplitGrownBrushes(sourceBrushes, misses, 1.0);
-            if (!split) split = SplitGrownBrushes(sourceBrushes, misses, 64.0);
-            if (!split || attempt + 2 >= kMostAttempts) split += SplitGrownBrushes(sourceBrushes, misses, 1e12);
-            if (!split)
-            {
-                built = false;
-                break;
-            }
-            counts.splitBack += split;
-            Logger::log("MapRecovery: the rebuilt BSP missed " + std::to_string(misses.size())
-                + " samples; split " + std::to_string(split) + " grown brushes back and building again");
             restoreBuildState.reset();
             collisionRecovery.reset();
             error.clear();
         }
-        // Structural brushes are written first, so brush i is RecoveredVolume<i+1>.
+        std::vector<RecoveredBspGeometry::Brush>{}.swap(best.current);
+        counts.spaceProbes = probes.size();
+        counts.spaceMisses = acceptedMisses.size();
+        if (built && !acceptedMisses.empty())
+        {
+            // The saved map is checked again after reopening: against the
+            // samples that matched here.
+            std::vector<SpaceProbe> matching;
+            matching.reserve(probes.size());
+            for (const auto& probe : probes)
+                if (std::none_of(acceptedMisses.begin(), acceptedMisses.end(), [&](const Vec3& miss)
+                    { return miss.x == probe.point.x && miss.y == probe.point.y && miss.z == probe.point.z; }))
+                    matching.push_back(probe);
+            constexpr size_t kMostPoints = 32;
+            for (size_t index = 0; index < acceptedMisses.size() && index < kMostPoints; ++index)
+            {
+                const Vec3& miss = acceptedMisses[index];
+                const auto probe = std::find_if(probes.begin(), probes.end(), [&](const SpaceProbe& candidate)
+                    { return candidate.point.x == miss.x && candidate.point.y == miss.y && candidate.point.z == miss.z; });
+                std::ostringstream item;
+                item << std::fixed << std::setprecision(1) << miss.x << ", " << miss.y << ", " << miss.z;
+                const bool wasEmpty = probe != probes.end() && probe->outside;
+                outcome.rows.push_back({"Space differs", item.str(),
+                    std::string(wasEmpty ? "Empty in the compiled map, solid" : "Solid in the compiled map, empty")
+                        + " in the rebuilt one: the editor's BSP build split the brushes here differently. "
+                          "Check the geometry at this point.", MapRecoveryModel::Target::None});
+            }
+            if (acceptedMisses.size() > kMostPoints)
+                outcome.rows.push_back({"Space differs", "More points",
+                    std::to_string(acceptedMisses.size() - kMostPoints) + " further points are not listed.",
+                    MapRecoveryModel::Target::None});
+            probes = std::move(matching);
+        }
+        if (built)
+            for (auto& row : attemptRows) outcome.rows.push_back(std::move(row));
+        // A brush left out of the source has no actor and no name.
         for (size_t index = 0; built && index < geometry.brushes.size(); ++index)
         {
             const auto& brush = geometry.brushes[index];
+            if (index >= brushNames.size() || brushNames[index].empty()) continue;
             const double width = RecoveredBspGeometry::MinimumWidth(brush), volume = RecoveredBspGeometry::Volume(brush);
             if (!MapRecoveryModel::IsThinBrush(width, volume)) continue;
             std::ostringstream detail;
             detail << std::setprecision(3) << "Only " << width << " units across (" << volume
                    << " cubic units): a sliver left by the compiled BSP's splits.";
-            const std::string name = "RecoveredVolume" + std::to_string(index + 1);
+            const std::string& name = brushNames[index];
             outcome.rows.push_back({"Thin brush", name, detail.str(), MapRecoveryModel::Target::Actor, name});
         }
-        const size_t structuralBrushCount = geometry.brushes.size();
+        const size_t structuralBrushCount = counts.brushes;
         std::string{}.swap(blankText);
         std::vector<RecoveredBspGeometry::Brush>{}.swap(geometry.brushes);
         std::vector<RecoveredFace>{}.swap(faces);
@@ -3775,7 +5118,7 @@ namespace
         if (!built) return false;
         if (!RecoveredBspLighting::CheckSavedAtlases(CurrentModel(), originalBspLighting, true, error)) return false;
         if (!WriteBspSurfaceAudit(CurrentModel(), scratch / "BspBuilt.json", error)) return false;
-        if (!VerifyPortalOutlines(CurrentModel(), originalPortals, error)) return false;
+        if (!VerifyPortalOutlines(CurrentModel(), originalPortals, error, portalsFromPolygons)) return false;
         if (!SeparateSolidPortalVisits(CurrentModel(), false, error)) return false;
         void* builtLevel = *reinterpret_cast<void**>(static_cast<char*>(editor) + kEditorLevelOffset);
         if (!SynchronizeImportedActorPlatforms(builtLevel, error)) return false;
@@ -3852,6 +5195,10 @@ namespace
         // From here the recovery writes its outputs and runs to the end.
         step(Stage::Saving, 0);
         using SaveFn = int(__thiscall*)(void*, const char*);
+        if (const size_t clearedActors = ClearDestroyedActors(builtLevel))
+            outcome.rows.push_back({"Actor slots cleared", std::to_string(clearedActors) + " slots",
+                "The built level's actor list held deleted or unreadable entries, which the editor's save cannot get past. "
+                "They were cleared before saving; Reloaded.Editor.dll.log names them.", MapRecoveryModel::Target::None});
         Logger::log("MapRecovery: saving normal source " + destination.string());
         const std::string outputName = destination.string();
         if (!reinterpret_cast<SaveFn>(0x10E0416B)(editor, outputName.c_str()))
@@ -3901,7 +5248,7 @@ namespace
         if (!RecoveredBspLighting::CheckSavedAtlases(CurrentModel(), originalBspLighting, false, error)) return false;
         Logger::log("MapRecovery: transferred BSP lightmap texture contents survived ordinary save and reopening");
         if (!WriteBspSurfaceAudit(CurrentModel(), scratch / "BspReopened.json", error)) return false;
-        if (!VerifyPortalOutlines(CurrentModel(), originalPortals, error)) return false;
+        if (!VerifyPortalOutlines(CurrentModel(), originalPortals, error, portalsFromPolygons)) return false;
         if (!SeparateSolidPortalVisits(CurrentModel(), false, error)) return false;
         if (!VerifySpaceProbes(probes, error) || !BspLeafLightFix::Validate(CurrentModel(), error)
             || !ValidateCollisionBounds(CurrentModel(), error))
@@ -3935,6 +5282,7 @@ namespace
                << "\nCleared references to confirmed deleted actors: " << actors.clearedDeletedActorReferenceCount
                << "\nRegenerated and verified procedural soft bodies: " << actors.regeneratedSoftBodies.size()
                << "\nVerified solid/empty samples: " << probes.size()
+               << "\nSolid/empty samples the rebuild left different (listed below): " << acceptedMisses.size()
                << "\nNormal import, geometry/BSP/lighting/path builds, save and reopening verified.\n";
         if (!assets.empty()) report << "Include this asset dependency when distributing the map: "
                                     << assetPackagePath.string() << '\n';
@@ -3947,6 +5295,7 @@ namespace
                   "Use Build > Recalculate Lighting explicitly to replace it; a fresh bake may differ from the original.\n";
         counts.actors = actors.actorCount;
         report << "\n" << MapRecoveryModel::Summary(counts) << "\n";
+        if (!lightReport.empty()) report << "\nLights the cook stripped:\n" << lightReport;
         if (outcome.rows.empty()) report << "\nNothing to report: every item came back cleanly.\n";
         else report << "\nItems that did not come back cleanly (" << outcome.rows.size() << "):\n"
                     << MapRecoveryModel::RowsText(outcome.rows);
@@ -4013,7 +5362,10 @@ bool MapRecovery::RecoverToSource(const std::filesystem::path& source,
                                   const std::filesystem::path& destination,
                                   std::string& error)
 {
-    return RecoverToSource(source, destination, error, RecoveryOptions{MergeGeometryEnabled()}, nullptr);
+    RecoveryOptions options;
+    options.mergeGeometry = MergeGeometryEnabled();
+    options.recoverLights = RecoverLightsEnabled();
+    return RecoverToSource(source, destination, error, options, nullptr);
 }
 
 bool MapRecovery::RecoverToSource(const std::filesystem::path& source,
@@ -4055,6 +5407,7 @@ extern "C" __declspec(dllexport) int __cdecl ReloadedRecoverMapToSourceWithOptio
     std::string error;
     MapRecovery::RecoveryOptions options;
     options.mergeGeometry = merge != 0;
+    options.recoverLights = MapRecovery::RecoverLightsEnabled();
     if (cancelStage >= 0 && cancelStage < static_cast<int>(MapRecoveryModel::Stage::Count))
         options.cancelAt = static_cast<MapRecoveryModel::Stage>(cancelStage);
     MapRecovery::RecoveryOutcome outcome;
@@ -4087,6 +5440,11 @@ namespace
 bool MapRecovery::MergeGeometryEnabled()
 {
     return GetPrivateProfileIntA("MapRecovery", "MergeGeometry", 1, RecoveryIniPath().c_str()) != 0;
+}
+
+bool MapRecovery::RecoverLightsEnabled()
+{
+    return GetPrivateProfileIntA("MapRecovery", "RecoverLights", 1, RecoveryIniPath().c_str()) != 0;
 }
 
 void MapRecovery::SetMergeGeometry(bool enabled)

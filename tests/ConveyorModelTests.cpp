@@ -60,7 +60,14 @@ int main()
         // An actor ticks after its owner and a static belt never ticks: nothing it spawns is owned.
         Check(Contains(belt, "Spawn(class'ConveyorMotor');") && Contains(belt, "Spawn(class'ConveyorRoller',,,") &&
               Contains(belt, "Spawn(class'ConveyorItem',,,") && !Contains(belt, ", self"), "spawned parts have no owner");
-        Check(Contains(belt, "var(Conveyor) ConveyorBelt NextBelt;") && Contains(belt, "var ConveyorBelt Seg[16];"), "belts chain");
+        Check(Contains(belt, "var(Conveyor) ConveyorBelt NextBelt;") && Contains(belt, "var ConveyorBelt Seg[" + std::to_string(MaxChain) + "];"), "belts chain");
+        Check(MaxChain >= 64, "room for a long line: each turn adds two belts");
+        // A loop of exactly MaxChain belts is still a loop: back at the first belt is
+        // checked before the chain counts as full.
+        const auto walk = belt.find("for (B = self; B != None; B = B.NextBelt)");
+        Check(walk != std::string::npos && belt.find("bLoop = true;", walk) < belt.find("if (Segs >= " + std::to_string(MaxChain) + ")", walk),
+              "a loop is found before the chain is full");
+        Check(Contains(belt, "B != self && n < " + std::to_string(MaxChain) + ";"), "a loop of MaxChain belts has a leader");
         Check(Contains(belt, "if (!bLoop && FadeDistance > 0)"), "a closed loop never fades");
         Check(Contains(belt, "simulated function Join(int s, ConveyorBelt Before)") && Contains(belt, "Join(0, Seg[Segs - 1]);"),
               "items cross from a belt's end onto the next one's centre line, a loop's last onto its first");

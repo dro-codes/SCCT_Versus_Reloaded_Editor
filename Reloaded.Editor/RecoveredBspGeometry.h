@@ -62,6 +62,15 @@ namespace RecoveredBspGeometry
         // Absolute coordinate tolerance. Geometry below this scale cannot be
         // distinguished reliably and is treated as coincident/zero volume.
         double epsilon = 0.000001;
+        // Reconstruct only. A cell that cannot become a brush is left out and
+        // counted in Result instead of failing the whole reconstruction: one
+        // open to the extraction bounds, one a split leaves without a closed
+        // cap, and one that is not a closed volume at the tolerance.
+        bool skipUnusableCells = false;
+        // Reconstruct only. Cells narrower than this are left out and counted
+        // (0 keeps every cell): the editor's BSP builder cannot tell the two
+        // sides of such a sliver apart.
+        double minimumCellWidth = 0;
     };
 
     struct Result
@@ -69,6 +78,10 @@ namespace RecoveredBspGeometry
         std::vector<Brush> brushes;
         std::size_t emptyLeafCount = 0;
         std::size_t solidLeafCount = 0;
+        // Cells left out (Limits::skipUnusableCells, minimumCellWidth).
+        std::size_t unboundedCells = 0;
+        std::size_t degenerateCells = 0;
+        std::size_t sliverCells = 0;
     };
 
     // Node zero is the root; -1 denotes a leaf. Nodes reachable through front
@@ -85,6 +98,9 @@ namespace RecoveredBspGeometry
     //                    backOutside  = outside && !isCsg.
     //
     // Output is committed only on success. Any failure clears result.
+    // With Limits::skipUnusableCells the faults that concern one cell (open
+    // to the bounds, no closed cap, not a closed volume) no longer fail: the
+    // cell is left out and counted in result.
     bool Reconstruct(const std::vector<Node>& nodes, bool rootOutside,
                      const Bounds& extractionBounds, Result& result,
                      std::string& error, const Limits& limits = {});

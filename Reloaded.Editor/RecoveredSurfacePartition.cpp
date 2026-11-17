@@ -890,7 +890,8 @@ namespace RecoveredSurfacePartition
                 error = "A material source polygon has an invalid normal or vertex count.";
                 return false;
             }
-            if (std::fabs(Dot(candidateNormal,frame.normal)) < 1-limits.normalTolerance)
+            if (std::fabs(Dot(candidateNormal,frame.normal))
+                    < (limits.candidatesPreselected ? 0.5 : 1-limits.normalTolerance))
                 continue;
             bool coplanar = true;
             Polygon boundary;
@@ -901,7 +902,8 @@ namespace RecoveredSurfacePartition
                     error = "A material source polygon contains a non-finite vertex.";
                     return false;
                 }
-                if (std::fabs(Dot(frame.normal,Sub(vertex,frame.origin))) > limits.planeTolerance)
+                if (!limits.candidatesPreselected
+                    && std::fabs(Dot(frame.normal,Sub(vertex,frame.origin))) > limits.planeTolerance)
                     coplanar = false;
                 Append(boundary,frame.Project(vertex));
             }
@@ -1408,8 +1410,11 @@ namespace RecoveredSurfacePartition
         error="Native brush preparation exceeds container capacity."; return false;
     }
 
-    bool ValidateEditorBrush(const RecoveredBspGeometry::Brush& brush,
-                             std::vector<bool>& collapsedFaces,std::string& error,const Limits& limits)
+    namespace
+    {
+    bool ValidateEditorBrushWeld(const RecoveredBspGeometry::Brush& brush,
+                                 std::vector<bool>& collapsedFaces,std::string& error,const Limits& limits,
+                                 bool nativeWeld)
     try
     {
         collapsedFaces.clear(); error.clear();
@@ -1441,6 +1446,16 @@ namespace RecoveredSurfacePartition
                     // at this tolerance. Near coordinate zero, casting its
                     // double arithmetic noise to float does not remove it.
                     const Vec3 difference=Sub(point,value);
+                    // The second pass welds as the T3D writer's point pool
+                    // does (RecoveredPolygonImport::VertexPool): corners
+                    // within the native coincident tolerance on every axis
+                    // are written as one corner.
+                    if (nativeWeld)
+                    {
+                        const double tolerance=RecoveredPolygonImport::kCoincidentVertexTolerance;
+                        return std::fabs(difference.x)<tolerance && std::fabs(difference.y)<tolerance
+                            && std::fabs(difference.z)<tolerance;
+                    }
                     return std::hypot(difference.x,difference.y,difference.z)<=limits.epsilon;
                 });
                 const std::size_t index=static_cast<std::size_t>(found-points.begin());
@@ -1520,6 +1535,22 @@ namespace RecoveredSurfacePartition
     catch (const std::length_error&)
     {
         collapsedFaces.clear(); error="Editor brush validation exceeds container capacity."; return false;
+    }
+    }
+
+    bool ValidateEditorBrush(const RecoveredBspGeometry::Brush& brush,
+                             std::vector<bool>& collapsedFaces,std::string& error,const Limits& limits)
+    {
+        if (ValidateEditorBrushWeld(brush,collapsedFaces,error,limits,false)) return true;
+        // Two float corners a few 1e-5 apart (CineU's subtractive boxes) are
+        // one corner once written, so the brush is closed as the editor reads
+        // it. Retry only the open-edge failure with the writer's weld.
+        static const std::string openEdge=
+            "A recovered structural brush has an open or repeated edge after editor float conversion.";
+        if (error!=openEdge) return false;
+        std::string retryError;
+        if (ValidateEditorBrushWeld(brush,collapsedFaces,retryError,limits,true)) { error.clear(); return true; }
+        return false;
     }
 
     bool PrepareSheetForEditor(const Surface& sheet,std::vector<Surface>& result,

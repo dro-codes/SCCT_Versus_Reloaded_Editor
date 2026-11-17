@@ -79,6 +79,15 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `skins.settings`
 - `objectiveplayers.state`
 - `conveyor.state`
+- `mover.selected` {} → the SMover selected in the Mover Workbench
+- `mover.state` {actor} → the mover's keys, settings and current pose
+- `mover.outline` {actor} → the mover's path outline for the viewports
+- `mover.candidates` {actor} → actors that could trigger this mover
+- `prefab.counts` {} → how many linked instances each prefab has
+- `prefab.instances` {} → the linked prefab instances in the open map
+- `prefab.selectinstance` {} → selects the actors of the instance under the selection
+- `prefab.selectall` {assembly} → selects every instance of a prefab
+- `objimport.preview` {file, package, group, name, scale, up} → previews an OBJ import without writing
 
 ## Undoable
 
@@ -146,7 +155,14 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `stairs.remove` {surfaces}
 - `settings.edit` {snapshot (from settings.inspect), changes {property: value}}
 - `ge.add` {command: ZL|HOH|PIPE|LADDER|FENCE|POLE|LG, points}
+- `ge.delete` {} → removes the geometric event selected in GE mode (no target args; select it there first)
 - `surface.texture` (not joinable) {texture, surfaces | brushes, faces}: faces by where their normal points (floor, ceiling, +X, -X, +Y, -Y)
+- `mover.path` {actor, path, label} → sets the mover's keyframe path
+- `mover.settings` {actor, changes} → changes the mover's settings (InitialState, MoveTime, …)
+- `mover.wire` {actor, trigger} → wires a trigger to the mover
+- `prefab.place` {assembly, position, rotation, bindings} → places a linked prefab instance
+- `prefab.update` {} → updates a prefab definition from the selected instance
+- `prefab.break` {} → breaks the link on the selected instance (its actors stay as ordinary actors)
 
 ## File
 
@@ -166,6 +182,8 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `emitterlib.save` {entry, members, map}
 - `emitterlib.delete` {id}
 - `emitterlib.update` {id}
+- `objimport.import` {file, package, group, name, scale, up} → imports an OBJ as a static mesh into the map's own package
+- `prefab.save` {name, members} → saves the selection as a new prefab in the library
 
 ## Build
 
@@ -208,3 +226,5 @@ Every op that changes something runs as a one-step plan, so approval, dry runs, 
 - `characters.close`
 - `characters.state`
 - `characters.camera` {camera}
+- `mover.preview` {actor, position, rotation} → moves the live mover to a preview pose outside the undo model
+- `mover.restore` {} → restores a mover from its preview pose

@@ -3,6 +3,7 @@
 #undef max
 #include "StoreyFilter.h"
 #include "WindowPlacement.h"
+#include "Appearance.h"
 #include "WorkflowEditor.h"
 #include "MapDesignModel.h"
 #include <objidl.h>
@@ -218,18 +219,25 @@ namespace
         GetClientRect(window, &rect);
         Bitmap buffer(std::max(1L, rect.right), std::max(1L, rect.bottom));
         Graphics g(&buffer);
-        g.Clear(Color(255, 255, 255, 255));
+        // Modern Dark: the window's dark background and text colours (GDI+ ignores the system's).
+        const bool night = Appearance::Dark();
+        const auto palette = Appearance::Colors();
+        auto rgb = [](uint32_t c) { return Color(255, GetRValue(c), GetGValue(c), GetBValue(c)); };
+        const Color background = night ? rgb(palette.window) : Color(255, 255, 255, 255);
+        g.Clear(background);
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         Font heading(L"Segoe UI", 10.f, FontStyleBold);
         Font body(L"Segoe UI", 8.5f);
-        SolidBrush dark(Color(255, 32, 38, 48)), dim(Color(255, 108, 116, 128)), strong(Color(255, 20, 30, 40));
+        SolidBrush dark(night ? rgb(palette.text) : Color(255, 32, 38, 48)), dim(night ? rgb(palette.grayText) : Color(255, 108, 116, 128)),
+            strong(night ? Color(255, 255, 255, 255) : Color(255, 20, 30, 40));
         g.DrawString(L"Storeys", -1, &heading, PointF(12, 10), &dark);
         g.DrawString(L"Only this floor shows in the viewports.", -1, &body, PointF(12, 28), &dim);
         const auto layout = LayoutFor(rect);
         if (layout.count > 0)
         {
             const float bottom = layout.top + layout.step * layout.count;
-            Pen track(Color(150, 90, 100, 115), 3), tick(Color(170, 90, 100, 115), 1);
+            const Color line = night ? Color(255, 120, 126, 136) : Color(150, 90, 100, 115);
+            Pen track(line, 3), tick(night ? line : Color(170, 90, 100, 115), 1);
             g.DrawLine(&track, layout.x, layout.top, layout.x, bottom);
             StringFormat rightAligned;
             rightAligned.SetAlignment(StringAlignmentFar);
@@ -245,7 +253,7 @@ namespace
                              i == current ? &strong : &dim);
             }
             const float y = layout.top + layout.step * current;
-            Pen outline(Color(255, 255, 255, 255), 2);
+            Pen outline(background, 2);
             SolidBrush handle(current ? Color(235, 0, 120, 200) : Color(235, 90, 100, 115));
             g.DrawEllipse(&outline, layout.x - 7, y - 7, 14.f, 14.f);
             g.FillEllipse(&handle, layout.x - 6, y - 6, 12.f, 12.f);
@@ -329,7 +337,7 @@ void Open()
 {
     if (window)
     {
-        ShowWindow(window, SW_RESTORE);
+        ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(window);
         Refresh(true);
         return;

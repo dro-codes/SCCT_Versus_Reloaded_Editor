@@ -393,6 +393,17 @@ Json AddGeometricEvent(const std::string& command,const Json& points)
     transaction.Commit();Redraw();
     return {{"command",text},{"points",at}};
 }
+// ge.delete: the editor's own GE DELETE, which removes the geometric event(s)
+// currently selected in GE mode. The stock editor has no console command to
+// select a specific GE, so the caller selects one in GE mode first; this only
+// issues the delete. One Undo step.
+Json DeleteGeometricEvent()
+{
+    Transaction transaction("Delete geometric event");
+    if(!Exec("GE DELETE"))throw std::runtime_error("The editor refused: GE DELETE");
+    transaction.Commit();Redraw();
+    return {{"command","GE DELETE"},{"note","Deleted the geometric event selected in GE mode."}};
+}
 // surface.texture: the stock Apply Texture on exactly the chosen surfaces, as
 // a Map JSON surface operation does it. A brush's faces are its built BSP
 // surfaces (FBspSurf +0x20 FPoly, whose +0x14c is the brush), named by the

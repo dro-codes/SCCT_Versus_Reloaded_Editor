@@ -602,6 +602,15 @@ namespace
             const auto rtf = Updater::NotesRtf(title, subtitle, Updater::ParseNotes(body, markdown && !notes.empty()), footer);
             SETTEXTEX how{ST_DEFAULT, CP_ACP};
             SendMessageW(control, EM_SETTEXTEX, reinterpret_cast<WPARAM>(&how), reinterpret_cast<LPARAM>(rtf.c_str()));
+            // The rich edit control takes "automatic" text colour from the
+            // system itself, which is black whatever the look: in Modern Dark
+            // that was black on the dark background set above. Give the text
+            // the look's own window text colour.
+            CHARFORMAT2W colour{};
+            colour.cbSize = sizeof(colour);
+            colour.dwMask = CFM_COLOR;
+            colour.crTextColor = GetSysColor(COLOR_WINDOWTEXT);
+            SendMessageW(control, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&colour));
         }
         else
         {

@@ -3,6 +3,8 @@
 // Used by Reloaded.Editor.rc
 
 #define IDR_HAZMAT_BUNDLE               201
+#define IDR_PS2_OBJECTIVE_SCRIPT        202
+#define IDR_PS2_OBJECTIVE_MATERIALS     203
 
 // Next default values for new objects
 //
